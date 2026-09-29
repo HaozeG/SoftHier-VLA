@@ -1,0 +1,3 @@
+[submodule "softhier_vla_wiki"]
+	path = softhier_vla_wiki
+	url = git@github.com:HaozeG/softhier_vla_wiki.git
