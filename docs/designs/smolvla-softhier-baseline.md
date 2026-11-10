@@ -155,7 +155,7 @@ Resolved:
 | A1 | G4 staged: estimate first, then the full run (with the R1 stop rule) |
 | A2 | softhier-mlir's LIBERO changes designed up front (Technical Plan) |
 | A4 | golden reference: thin, independent, on `main`, in softhier-mlir's layout |
-| XC | G2 crosscheck: softhier-mlir's `smolvla_expert_ref.py` is ported to the current LeRobot/transformers API (patch 0003) and run in the same environment, rather than a third environment with the old API or dropping the check |
+| XC | G2 crosscheck (following the owner's suggestion to raise the script to transformers ≥ 5.4; revertible): softhier-mlir's `smolvla_expert_ref.py` is ported to the current LeRobot/transformers API (patch 0003) and run in the same environment, rather than a third environment with the old API or dropping the check |
 | SR | success rate by SR-A first; SR-B and SR-C recorded as later options |
 | A6 | G3 validity gate: total within ±5 % of 119.1 ms and action max-abs ≤ 0.10 |
 | limits | 2 h wall time per simulator process, then stop and ask; no overall G3 time-box; G4b only if every projected phase fits in 2 h, otherwise ask |
@@ -236,13 +236,14 @@ per-phase logs + summary.json --> run.sh prints a record block; gate.py checks
         With deterministic settings (`torch.use_deterministic_algorithms(True)`, `CUBLAS_WORKSPACE_CONFIG=:4096:8`, TF32 off), two runs on the same machine and library versions give byte-identical files. `--device cpu` runs the same code on the CPU (used by the crosscheck).
     *   `libero_eval.py`: a thin wrapper around `lerobot-eval` with `--env.type=libero`, `--env.task`, `--eval.n_episodes`, `--eval.batch_size`, `--policy.path` and revision, `--rename_map` (`observation.images.image` → `observation.images.camera1`, `observation.images.image2` → `observation.images.camera2`), and `--output_dir`. It reads `eval_info.json` and writes the success rate with a Wilson 95 % interval.
 4.  **softhier-mlir submodule** (`experiments/smolvla-e2e-baseline/softhier-mlir`, branch `main`), frozen from G3 to G5 (R4). Its uv project is defined by the experiment (xdsl, numpy, CPU torch, transformers, safetensors, filecheck, lit).
-5.  **`run.sh`** (experiment): the only run tool, with three subcommands. All three source `infra/env.sh` and a config (`configs/published.env` or `configs/libero.env`), activate the experiment's uv environment, and apply the patches. Applying means `git -C softhier-mlir checkout -- .` (tracked files only, so outputs that softhier-mlir writes inside its own tree are kept), then `git apply patches/*.patch` in order; a patch that fails to apply exits with code 2.
+5.  **`run.sh`** (experiment): the only run tool, with four subcommands. `fetch`, `prepare` and `sim` source `infra/env.sh` and a config (`configs/published.env` or `configs/libero.env`), activate the experiment's uv environment, and apply the patches. Applying means `git -C softhier-mlir checkout -- .` (tracked files only, so outputs that softhier-mlir writes inside its own tree are kept), then `git apply patches/*.patch` in order; a patch that fails to apply exits with code 2.
     *   `run.sh <config> fetch`: `huggingface-cli download <checkpoint> --revision <revision>` into `HF_HOME`, then symlinks the snapshot's `model.safetensors` and `config.json` into `$SHVLA_SMOLVLA_DIR`.
+    *   `run.sh apply`: only resets and patches the softhier-mlir checkout, activating no environment (used before G2.3, which runs a patched file in the LeRobot environment).
     *   `run.sh <config> prepare`: runs the config's host prepare commands in order (file 26), each with explicit `--ckpt` and `--out`. No simulator, no stamp check.
     *   `run.sh <config> sim <run-name> -- <script> <args>`:
         1. Refuses (exit 2) if `stamp.py check` fails against `arch/softhier_mlir_arch.py`; the fix is to run `build_arch.sh` explicitly.
-        2. Runs `python <script> <args>` from the softhier-mlir root. `<script>` is `tests/gvsoc/run.py` or `tests/gvsoc/expert.py`. For `run.py smolvla-e2e`, `run.sh` appends `--app-dir $SHVLA_DATA/runs/<config>/<run-name>` and `--timeout $SHVLA_SIM_TIMEOUT` (patch 0004). The output is teed to `<app-dir>/run.log`.
-        3. **Limit:** each GVSoC process (one phase of the chain) gets `$SHVLA_SIM_TIMEOUT` seconds (default 7200 = 2 h), enforced by softhier-mlir's own `run_sim(timeout=...)`. A config file may raise it for an owner-approved exception. There is no idle limit: the per-process timeout covers hangs.
+        2. Runs `python <script> <args>` from the softhier-mlir root. `<script>` is `tests/gvsoc/run.py` or `tests/gvsoc/expert.py`. Every other script or subcommand runs under coreutils `timeout $SHVLA_SIM_TIMEOUT`, since each is a single simulator process. For `run.py smolvla-e2e`, `run.sh` instead appends `--app-dir $SHVLA_DATA/runs/<config>/<run-name>` and `--timeout $SHVLA_SIM_TIMEOUT` (patch 0004). The output is teed to `<app-dir>/run.log`.
+        3. **Limit:** each GVSoC process gets `$SHVLA_SIM_TIMEOUT` seconds (default 7200 = 2 h): per chain phase by softhier-mlir's own `run_sim(timeout=...)`, for every other run by `timeout` (exit 124, mapped to 3). A config file may raise it for an owner-approved exception. There is no idle limit: the per-process timeout covers hangs.
         4. **Resume:** the run folder is named by the caller. Calling again with the same `<run-name>` reuses phases that already finished (softhier-mlir's reuse checks `<app>/<name>.log` and `.json`); adding `--fresh` after `--` re-simulates them. A new `<run-name>` starts clean.
         5. After the run, greps `run.log` for `TimeoutExpired` (exit 3) and for the side-note error strings ("No entry found for burst", "Executing illegal instruction", "Received out-of-bound request"), and prints the last 40 lines on any failure. The side-note table is then consulted by hand.
         6. Prints a block for LOG.md: command, run name, permalinks, stamp, patch list, exit code, and per phase the simulated ROI, wall time and peak child RSS, read from `<app>/<phase>.json` (written by softhier-mlir).
@@ -293,16 +294,16 @@ The published configuration has the same keys with 1 camera, 256 tokens and a 65
 
 ### G3 ladder (published configuration, `lerobot/smolvla_base`)
 
-The host prepare steps run first, through `run.sh published prepare` (file 26 lists them). Every rung then runs as `run.sh published sim <rung name> -- <script> <args>`. Rungs 1–5 use softhier-mlir's own on-device or host references and tolerances, and pass on its PASS line. Rung 6 compares against G2. Paths below are relative to `$SHVLA_SMOLVLA_DIR`.
+The host prepare steps run first, through `run.sh published prepare` (file 26 lists them). Every rung then runs as `run.sh published sim <rung name> -- <script> <args>`. Rungs 1–5 use softhier-mlir's own on-device or host references and tolerances, and pass on its PASS line. Rung 6 compares against G2. `$D` stands for `$SHVLA_SMOLVLA_DIR`, written out in full in the commands; `run.py` does not resolve relative npz paths.
 
 | rung | command (`tests/gvsoc/run.py ...` unless noted) | checked against | pass |
 | --- | --- | --- | --- |
 | 1 | `gemm` | on-device self-check | all shapes PASS |
 | 2 | `mlir examples/*.mlir` | on-device self-check | every example that has a self-check PASSes; the others build and run to the end (the count is recorded) |
-| 3 | `smolvla --npz vision_s256.npz --layers 1` | HF SigLIP fp32 inside `prepare --seq 256` | PASS; errors recorded next to the README's (EMB 0.0067, layer 1 0.039) |
-| 4 | `smolvla-vlm --npz vlm_c1.npz --layers 1` | fp32 LeRobot-semantics reference inside `prepare-vlm` | PASS; errors recorded next to `docs/SMOLVLA.md` |
-| 5 | `tests/gvsoc/expert.py flow --npz expert.npz --steps 1` | the expert's numpy twin and G2 `xt[1]` | PASS; step-1 error recorded |
-| 6 | `smolvla-e2e --npz e2e_c1_t256.npz --e2e-trace` | G2 at every hand-over (VIS, IMG, K/V, x_t, actions) | `gate.py g3` (the validity gate) |
+| 3 | `smolvla --npz $D/vision_s256.npz --layers 1` | HF SigLIP fp32 inside `prepare --seq 256` | PASS; errors recorded next to the README's (EMB 0.0067, layer 1 0.039) |
+| 4 | `smolvla-vlm --npz $D/vlm_c1.npz --layers 1` | fp32 LeRobot-semantics reference inside `prepare-vlm` | PASS; errors recorded next to `docs/SMOLVLA.md` |
+| 5 | `tests/gvsoc/expert.py flow --npz $D/expert.npz --steps 1` | the expert's numpy twin and G2 `xt[1]` | PASS; step-1 error recorded |
+| 6 | `smolvla-e2e --npz $D/e2e_c1_t256.npz --e2e-trace` | G2 at every hand-over (VIS, IMG, K/V, x_t, actions) | `gate.py g3` (the validity gate) |
 
 Rung 6 is the published-configuration chain. G4 is a different configuration (LIBERO) and a different checkpoint.
 
@@ -310,15 +311,15 @@ Rung 6 is the published-configuration chain. G4 is a different configuration (LI
 
 | step | command | measures |
 | --- | --- | --- |
-All commands run as `run.sh libero sim <step id> -- tests/gvsoc/run.py ...`, after `run.sh libero prepare`.
+All commands run as `run.sh libero sim <step id> -- tests/gvsoc/run.py ...`, after `run.sh libero prepare`; `$D` is `$SHVLA_SMOLVLA_DIR`, written out in full.
 
 | step | command | measures |
 | --- | --- | --- |
 | G4a.1 | `smolvla-e2e --vision-only 1024 --layers 1 --e2e-trace` (reads `vision_s1024.npz` of the LIBERO weights) | one SigLIP layer at 1024 tokens: embed, attention, proj/FFN per layer, post-LN, connector |
 | G4a.2 | `smolvla-e2e --prefix-only 2 --layers 8 --e2e-trace` (reads `vlm_c2.npz`, 177 tokens) | connector and prefix layers 1–8 at 177 tokens |
-| G4a.3 | `smolvla-e2e --expert-only ref:e2e_c2_t1024.npz --steps 2 --e2e-trace` (patch 0005: KV from G2) | expert KV projection and per-step time at Lp 177; steps 1–2 against G2 `xt[1..2]` |
+| G4a.3 | `smolvla-e2e --expert-only ref:$D/e2e_c2_t1024.npz --steps 2 --e2e-trace` (patch 0005: KV from G2) | expert KV projection and per-step time at Lp 177; steps 1–2 against G2 `xt[1..2]` |
 | G4a.4 | `gate.py g4a`: vision = 2 cameras × (embed + 12 × layer + post-LN) + connector; prefix = 2 × layers 1–8; expert = KV projection + 10 × step | the estimate and, from the wall-time ratios, the G4b projection |
-| G4b | `smolvla-e2e --npz e2e_c2_t1024.npz --e2e-trace` | the full chain, measured |
+| G4b | `smolvla-e2e --npz $D/e2e_c2_t1024.npz --e2e-trace` | the full chain, measured |
 
 The projection is made per phase: G4b runs as four simulator processes (V, Pa, Pb, X), each under the 2 h limit. If any projected phase exceeds 2 h (R1), the session stops and asks the owner before G4b.
 
@@ -336,9 +337,9 @@ Changes, as patch files:
 | --- | --- | --- | --- |
 | 0001 | `softhier_mlir/frontend/smolvla_e2e.py` (`MODELS`), `frontend/smolvla.py` (lines 524–525 cache paths; 999, 1012 `--ckpt` defaults), `frontend/smolvla_expert.py` (886–887), `frontend/smolvla_expert_ref.py` (225), `tests/gvsoc/run.py` (803, 838, 1088), `tests/gvsoc/expert.py` (default `--npz`) | read `SHVLA_SMOLVLA_DIR` instead of `/app/models/smolvla_base`, falling back to the original | the paths do not exist here; one variable per run selects the checkpoint folder |
 | 0002 | `frontend/smolvla_e2e.py` (`VISION_NPZ`, `VLM_NPZ`, `EXPERT_NPZ` and the default arguments that bind them at import, lines 60, 103–104, 260, 282, 312), `tests/gvsoc/run.py` (748, 751, 755) | replace the three constants with functions `vision_npz()`, `vlm_npz()`, `expert_npz()` that read `SHVLA_SMOLVLA_DIR` when called; default arguments become `None` and are resolved inside the function; the attribute reads in `run.py` call the functions | the same process may prepare both checkpoints, and a default bound at import would keep the first folder |
-| 0003 | `frontend/smolvla_expert_ref.py` | port to the LeRobot and transformers versions of `infra/lerobot` (transformers ≥ 5.4): the VLM forward drops `fill_kv_cache=True` (LeRobot fills the cache when `use_cache=True` and `past_key_values=None`); the KV dump reads `DynamicCache.layers[l].keys` / `.values` and transposes to [tokens, heads, d] before the reshape; phase `expert` rebuilds a `DynamicCache` from the npz with `update(k, v, l)` per layer ([1, 5, Lp, 64], the reverse of the dump) before `denoise_step`; the docstring's environment line is updated. Output keys and layout unchanged | the crosscheck (G2.3) runs the reference in the same environment as `golden_ref.py`; the old API exists in neither planned environment |
+| 0003 | `frontend/smolvla_expert_ref.py` | port to the LeRobot and transformers versions of `infra/lerobot` (transformers ≥ 5.4): the VLM forward drops `fill_kv_cache=True` (LeRobot fills the cache when `use_cache=True` and `past_key_values=None`); the KV dump reads `DynamicCache.layers[l].keys` / `.values` and transposes to [tokens, heads, d] before the reshape; phase `expert` rebuilds a `DynamicCache` from the npz with `update(k, v, l)` per layer ([1, 5, Lp, 64], the reverse of the dump) before `denoise_step`; the docstring's environment line is updated. Output keys and layout unchanged. This is the known minimum: if the meta-device build (`build_policy`) or the buffer rebuild in `materialise` also breaks under the new versions (for example new buffer names), the extra change is logged in LOG.md first and added to this patch, as part of this plan rather than an R3 change | the crosscheck (G2.3) runs the reference in the same environment as `golden_ref.py`; the old API exists in neither planned environment |
 | 0004 | `tests/gvsoc/run.py` (argument parser, the `smolvla-e2e` dispatch) | add `--timeout <seconds>` (default unchanged, 48 h) and pass it to `run_smolvla_e2e`, `run_vision_cost`, `run_prefix_cost` and `run_expert_cost`, which already take `timeout` and hand it to `run_sim` | the 2 h per-process limit, enforced by softhier-mlir's own `subprocess.run(timeout=...)` |
-| 0005 | `tests/gvsoc/run.py` (`run_expert_cost`) | a new KV source `ref:<e2e npz>`: build the expert data with `E.expert_data(e2e, {L: (e2e["ref_kv_k_L"], e2e["ref_kv_v_L"])})`, i.e. G2's KV, which `smolvla_e2e.prepare` already copies into the e2e npz (`smolvla_e2e.py:87-89`). Modelled on the `vlm_c1` branch (`run.py:750-761`). The existing e2e source, which reads `chain_outputs.npz` from a fixed folder inside the submodule (`run.py:743`), is left unchanged | G4a.3 must run before G4b, and the existing source needs a finished chain run and ignores `--app-dir` |
+| 0005 | `tests/gvsoc/run.py` (`run_expert_cost`) | a new KV source `ref:<e2e npz>`, checked **before** the existing `kv_src.endswith(".npz") and "e2e_" in kv_src` branch (which `ref:...e2e_....npz` would otherwise match); the `ref:` prefix is stripped, then the expert data is built with `E.expert_data(e2e, {L: (e2e["ref_kv_k_L"], e2e["ref_kv_v_L"])})`, i.e. G2's KV, which `smolvla_e2e.prepare` already copies into the e2e npz (`smolvla_e2e.py:87-89`). Modelled on the `vlm_c1` branch (`run.py:750-761`). The existing e2e source, which reads `chain_outputs.npz` from a fixed folder inside the submodule (`run.py:743`), is left unchanged | G4a.3 must run before G4b, and the existing source needs a finished chain run and ignores `--app-dir` |
 
 Not patched: `--steps` already reaches `run_expert_cost` (`run.py:1148`); `--prefix-only 2` reads `$SHVLA_SMOLVLA_DIR/vlm_c2.npz` once patch 0001 is in, and `prepare-vlm --cams 2` produces the 177-token prefix.
 
@@ -461,7 +462,7 @@ Each step ends with its LOG.md entry; the checkpoint is what must hold before th
 | G6a.2 | 17 | `libero_eval.py`; 1 task × 1 episode smoke run | `summary.json` written |
 | G2.1 | 16, 18 | `golden_ref.py` synthetic and from-npz modes; tests (a)–(c) | published ref written; tests pass |
 | G2.2 | 23, 24, 26, 27, 28 (0001–0005) | softhier-mlir submodule at `b11cd5f` (experiment commit), experiment uv project, configs, `run.sh`, patches | `run.sh published fetch` and `prepare` finish; patches apply |
-| G2.3 | — | crosscheck: patched `smolvla_expert_ref.py` on CPU, then `golden_ref.py --obs from-npz:<it> --device cpu --crosscheck <it>` | every key within tolerance (Verification Plan) |
+| G2.3 | — | crosscheck: `run.sh apply`; then in the LeRobot environment `python experiments/smolvla-e2e-baseline/softhier-mlir/softhier_mlir/frontend/smolvla_expert_ref.py --ckpt $SHVLA_DATA/smolvla_base --cams 1 --img-size 256 --out $SHVLA_DATA/golden/xc_ref.npz` (by file path, not `-m`, so the package `__init__` and its xdsl import are not loaded; the script itself imports only stdlib, numpy, torch and LeRobot), then `golden_ref.py --obs from-npz:$SHVLA_DATA/golden/xc_ref.npz --device cpu --crosscheck $SHVLA_DATA/golden/xc_ref.npz` | every key within tolerance (Verification Plan) |
 | G2.4 | 16, 18 | libero mode; test (d), (e) | LIBERO ref written; tests pass |
 | G2.5 | 13 | `infra/lerobot/README.md` | — |
 | G6b.1 | — | `libero_spatial` 10 × 10; settle OQ2–OQ4 | success rate with interval in LOG.md |
@@ -668,7 +669,7 @@ Before editing: `git submodule update --init softhier_vla_wiki` if the worktree'
 
 ##### 27. `experiments/smolvla-e2e-baseline/run.sh` (Create)
 *   **Type / Scope**: Shell script (the only run tool).
-*   **Proposed Changes**: As in Component 5: `run.sh <config> fetch`, `run.sh <config> prepare`, `run.sh <config> sim <run-name> -- <script> <args>`. Exit codes: 0 pass, 1 fail, 2 refused (stamp or patch), 3 stopped by the timeout.
+*   **Proposed Changes**: As in Component 5: `run.sh apply`, `run.sh <config> fetch`, `run.sh <config> prepare`, `run.sh <config> sim <run-name> -- <script> <args>`. Exit codes: 0 pass, 1 fail, 2 refused (stamp or patch), 3 stopped by the timeout.
 
 ##### 28. `experiments/smolvla-e2e-baseline/patches/0001…0005` and `patches/README.md` (Create)
 *   **Type / Scope**: Patches on softhier-mlir and their index.
