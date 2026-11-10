@@ -13,7 +13,7 @@ Status values: planned, in progress, done, failed, skipped.
 | G0.0 | 29 | step log skeleton (this file) | LOG.md committed | done | f48297b |
 | G0.1 | 19–22 | wiki branch `decision/first-baseline` in the submodule: decision, catalog, glossary row, knowledge link; `wiki.py fmt`, `check`, `commit update` | `wiki.py check` passes; owner told the branch name | done | wiki branch `decision/first-baseline`: 6f17054 |
 | G0.2 | 3, 4 | `.gitignore`, README layout section | — | done | infra 5eb1064 |
-| G1.1 | 1, 2 | add the GVSoC submodule (infra commit with only that entry in `.gitmodules`) | `git submodule status` shows `soft_hier_release` | planned | |
+| G1.1 | 1, 2 | add the GVSoC submodule (infra commit with only that entry in `.gitmodules`) | `git submodule status` shows `soft_hier_release` | done | infra 5c6a71b |
 | G1.2 | 5 | `infra/env.sh`, `env.local.sh.example` | `env.sh --show` prints every variable | planned | |
 | G1.3 | 8, 9 | GVSoC uv project, `setup.sh`; run it | `softhier_preparation` finished; toolchain present | planned | |
 | G1.4 | 10, 12 | `stamp.py`, `build_arch.sh` | `stamp.py check` passes after a build with `implementation/`'s arch | planned | |
@@ -90,3 +90,19 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Commit: infra 5eb1064(`[G0.2] infra: layout section, metrics, gitignore`);这条 LOG entry 在紧接着的 experiment commit 里。
 - Paths under `$SHVLA_DATA`: none。
 - What to inspect: `README.md` 的 Repository layout 表和 Tracked metrics 两节。
+
+### G1.1 — GVSoC submodule
+
+- Time: 2026-11-10。
+- What and why: 把 GVSoC `soft_hier_release` 加成 `third_party/gvsoc` submodule,`.gitmodules` 里设 `ignore = dirty`(build 输出不污染 `git status`),然后递归 init 嵌套的 `core` 和 `pulp`。
+- Commands: `git submodule add -b soft_hier_release https://github.com/gvsoc/gvsoc.git third_party/gvsoc`;手动在 `.gitmodules` 加 `ignore = dirty`(worktree 里 `git config -f` 被拒绝);`git submodule update --init --recursive third_party/gvsoc`。
+- Result: `git submodule status` 显示 `third_party/gvsoc (heads/soft_hier_release)`。
+  - GVSoC: `d806a84c5785237547f504c2e34a4d9f230cb437`,https://github.com/gvsoc/gvsoc/tree/d806a84c5785237547f504c2e34a4d9f230cb437
+  - `core` (gvsoc-core): `bda268a4808708a48eab21981c7d6bbced1577d7`,https://github.com/gvsoc/gvsoc-core/tree/bda268a4808708a48eab21981c7d6bbced1577d7
+  - `pulp` (gvsoc-pulp): `3ca2016d056dda72317e27c4319fc6174b5f8c4d`,https://github.com/gvsoc/gvsoc-pulp/tree/3ca2016d056dda72317e27c4319fc6174b5f8c4d
+  - checkout 大小 40 MB(build 之前)。
+- Files changed: `.gitmodules`,`third_party/gvsoc`(gitlink)。
+- Commit: infra 5c6a71b(`[G1.1] infra: GVSoC soft_hier_release submodule`)。
+- Paths under `$SHVLA_DATA`: none。
+- What to inspect: `.gitmodules` 的 gvsoc 条目(URL、branch、ignore)。
+
