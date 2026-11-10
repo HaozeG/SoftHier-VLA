@@ -23,7 +23,7 @@ Status values: planned, in progress, done, failed, skipped, blocked (waiting for
 | G6a.2 | 17 | `libero_eval.py`; 1 task × 1 episode smoke run | `summary.json` written | done | infra 3d1607c |
 | G2.1 | 16, 18 | `golden_ref.py` synthetic and from-npz modes; tests (a)–(c) | published ref written; tests pass | done | infra 6aa2bd2 |
 | G2.2 | 23, 24, 26, 27, 28 (0001–0005) | softhier-mlir submodule at `b11cd5f` (experiment commit), experiment uv project, configs, `run.sh`, patches | `run.sh published fetch` and `prepare` finish; patches apply | done | experiment 0c2fefe, ceb1249, e5af70f, ec9c6a7, 8c8efc8, 31795c1 (setuptools pin), the run.sh fixes commit and the log commits (see entry) |
-| G2.3 | — | crosscheck: `run.sh apply`; then in the LeRobot environment `python experiments/smolvla-e2e-baseline/softhier-mlir/softhier_mlir/frontend/smolvla_expert_ref.py --ckpt $SHVLA_DATA/smolvla_base --cams 1 --img-size 256 --out $SHVLA_DATA/golden/xc_ref.npz` (by file path, not `-m`, so the package `__init__` and its xdsl import are not loaded; the script itself imports only stdlib, numpy, torch and LeRobot), then `golden_ref.py --obs from-npz:$SHVLA_DATA/golden/xc_ref.npz --device cpu --crosscheck $SHVLA_DATA/golden/xc_ref.npz` | every key within tolerance (Verification Plan) | planned | |
+| G2.3 | — | crosscheck: `run.sh apply`; then in the LeRobot environment `python experiments/smolvla-e2e-baseline/softhier-mlir/softhier_mlir/frontend/smolvla_expert_ref.py --ckpt $SHVLA_DATA/smolvla_base --cams 1 --img-size 256 --out $SHVLA_DATA/golden/xc_ref.npz` (by file path, not `-m`, so the package `__init__` and its xdsl import are not loaded; the script itself imports only stdlib, numpy, torch and LeRobot), then `golden_ref.py --obs from-npz:$SHVLA_DATA/golden/xc_ref.npz --device cpu --crosscheck $SHVLA_DATA/golden/xc_ref.npz` | every key within tolerance (Verification Plan) | done | no infra commit (golden_ref.py unchanged); the log commit |
 | G2.4 | 16, 18 | libero mode; test (d), (e) | LIBERO ref written; tests pass | planned | |
 | G2.5 | 13 | `infra/lerobot/README.md` | — | planned | |
 | G6b.1 | — | `libero_spatial` 10 × 10; settle OQ2–OQ4 | success rate with interval in LOG.md | planned | |
@@ -264,3 +264,21 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Commit: 0c2fefe(submodule),ceb1249(uv 项目),e5af70f(patches),ec9c6a7 + 8c8efc8(configs 和 run.sh,后者补可执行位),31795c1(`setuptools<81` pin),b956adf(本条 LOG 的第一版),之后的 fixes commit 和 LOG 修订 commit。
 - Paths under `$SHVLA_DATA`: `smolvla_base/`(`model.safetensors` 和 `config.json` 的 symlink,上面五个 npz,共约 1.0 GB),`smolvla_libero/`(symlink,`vision_s1024.npz`,`vlm_c1.npz`,`vlm_c2.npz`,约 1.0 GB),`golden/xc_ref.npz` 和 `golden/xc_ref.npz.kv.npz`(G2.3 的输入)。
 - What to inspect: `experiments/smolvla-e2e-baseline/patches/README.md`;`git -C experiments/smolvla-e2e-baseline/softhier-mlir diff` 在 `bash experiments/smolvla-e2e-baseline/run.sh apply` 之后(注意 0003 的 `vision_position_ids` 改动);`run.sh` 的 `sim` 部分(exit code 映射、stamp 拒绝);`configs/*.env` 里的 prepare 列表。
+
+### G2.3 — crosscheck of `golden_ref.py` against softhier-mlir's reference (PASS)
+
+- Time: 2026-11-10。
+- What and why: 用提交的 patch 0003 重新生成 reference,再让 `golden_ref.py` 在同样的输入上跑一遍并逐 key 比较,验证 `golden_ref.py` 的捕获点和布局(KV 的 head-major 列、time_emb、xt/vt、n_valid)和 softhier-mlir 的 `smolvla_expert_ref.py` 一致。
+- Commands(都在 LeRobot 环境,`systemd-run --user --scope -p MemoryMax=12G -p MemorySwapMax=0` 下):
+  - `bash experiments/smolvla-e2e-baseline/run.sh apply`(`5 patches applied`);
+  - `python experiments/smolvla-e2e-baseline/softhier-mlir/softhier_mlir/frontend/smolvla_expert_ref.py --ckpt $SHVLA_DATA/smolvla_base --cams 1 --img-size 256 --out $SHVLA_DATA/golden/xc_ref.npz`(`$SHVLA_DATA/smolvla_base` 里 `model.safetensors` 和 `config.json` 是 symlink,存在;132 个数组,重新生成覆盖了 G2.2 的文件);
+  - `python infra/lerobot/golden_ref.py --checkpoint lerobot/smolvla_base --revision 5e8d12a6e2975b0e5e5fce7c8caf47c371d257b6 --obs from-npz:$SHVLA_DATA/golden/xc_ref.npz --device cpu --out $SHVLA_DATA/golden/xc_golden_cpu.npz --crosscheck $SHVLA_DATA/golden/xc_ref.npz`(10.8 s,self-check 0.0,500 个权重 tensor 相等)。
+- Result: **PASS,exit 0。** 比较的 59 个共有 key(`golden_ref.py` 写出的全部数值 key;`xc_ref.npz` 里多出的 73 个 key 不在范围内)的相对误差 `max|a-b| / max(|b|.max(), 1e-6)` **全部是 0.000e+00**(逐位相同,包括 `kv_k_0..15`、`kv_v_0..15` 共 32 个 key,最大 0),容差 1e-4。key 列表:images, vis_pos_ids, lang_tokens, lang_mask, state, noise, vis_out_0, img_emb_0, prefix_embs, prefix_valid, n_valid, kv_k_*, kv_v_*, time_emb, xt, vt, actions, meta,每个都是 0.000e+00。
+- 要注意:
+  - 逐位相同是因为两边都在 CPU、同一个 torch、同一套 LeRobot 模块上跑,所以这个结果验证的是**捕获点和布局**(KV 的 reshape、cache 读取、flow 的各个量、n_valid),不是两套独立数值实现的一致性。
+  - G2.1 的补充检查预计 `vis_pos_ids` 会 diverge,**实际没有**:patch 0003 已经把 `vision_position_ids` 改成 transformers 5 的公式(`idx * (1/n)` 再 clamp),所以和 `golden_ref.py` 的 ids 完全相等。G2.1 entry 里留给 owner 的那个问题("改旧 reference 还是 crosscheck 单独处理")已经由 patch 0003 解决,没有剩余的决定。
+- Deviations: 无。没有改 `golden_ref.py`,没有 infra commit。
+- Files changed: `LOG.md`(本 entry,step list 状态)。
+- Commit: 本 entry 所在的 experiment commit `[G2.3] experiment: log G2.3`。
+- Paths under `$SHVLA_DATA`: `golden/xc_ref.npz`、`golden/xc_ref.npz.kv.npz`、`golden/xc_golden_cpu.npz`。
+- What to inspect: 上面的 key 表(重跑上面的第三条命令即可看到完整输出)。
