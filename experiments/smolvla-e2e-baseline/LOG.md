@@ -14,7 +14,7 @@ Status values: planned, in progress, done, failed, skipped.
 | G0.1 | 19–22 | wiki branch `decision/first-baseline` in the submodule: decision, catalog, glossary row, knowledge link; `wiki.py fmt`, `check`, `commit update` | `wiki.py check` passes; owner told the branch name | done | wiki branch `decision/first-baseline`: 6f17054 |
 | G0.2 | 3, 4 | `.gitignore`, README layout section | — | done | infra 5eb1064 |
 | G1.1 | 1, 2 | add the GVSoC submodule (infra commit with only that entry in `.gitmodules`) | `git submodule status` shows `soft_hier_release` | done | infra 5c6a71b |
-| G1.2 | 5 | `infra/env.sh`, `env.local.sh.example` | `env.sh --show` prints every variable | planned | |
+| G1.2 | 5 | `infra/env.sh`, `env.local.sh.example` | `env.sh --show` prints every variable | done | infra daa21be |
 | G1.3 | 8, 9 | GVSoC uv project, `setup.sh`; run it | `softhier_preparation` finished; toolchain present | planned | |
 | G1.4 | 10, 12 | `stamp.py`, `build_arch.sh` | `stamp.py check` passes after a build with `implementation/`'s arch | planned | |
 | G1.5 | 11 | `run_kernel_tests.sh`; read the kernel make targets and pass strings; run | `gemm`, `norm`, `acti`, `attn` PASS | planned | |
@@ -105,4 +105,15 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Commit: infra 5c6a71b(`[G1.1] infra: GVSoC soft_hier_release submodule`)。
 - Paths under `$SHVLA_DATA`: none。
 - What to inspect: `.gitmodules` 的 gvsoc 条目(URL、branch、ignore)。
+
+### G1.2 — `infra/env.sh`
+
+- Time: 2026-11-10。
+- What and why: 环境变量默认值的单一来源,按设计的变量表:`SHVLA_ROOT`、`SHVLA_DATA`、`SOFTHIER_HOME`、`SOFTHIER_CHROOT`(导出为空)、`SHVLA_SIM_TIMEOUT=7200`。每个默认值只在变量未设置时生效,最后 source `infra/env.local.sh`(如果存在)。`HF_HOME` 不强制设值(用 HF 默认),`SHVLA_SMOLVLA_DIR` 由 experiment config 设,`SOFTHIER_IDEAL_HBM` 不导出。
+- Commands: `bash infra/env.sh --show`;`bash -c 'set -u; source infra/env.sh'`。
+- Result: `--show` 打印所有变量(未设置的显示 `<unset ...>`);`set -u` 下 source 通过。shellcheck 没有安装,所以没有跑(脚本里只有 `# shellcheck` 注释)。
+- Files changed: `infra/env.sh`,`infra/env.local.sh.example`。
+- Commit: infra daa21be(`[G1.2] infra: env.sh and env.local.sh.example`)。
+- Paths under `$SHVLA_DATA`: none。
+- What to inspect: `bash infra/env.sh --show` 的输出。
 
