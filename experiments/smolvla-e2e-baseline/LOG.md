@@ -10,9 +10,9 @@ Status values: planned, in progress, done, failed, skipped.
 
 | step | files | action | checkpoint | status | commits |
 | --- | --- | --- | --- | --- | --- |
-| G0.0 | 29 | step log skeleton (this file) | LOG.md committed | done | HASH_G00 |
-| G0.1 | 19–22 | wiki branch `decision/first-baseline` in the submodule: decision, catalog, glossary row, knowledge link; `wiki.py fmt`, `check`, `commit update` | `wiki.py check` passes; owner told the branch name | planned | |
-| G0.2 | 3, 4 | `.gitignore`, README layout section | — | planned | |
+| G0.0 | 29 | step log skeleton (this file) | LOG.md committed | done | f48297b |
+| G0.1 | 19–22 | wiki branch `decision/first-baseline` in the submodule: decision, catalog, glossary row, knowledge link; `wiki.py fmt`, `check`, `commit update` | `wiki.py check` passes; owner told the branch name | done | wiki branch `decision/first-baseline`: 6f17054 |
+| G0.2 | 3, 4 | `.gitignore`, README layout section | — | done | infra 5eb1064 |
 | G1.1 | 1, 2 | add the GVSoC submodule (infra commit with only that entry in `.gitmodules`) | `git submodule status` shows `soft_hier_release` | planned | |
 | G1.2 | 5 | `infra/env.sh`, `env.local.sh.example` | `env.sh --show` prints every variable | planned | |
 | G1.3 | 8, 9 | GVSoC uv project, `setup.sh`; run it | `softhier_preparation` finished; toolchain present | planned | |
@@ -65,6 +65,28 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Commands: `mkdir -p experiments/smolvla-e2e-baseline`,从设计的 "Ordered steps" 表生成 step list。
 - Result: 文件已创建,所有 step 为 `planned`,G0.0 为 `done`。
 - Files changed: `experiments/smolvla-e2e-baseline/LOG.md`。
-- Commit: HASH_G00(`[G0.0] experiment: step log skeleton`)。
+- Commit: f48297b(`[G0.0] experiment: step log skeleton`)。
 - Paths under `$SHVLA_DATA`: none。
 - What to inspect: step list 表的 status 列和 commits 列是否符合你想要的格式。
+
+### G0.1 — wiki decision
+
+- Time: 2026-11-10。
+- What and why: 在 wiki submodule 里建分支 `decision/first-baseline`(从 detached HEAD `5dd005f` 出发,没有动 `main`),写 decision,记录两个 metrics、simulator 和 compiler 选择、layout rule、LIBERO configuration、SR-A,以及 SR-B 和 SR-C 两个 open questions。同时加了 catalog 行、`golden reference` glossary 行(`defines:`)和 knowledge 链接。
+- Commands: `git checkout -b decision/first-baseline`;`softhier_vla_wiki/tools/wiki.py setup`;`glossary --az`;`fmt`;`check`;`commit update "[G0.1] ..."`;之后 amend 加上 `Co-Authored-By` 行。
+- Result: `wiki.py check` 0 error,2 个 STALE warning(glossary 和 knowledge 的 `_overview.md`,内容仍然正确,按 wiki 规则不改)。commit-msg hook 要求 subject 是 `wiki(<op>): ...`,所以 subject 是 `wiki(update): [G0.1] record first-baseline metrics decision`。
+- Files changed: wiki 里的 `memories/decisions/2026-11-10-first-baseline-latency-and-success-rate.md`(新),`memories/decisions/_overview.md`,`_abstract.md`,`glossary/project-terms.md`,`glossary/a-to-z.md`,`knowledge/softhier-and-the-project.md`。
+- Commit: wiki 分支 `decision/first-baseline` 上的 6f17054。父仓库的 `softhier_vla_wiki` 指针没有 bump,由 owner 决定。
+- Paths under `$SHVLA_DATA`: none。
+- What to inspect: decision 文件的 Decision 和 Open questions 两节;设计里的 gate 数字(119.1 ms、±5 %、0.10)按 wiki-design decision 0013 没有写进 wiki;decision 里的设计链接在设计合入 `main` 之前会是 404。
+
+### G0.2 — `.gitignore` and README
+
+- Time: 2026-11-10。
+- What and why: `.gitignore` 加 `.venv/`、`__pycache__/`、`infra/env.local.sh`、`egm-review/`(`CLAUDE.md` 仍然 ignored)。README 第一行的链接换成 GVSoC `soft_hier_release`,并加了 Repository layout、layout rule、Tracked metrics、Quick start 四部分。
+- Commands: 编辑两个文件,`git add .gitignore README.md`。
+- Result: infra commit 只含这两个文件。README 里指向 wiki decision 的相对链接,在 owner bump submodule 指针之前,在 pinned wiki commit 里还解析不到。
+- Files changed: `.gitignore`,`README.md`。
+- Commit: infra 5eb1064(`[G0.2] infra: layout section, metrics, gitignore`);这条 LOG entry 在紧接着的 experiment commit 里。
+- Paths under `$SHVLA_DATA`: none。
+- What to inspect: `README.md` 的 Repository layout 表和 Tracked metrics 两节。
