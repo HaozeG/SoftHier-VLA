@@ -26,7 +26,7 @@ Status values: planned, in progress, done, failed, skipped, blocked (waiting for
 | G2.3 | — | crosscheck: `run.sh apply`; then in the LeRobot environment `python experiments/smolvla-e2e-baseline/softhier-mlir/softhier_mlir/frontend/smolvla_expert_ref.py --ckpt $SHVLA_DATA/smolvla_base --cams 1 --img-size 256 --out $SHVLA_DATA/golden/xc_ref.npz` (by file path, not `-m`, so the package `__init__` and its xdsl import are not loaded; the script itself imports only stdlib, numpy, torch and LeRobot), then `golden_ref.py --obs from-npz:$SHVLA_DATA/golden/xc_ref.npz --device cpu --crosscheck $SHVLA_DATA/golden/xc_ref.npz` | every key within tolerance (Verification Plan) | done | no infra commit (golden_ref.py unchanged); the log commit |
 | G2.4 | 16, 18 | libero mode; test (d), (e) | LIBERO ref written; tests pass | done | infra 59218d9; the log commit |
 | G2.5 | 13 | `infra/lerobot/README.md` | — | done | infra 84ad868; the log commit |
-| G6b.1 | — | `libero_spatial` 10 × 10; settle OQ2–OQ4 | success rate with interval in LOG.md | planned | |
+| G6b.1 | — | `libero_spatial` 10 × 10; settle OQ2–OQ4 | success rate with interval in LOG.md | done | the log commit |
 | G3.0 | 25 | arch file; `build_arch.sh` with it | `stamp.py check` passes | planned | |
 | G3.1–G3.6 | — | ladder rungs 1–6; fork commits (33) when a fix is needed, owner first | each rung's pass column | planned | |
 | G3.7 | 34 | `gate.py g3` on the rung-6 run | gate outcome recorded (PASS or MISS with values) | planned | |
@@ -361,3 +361,34 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Files changed: `infra/softhier/README.md`(infra 提交);本次 LOG.md(本 entry,step list 状态)。
 - Commit: infra 89b92d8(`[G1.6] infra: infra/softhier/README.md`)。
 - What to inspect: README 的 "Kernel tests rebuild the hardware" 和 "Notes from setup" 两节。
+
+### G6b.1 — `libero_spatial` 10 × 10 closed-loop success rate (OQ2–OQ4 settled)
+
+- Time: 2026-11-10。
+- What and why: 对 `lerobot/smolvla_libero`(revision `a24f1f380461b665158d52acd140152c79e8b36d`)在 `libero_spatial` 全部 10 个 task 各跑 10 episode(共 100),GPU fp32,同步策略(SR-A:仿真在推理时暂停),得到基线成功率。
+- Command: `source infra/lerobot/env.sh && python infra/lerobot/libero_eval.py --run-name g6b_spatial_10x10_b2 --n-episodes 10 --batch-size 2`(12 GB cap 下,seed 1000)。
+- 第一次尝试 `--batch-size 5`(run name `g6b_spatial_10x10`)失败:约 70 s 后 `RuntimeError: Environment process exited with code -9`,即 env worker 进程被 cap 的 OOM kill(并发的模拟器作业占着内存,eval 启动时整机已用约 15 GB)。没有改 `libero_eval.py`,把 batch size 降到 2 并换 run name 重跑(`g6b_spatial_10x10` 目录只含失败的残留,没有 summary)。3 个进程各约 3 GB RSS,没有再触到 cap。
+- Results(`summary.json`,Wilson 95 %,k/n 由 `eval_info.json` 的 `successes` 计算):
+
+| task | 成功 | 成功率 | Wilson 95 % |
+| --- | --- | --- | --- |
+| 0 | 9/10 | 90 % | [59.6, 98.2] |
+| 1 | 6/10 | 60 % | [31.3, 83.2] |
+| 2 | 7/10 | 70 % | [39.7, 89.2] |
+| 3 | 6/10 | 60 % | [31.3, 83.2] |
+| 4 | 5/10 | 50 % | [23.7, 76.3] |
+| 5 | 1/10 | 10 % | [1.8, 40.4] |
+| 6 | 9/10 | 90 % | [59.6, 98.2] |
+| 7 | 4/10 | 40 % | [16.8, 68.7] |
+| 8 | 4/10 | 40 % | [16.8, 68.7] |
+| 9 | 8/10 | 80 % | [49.0, 94.3] |
+| overall | **59/100** | **59.0 %** | **[49.2, 68.1]** |
+
+- Wall time / memory:wrapper 报 wall 3781 s(约 63 min;`lerobot-eval` 自己报 `eval_s` 3756 s,37.6 s/episode),`batch_size=2`,最大单个进程 RSS 4145 MiB(`RUSAGE_CHILDREN`),`/usr/bin/time` 的 Maximum RSS 4244020 kB;没有触到 12 GB cap。**这个 wall time 是在争用下测的**:另一个 agent 同时在跑 CPU 密集的模拟器(GVSoC)作业,而 MuJoCo 用 osmesa 在 CPU 上渲染,所以单独跑应当更快。
+- 已发表的数字(OQ4):**没有找到 `lerobot/smolvla_libero` 在 `libero_spatial` 上的已发表成功率。** HF cache 里的 model card(`snapshots/a24f1f38…/README.md`)是 LeRobot 自动生成的模板,没有任何评测数字;wiki 里的 `softhier_vla_wiki/resources/models/smolvla.md:18` 只有论文 Table 2 的 LIBERO **平均**(SmolVLA 0.24B 82.75、0.45B 87.3、2.25B 88.75;multi-task,无 robot pretraining),没有 per-suite 的 spatial 数字;`wiki.py find` 也没有 spatial 数字。所以**没有可直接比较的已发表 spatial 数字**。论文的 87.3(0.45B,四个 suite 的平均)对应的是论文自己训练的模型和设置,不是这个 checkpoint,也不是 spatial 单 suite。本次 59 % 低于该平均值很多(区间上限 68 %),但因为模型、suite、设置都不同,不能据此判定是 bug 或不是 bug。**这个差距是一个未解决的疑点**,下一步值得查:checkpoint 的训练配置(`train_config.json`)是不是针对 spatial 以外的设置、eval 的 seed、相机分辨率(env 360 × 360,checkpoint config 写 256 × 256)、max steps 280 是否够用、task 5/7/8 的视频。
+- OQ2(state 维度和 observation keys):env 的 observation 是 `pixels` 里的 `image`、`image2`(360 × 360 × 3,`LiberoEnvConfig.observation_height/width = 360`,`envs/configs.py:480`),加 `agent_pos`;`agent_pos` 是 8-D = eef 位置 3 + axis-angle 3 + gripper qpos 2(`lerobot/sim/integrations/libero.py:50–55`)。checkpoint 的 `config.json` 里 `observation.state` shape `[8]`,`observation.images.camera1/camera2` shape `[3,256,256]`,`max_state_dim` 32(模型内部补零到 32)。eval 里用 `--rename_map` 把 `image`/`image2` 改成 `camera1`/`camera2`。与 G2.4 一致。
+- OQ3(控制频率):**20 Hz**。`LiberoEnvConfig.fps: int = 20`(`envs/configs.py:470`,注释说必须等于 robosuite 默认 control_freq),`gym_kwargs` 里 `"control_freq": self.fps`(`envs/configs.py:500`);`LiberoEnv.__init__(control_freq=20)`(`sim/integrations/libero.py:164`)存为 `self.control_freq`(`:199`)并传给底层 env(`:307`);robosuite 的 `control_freq=20` 默认值在 `robosuite/environments/base.py:95`,LIBERO 的 `env_wrapper.py:27` 同样默认 20。eval 没有覆盖这个 flag,所以实际是 20 Hz(episode 最多 280 步 ≈ 14 s 仿真时间)。(路径相对 `infra/lerobot/.venv/lib/python3.12/site-packages/`。)
+- Deviations: batch size 5 → 2(上面的 OOM);没有改任何代码。
+- Files changed: 只有 `LOG.md`(本 entry,step list 状态)。没有 infra 提交。
+- Paths under `$SHVLA_DATA`: `eval/g6b_spatial_10x10_b2/`(`eval_info.json`、`summary.json`、`task_descriptions.json`、`videos/libero_spatial_<t>/eval_episode_<e>.mp4`);`eval/g6b_spatial_10x10/` 是失败的 batch-5 尝试。
+- What to inspect: `$SHVLA_DATA/eval/g6b_spatial_10x10_b2/summary.json` 和 `eval_info.json`;task 5(1/10)、7、8(4/10)的 mp4。
