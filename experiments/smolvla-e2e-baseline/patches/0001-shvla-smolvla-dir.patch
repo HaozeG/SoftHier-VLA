@@ -1,0 +1,180 @@
+Subject: [PATCH 1/5] Read the checkpoint folder from SHVLA_SMOLVLA_DIR
+
+what:     every hard-coded `/app/models/smolvla_base` on a run path becomes
+          os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base"): MODELS in frontend/smolvla_e2e.py;
+          the vision_s1024 / vision_out_seed cache paths and the two --ckpt defaults of frontend/smolvla.py;
+          the two defaults of frontend/smolvla_expert.py (prepare); the --ckpt default of frontend/smolvla_expert_ref.py;
+          tests/gvsoc/run.py (vision-cost and prefix-cost npz paths, the --npz default); tests/gvsoc/expert.py (--npz).
+why:      /app/models does not exist here; one variable per run selects the checkpoint folder (published or LIBERO).
+evidence: grep -rn '"/app/models/smolvla_base' --include=*.py after the patch: only tests/gvsoc/flow_tables.py:52,
+          tests/gvsoc/ttt.py:290 and tools/e2e/*.py remain (not on any run.sh path, left unchanged).
+upstream: yes (default unchanged when the variable is unset).
+applies-to: softhier-mlir b11cd5fa4f3e717374d1e9ba14442ff302d1f970
+
+---
+diff --git a/softhier_mlir/frontend/smolvla.py b/softhier_mlir/frontend/smolvla.py
+index 8dc3f99..dbda587 100644
+--- a/softhier_mlir/frontend/smolvla.py
++++ b/softhier_mlir/frontend/smolvla.py
+@@ -24,6 +24,7 @@ position embeddings*, so the reduced program is exactly the full model restricte
+ from __future__ import annotations
+ 
+ import argparse
++import os
+ import math
+ from pathlib import Path
+ 
+@@ -521,8 +522,8 @@ def vision_outputs(ckpt: str | Path, seeds: list[int]) -> np.ndarray:
+     model). The vision model is freed afterwards (memory)."""
+     import gc
+     outs, todo = {}, []
+-    cache = Path("/app/models/smolvla_base/vision_s1024.npz")
+-    per_seed = lambda s: Path(f"/app/models/smolvla_base/vision_out_seed{s}.npz")  # noqa: E731
++    cache = Path(os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base")) / "vision_s1024.npz"
++    per_seed = lambda s: Path(os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base")) / f"vision_out_seed{s}.npz"  # noqa: E731
+     for s in seeds:
+         if s == 0 and cache.exists():
+             d = np.load(cache)
+@@ -996,7 +997,7 @@ def main() -> None:
+     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+     sub = ap.add_subparsers(dest="cmd", required=True)
+     pv = sub.add_parser("prepare-vlm", help="checkpoint -> npz of the VLM text prefix (weights, host-prepared inputs, references)")
+-    pv.add_argument("--ckpt", default="/app/models/smolvla_base/model.safetensors")
++    pv.add_argument("--ckpt", default=os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base") + "/model.safetensors")
+     pv.add_argument("--cams", type=int, default=1, help="cameras (64 image tokens each): 1 -> 113 tokens, 3 -> the full 241")
+     pv.add_argument("--layers", type=int, default=TLAYERS)
+     pv.add_argument("--task-ids", type=int, nargs="*", help=f"language token ids (default {DEFAULT_TASK_IDS})")
+@@ -1009,7 +1010,7 @@ def main() -> None:
+     pev.add_argument("--layers", type=int)
+     pev.add_argument("--cluster", type=int, default=-1)
+     pp = sub.add_parser("prepare", help="checkpoint -> npz (weights in library layout, patch matrix, HF reference)")
+-    pp.add_argument("--ckpt", default="/app/models/smolvla_base/model.safetensors")
++    pp.add_argument("--ckpt", default=os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base") + "/model.safetensors")
+     pp.add_argument("--seq", type=int, default=256, help="tokens kept (a square: 256 = top-left 16x16 patches, 1024 = all)")
+     pp.add_argument("--layers", type=int, default=LAYERS)
+     pp.add_argument("--image-seed", type=int, default=0)
+diff --git a/softhier_mlir/frontend/smolvla_e2e.py b/softhier_mlir/frontend/smolvla_e2e.py
+index a4859d2..07042a0 100644
+--- a/softhier_mlir/frontend/smolvla_e2e.py
++++ b/softhier_mlir/frontend/smolvla_e2e.py
+@@ -30,6 +30,7 @@ n_img + 48 language + 1 state tokens: 65 / 97 at 256 tokens for 1 / 3 cameras, 1
+ from __future__ import annotations
+ 
+ import argparse
++import os
+ import math
+ from pathlib import Path
+ 
+@@ -40,7 +41,7 @@ from softhier_mlir.frontend import smolvla_expert as X
+ from softhier_mlir.frontend.siglip import _Emitter, gemm_tile_attrs
+ from softhier_mlir.sim.preload import sentinel_array
+ 
+-MODELS = Path("/app/models/smolvla_base")
++MODELS = Path(os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base"))
+ VISION_NPZ = MODELS / "vision_s1024.npz"      # SigLIP weights in library layout + the full 1024-row position table
+ VLM_NPZ = MODELS / "vlm_c1.npz"               # text tower + connector weights (fp16 library layout)
+ EXPERT_NPZ = MODELS / "expert.npz"            # expert weights + time table (fp16 library layout)
+diff --git a/softhier_mlir/frontend/smolvla_expert.py b/softhier_mlir/frontend/smolvla_expert.py
+index 0909456..a5765e8 100644
+--- a/softhier_mlir/frontend/smolvla_expert.py
++++ b/softhier_mlir/frontend/smolvla_expert.py
+@@ -30,6 +30,7 @@ table tb[s] = time_emb(t_s) @ W_in[:, 720:]^T + b_in (exact algebra). Euler: x_{
+ from __future__ import annotations
+ 
+ import argparse
++import os
+ import math
+ from pathlib import Path
+ 
+@@ -883,8 +884,8 @@ def main() -> None:
+     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+     sub = ap.add_subparsers(dest="cmd", required=True)
+     pp = sub.add_parser("prepare")
+-    pp.add_argument("--ckpt", default="/app/models/smolvla_base/model.safetensors")
+-    pp.add_argument("--ref", default="/app/models/smolvla_base/expert_ref.npz")
++    pp.add_argument("--ckpt", default=os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base") + "/model.safetensors")
++    pp.add_argument("--ref", default=os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base") + "/expert_ref.npz")
+     pp.add_argument("--out", required=True)
+     pe = sub.add_parser("emit")
+     pe.add_argument("npz", nargs="?")
+diff --git a/softhier_mlir/frontend/smolvla_expert_ref.py b/softhier_mlir/frontend/smolvla_expert_ref.py
+index d6f29b7..114e283 100644
+--- a/softhier_mlir/frontend/smolvla_expert_ref.py
++++ b/softhier_mlir/frontend/smolvla_expert_ref.py
+@@ -35,6 +35,7 @@ What is dumped (all fp32 unless noted), layer index l = 0..15 of the 16 VLM/expe
+ from __future__ import annotations
+ 
+ import argparse
++import os
+ import dataclasses
+ import gc
+ import json
+@@ -222,7 +223,7 @@ def phase_expert(a, kv: dict | None) -> None:
+ 
+ def main() -> None:
+     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+-    ap.add_argument("--ckpt", default="/app/models/smolvla_base")
++    ap.add_argument("--ckpt", default=os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base"))
+     ap.add_argument("--out", required=True)
+     ap.add_argument("--seed", type=int, default=0)
+     ap.add_argument("--prompt", default=PROMPT)
+diff --git a/tests/gvsoc/expert.py b/tests/gvsoc/expert.py
+index 9daa45d..12678f3 100644
+--- a/tests/gvsoc/expert.py
++++ b/tests/gvsoc/expert.py
+@@ -13,6 +13,7 @@ private directory and gvsoc runs with the preload image (see tests/gvsoc/run.py
+ from __future__ import annotations
+ 
+ import argparse
++import os
+ import re
+ import sys
+ from pathlib import Path
+@@ -298,7 +299,7 @@ if __name__ == "__main__":
+     ap.add_argument("test", choices=["layer", "flow", "op"])
+     ap.add_argument("--which", default="attn", help="op: attn | xattn | rmsnorm | rope | silu | silu_view | axpy")
+     ap.add_argument("--cols", type=int, default=960, help="op: columns of the row-op tests")
+-    ap.add_argument("--npz", default="/app/models/smolvla_base/expert.npz")
++    ap.add_argument("--npz", default=os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base") + "/expert.npz")
+     ap.add_argument("--seed", type=int, default=1)
+     ap.add_argument("--steps", type=int, default=10)
+     ap.add_argument("--layers", type=int, default=16)
+diff --git a/tests/gvsoc/run.py b/tests/gvsoc/run.py
+index 08c70db..237b7f1 100644
+--- a/tests/gvsoc/run.py
++++ b/tests/gvsoc/run.py
+@@ -24,6 +24,7 @@ GVSoC natively (ideal HBM). Prints PASS/FAIL and the ROI in ns.
+ from __future__ import annotations
+ 
+ import argparse
++import os
+ import re
+ import subprocess
+ import sys
+@@ -800,7 +801,7 @@ def run_vision_cost(T: int = 1024, layers: int = 1, trace: bool = True, app_dir:
+     import json
+     from softhier_mlir.frontend import smolvla, smolvla_e2e as E
+     from softhier_mlir.testing import lcg
+-    src = np.load(f"/app/models/smolvla_base/vision_s{T}.npz")
++    src = np.load(Path(os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base")) / f"vision_s{T}.npz")
+     img_tok = T // E.PS
+     n = img_tok + smolvla.LANG_LEN + 1
+     e2e = {"xp": src["xp"][None], "vis_pos_ids": smolvla.token_ids_for(T), "meta": np.array([n, 16, 1, T, n], dtype=np.int64)}
+@@ -835,7 +836,7 @@ def run_prefix_cost(cams: int, layers: int = 8, trace: bool = True, app_dir: Pat
+     per-layer time of layers 9-16 equals 1-8 within 2 %, docs/SMOLVLA.md), traced for bytes / utilisation."""
+     import json
+     from softhier_mlir.frontend import smolvla
+-    data = dict(np.load(f"/app/models/smolvla_base/vlm_c{cams}.npz"))
++    data = dict(np.load(Path(os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base")) / f"vlm_c{cams}.npz"))
+     app = Path(app_dir) if app_dir else HERE / "smolvla_e2e_app" / f"prefix_c{cams}_t1024_L{layers}{'_trace' if trace else ''}"
+     out = _e2e_phase(app, "prefix_a", lambda: smolvla.emit_vlm(data, layers, -1, -1, dumps=(), layer0=0), timeout, trace, reuse)
+     marks = parse_marks(out)
+@@ -1085,7 +1086,7 @@ if __name__ == "__main__":
+     ap.add_argument("--kv-heads", type=int, default=5, help="llmops: key/value heads (GQA)")
+     ap.add_argument("--layer0", type=int, default=0, help="smolvla-vlm: first layer to run (the program starts from the reference's L<layer0>)")
+     ap.add_argument("--layers", type=int, default=1)
+-    ap.add_argument("--npz", default="/app/models/smolvla_base/vision_s256.npz", help="smolvla: output of `smolvla.py prepare`")
++    ap.add_argument("--npz", default=os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base") + "/vision_s256.npz", help="smolvla: output of `smolvla.py prepare`")
+     ap.add_argument("--attn", type=int, default=-1, help="smolvla: cluster of the per-head attention ops (-1 = SH_ALL per op)")
+     ap.add_argument("--dumps", nargs="*", help="smolvla: tensors to compare (default EMB, L1..Ln, OUT)")
+     ap.add_argument("--log", help="smolvla: stream the simulator output to this file")

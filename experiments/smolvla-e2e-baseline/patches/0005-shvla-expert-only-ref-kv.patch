@@ -1,0 +1,48 @@
+Subject: [PATCH 5/5] A ref:<e2e npz> KV source for --expert-only
+
+what:     tests/gvsoc/run.py run_expert_cost: new KV source `ref:<e2e npz>`, checked before the existing
+          `.npz` + "e2e_" branch (which `ref:...e2e_....npz` would otherwise match). The prefix is stripped, then
+          E.expert_data(e2e, {L: (e2e["ref_kv_k_L"], e2e["ref_kv_v_L"])}) builds the expert data from the golden
+          reference's KV, which smolvla_e2e.prepare copies into the e2e npz. Tag ref_c<cams>_t<T>. The existing e2e source
+          (reads chain_outputs.npz from a fixed folder inside the submodule) is unchanged. Help text updated.
+why:      G4a.3 must run before the full chain (G4b); the existing source needs a finished chain run and ignores --app-dir.
+evidence: none yet (first used by G4a.3).
+upstream: yes.
+applies-to: softhier-mlir b11cd5fa4f3e717374d1e9ba14442ff302d1f970
+
+---
+diff --git a/tests/gvsoc/run.py b/tests/gvsoc/run.py
+index 42ccf10..1220c2d 100644
+--- a/tests/gvsoc/run.py
++++ b/tests/gvsoc/run.py
+@@ -733,12 +733,20 @@ def run_expert_cost(kv_src: str, chunk: int = 50, steps: int = 10, trace: bool =
+     """The expert phase alone for the cost table: a prefix length / chunk point that the chained runs do not cover.
+     kv_src: an e2e npz whose chain already ran (its device KV from <app>/chain_outputs.npz; validated against lerobot,
+     first `chunk` action rows), `expert` (expert.npz: lerobot's 241-token KV), `vlm_c1` (vlm_c1.npz: the fp32 113-token
+-    prefix reference's KV). Writes <app>/summary.json (per-step times, KV projection, trace segments)."""
++    prefix reference's KV), `ref:<e2e npz>` (the golden reference's KV stored in that e2e npz; no chain run needed).
++    Writes <app>/summary.json (per-step times, KV projection, trace segments)."""
+     import json
+     from softhier_mlir.frontend import smolvla, smolvla_e2e as E, smolvla_expert as XE
+     from softhier_mlir.testing import lcg
+     ref_xt = None
+-    if kv_src.endswith(".npz") and "e2e_" in kv_src:
++    if kv_src.startswith("ref:"):
++        # KV cache of the golden reference (copied into the e2e npz by smolvla_e2e.prepare as ref_kv_k_<L> / ref_kv_v_<L>),
++        # not of a finished chain run: needs neither chain_outputs.npz nor a chain run
++        e2e = dict(np.load(kv_src[len("ref:"):]))
++        it = E.info(e2e)
++        d = E.expert_data(e2e, {L: (e2e[f"ref_kv_k_{L}"], e2e[f"ref_kv_v_{L}"]) for L in range(16)})
++        ref_xt, lp, tag = e2e["ref_xt"], it["n"], f"ref_c{it['cams']}_t{it['T']}"
++    elif kv_src.endswith(".npz") and "e2e_" in kv_src:
+         e2e = dict(np.load(kv_src))
+         it = E.info(e2e)
+         chain = HERE / "smolvla_e2e_app" / f"c{it['cams']}_t{it['T']}_trace" / "chain_outputs.npz"
+@@ -1122,6 +1130,7 @@ if __name__ == "__main__":
+     ap.add_argument("--fresh", action="store_true", help="smolvla-e2e: re-simulate phases that already have a finished log")
+     ap.add_argument("--split", type=int, default=8, help="smolvla-e2e: prefix layers in the first prefix program")
+     ap.add_argument("--expert-only", help="smolvla-e2e: only the expert phase for the cost table; KV from an e2e npz whose chain ran, "
++                                          "'ref:<e2e npz>' (the golden reference's KV in that npz), "
+                                           "'expert' (241-token lerobot KV) or 'vlm_c1' (113-token prefix reference KV)")
+     ap.add_argument("--prefix-only", type=int, help="smolvla-e2e: only the full-resolution prefix (vlm_c<N>.npz), --layers layers")
+     ap.add_argument("--vision-only", type=int,help="smolvla-e2e: only the vision phase, 1 camera at this many SigLIP tokens, --layers layers")

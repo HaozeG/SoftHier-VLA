@@ -1,0 +1,45 @@
+Subject: [PATCH 4/5] Add --timeout to tests/gvsoc/run.py for the smolvla-e2e functions
+
+what:     tests/gvsoc/run.py: new --timeout <seconds> (default 48 * 3600, unchanged), passed as timeout= to
+          run_smolvla_e2e, run_vision_cost, run_prefix_cost and run_expert_cost, which already hand it to run_sim.
+why:      the 2 h per-process limit, enforced by softhier-mlir's own subprocess.run(timeout=...) (run.sh appends
+          --timeout $SHVLA_SIM_TIMEOUT for smolvla-e2e).
+evidence: none yet (first used by the G3 rung 6 run).
+upstream: yes.
+applies-to: softhier-mlir b11cd5fa4f3e717374d1e9ba14442ff302d1f970
+
+---
+diff --git a/tests/gvsoc/run.py b/tests/gvsoc/run.py
+index 28dee89..42ccf10 100644
+--- a/tests/gvsoc/run.py
++++ b/tests/gvsoc/run.py
+@@ -1126,6 +1126,7 @@ if __name__ == "__main__":
+     ap.add_argument("--prefix-only", type=int, help="smolvla-e2e: only the full-resolution prefix (vlm_c<N>.npz), --layers layers")
+     ap.add_argument("--vision-only", type=int,help="smolvla-e2e: only the vision phase, 1 camera at this many SigLIP tokens, --layers layers")
+     ap.add_argument("--chunk", type=int, default=50,help="smolvla-e2e --expert-only: action rows (25 = the first 25 of the 50-row chunk)")
++    ap.add_argument("--timeout", type=int, default=48 * 3600, help="smolvla-e2e: seconds per simulator process (each chain phase)")
+     a = ap.parse_args()
+     DATA = a.data
+     if a.cluster is None:
+@@ -1142,14 +1143,17 @@ if __name__ == "__main__":
+     elif a.test == "llmops":
+         ok = run_llmops(a.rows, a.cols or 960, a.heads or 15, a.kv_heads, "SH_ALL" if a.cluster == "all" else "0", a.nsamples)
+     elif a.test == "smolvla-e2e" and a.prefix_only:
+-        ok = run_prefix_cost(a.prefix_only, a.layers, a.e2e_trace, Path(a.app_dir) if a.app_dir else None, not a.fresh)
++        ok = run_prefix_cost(a.prefix_only, a.layers, a.e2e_trace, Path(a.app_dir) if a.app_dir else None, not a.fresh,
++                              timeout=a.timeout)
+     elif a.test == "smolvla-e2e" and a.vision_only:
+-        ok = run_vision_cost(a.vision_only, a.layers, a.e2e_trace, Path(a.app_dir) if a.app_dir else None, not a.fresh)
++        ok = run_vision_cost(a.vision_only, a.layers, a.e2e_trace, Path(a.app_dir) if a.app_dir else None, not a.fresh,
++                             timeout=a.timeout)
+     elif a.test == "smolvla-e2e" and a.expert_only:
+-        ok = run_expert_cost(a.expert_only, a.chunk, a.steps, a.e2e_trace, Path(a.app_dir) if a.app_dir else None, not a.fresh)
++        ok = run_expert_cost(a.expert_only, a.chunk, a.steps, a.e2e_trace, Path(a.app_dir) if a.app_dir else None, not a.fresh,
++                            timeout=a.timeout)
+     elif a.test == "smolvla-e2e":
+         ok = run_smolvla_e2e(a.npz, a.steps, Path(a.app_dir) if a.app_dir else None, a.e2e_trace, not a.fresh, min(a.nsamples, 128),
+-                             split=a.split)
++                             timeout=a.timeout, split=a.split)
+     elif a.test == "smolvla-vlm":
+         ok = run_smolvla_vlm(a.npz, None if a.all_layers else a.layers, a.attn, -1 if a.cluster == "all" else int(a.cluster),
+                              a.nsamples, a.dumps, Path(a.log) if a.log else None, app_dir=a.app_dir,

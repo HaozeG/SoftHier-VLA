@@ -1,0 +1,110 @@
+Subject: [PATCH 3/5] Port smolvla_expert_ref.py to LeRobot 0.7.0 / transformers >= 5.4
+
+what:     frontend/smolvla_expert_ref.py (the host reference that writes the golden-reference keys):
+          - make_att_2d_masks and create_sinusoidal_pos_embedding come from lerobot.policies.common.vla_utils;
+          - the VLM forward runs with use_cache=True, past_key_values=None (no fill_kv_cache) and returns a DynamicCache;
+          - the KV dump reads DynamicCache.layers[l].keys / .values ([1, 5, Lp, 64]), transposes to [Lp, 5, 64] and reshapes
+            to [Lp, 320] (head-major columns);
+          - phase `expert` rebuilds a DynamicCache from the npz with update(k, v, l) per layer (the reverse of the dump);
+          - vision_position_ids takes the transformers 5 formula: idx * (1 / n) clamped to 1 - 1e-6, then bucketize
+            right=True. The old `idx / n * (1 - 1e-6)` puts every row after the first one bucket lower (found in G2.1:
+            the position ids differ from the ones SigLIP really uses);
+          - docstring: environment line.
+          Output keys and layout unchanged. build_policy (meta-device build) and materialise (buffer rebuild) needed no change.
+why:      the crosscheck (G2.3) runs this reference in the same environment as infra/lerobot/golden_ref.py.
+evidence: G2.2: run by file path in infra/lerobot/.venv (lerobot 0.7.0, transformers 5.22), cams 1, img-size 256:
+          writes $SHVLA_DATA/golden/xc_ref.npz (132 arrays); vis_pos_ids equal to golden_ref.py's published.npz.
+upstream: yes (the position-id formula bug is also worth reporting: with transformers 5, softhier-mlir's old formula
+          gives different rows).
+applies-to: softhier-mlir b11cd5fa4f3e717374d1e9ba14442ff302d1f970
+
+---
+diff --git a/softhier_mlir/frontend/smolvla_expert_ref.py b/softhier_mlir/frontend/smolvla_expert_ref.py
+index 114e283..b748c30 100644
+--- a/softhier_mlir/frontend/smolvla_expert_ref.py
++++ b/softhier_mlir/frontend/smolvla_expert_ref.py
+@@ -1,12 +1,15 @@
+ """Host reference for the SmolVLA action expert: run lerobot's SmolVLAPolicy code (eager attention) on a fixed
+ synthetic observation and dump everything the device program consumes or is compared against.
+ 
+-    /app/models/lerobot_venv/bin/python -m softhier_mlir.frontend.smolvla_expert_ref --ckpt /app/models/smolvla_base \
+-        --out /app/models/smolvla_base/expert_ref.npz [--vlm-dtype fp32|bf16] [--phase kv|expert|all]
++    source infra/lerobot/env.sh   # SoftHier-VLA: the LeRobot 0.7.0 / transformers 5 environment
++    python softhier_mlir/frontend/smolvla_expert_ref.py --ckpt $SHVLA_SMOLVLA_DIR \
++        --out $SHVLA_SMOLVLA_DIR/expert_ref.npz [--vlm-dtype fp32|bf16] [--phase kv|expert|all]
++    (run by file path: the package __init__ would import xdsl, which that environment does not have)
+ 
+-Needs lerobot (its modeling_smolvla / smolvlm_with_expert are the reference; a venv with
+-`pip install lerobot "transformers<5" num2words`), torch, and hub access for the SmolVLM2-500M config + tokenizer
+-(the VLM weights come from the checkpoint, not the hub: `load_vlm_weights=False`).
++Needs lerobot (its modeling_smolvla / smolvlm_with_expert are the reference; LeRobot 0.7.0 with transformers >= 5.4:
++the prefix cache is a transformers DynamicCache, filled when forward() runs with use_cache=True and past_key_values=None),
++torch, and hub access for the SmolVLM2-500M config + tokenizer (the VLM weights come from the checkpoint, not the hub:
++`load_vlm_weights=False`).
+ 
+ Memory: the shared host has 7 GB and is full of simulators, so the policy is built on the meta device and only the
+ tensors a phase needs are materialised: phase `kv` runs the frozen VLM (vision tower + connector first, freed, then
+@@ -113,13 +116,15 @@ def vision_position_ids(size: int, patch: int = 16, image_size: int = 512) -> np
+     side, n = image_size // patch, size // patch
+     boundaries = torch.arange(1 / side, 1.0, 1 / side)
+     idx = torch.arange(n, dtype=torch.float32)
+-    frac = idx / n * (1 - 1e-6)
++    # transformers >= 5: fractional_coords = idx * (1 / n), clamped to 1 - 1e-6 (the earlier `idx / n * (1 - 1e-6)` puts
++    # every row after the first one bucket lower)
++    frac = torch.clamp(idx * (1.0 / n), max=1.0 - 1e-6)
+     b = torch.bucketize(frac, boundaries, right=True)
+     return (b[:, None] * side + b[None, :]).flatten().numpy()
+ 
+ 
+ def phase_kv(a) -> dict:
+-    from lerobot.policies.smolvla.modeling_smolvla import make_att_2d_masks
++    from lerobot.policies.common.vla_utils import make_att_2d_masks
+     cfg, policy = build_policy(a.ckpt)
+     m = policy.model; we = m.vlm_with_expert
+     vlm_dtype = torch.float32 if a.vlm_dtype == "fp32" else torch.bfloat16
+@@ -149,15 +154,17 @@ def phase_kv(a) -> dict:
+         prefix_embs, prefix_pad_masks, prefix_att_masks = m.embed_prefix(images, img_masks, lang_tokens, lang_masks, state=state)
+         prefix_att_2d = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+         prefix_pos = torch.cumsum(prefix_pad_masks, dim=1) - 1
++        # past_key_values=None with use_cache=True: forward() creates a DynamicCache and fills it (post-RoPE K, V)
+         _, pkv = we.forward(attention_mask=prefix_att_2d, position_ids=prefix_pos, past_key_values=None,
+-                            inputs_embeds=[prefix_embs, None], use_cache=cfg.use_cache, fill_kv_cache=True)
++                            inputs_embeds=[prefix_embs, None], use_cache=True)
+     Lp = prefix_pad_masks.shape[1]
+     out["prefix_embs"] = prefix_embs[0].float().numpy()
+     out["prefix_valid"] = prefix_pad_masks[0].float().numpy()
+     out["n_valid"] = np.array(int(prefix_pad_masks.sum()))
+     for l in range(we.num_vlm_layers):
+-        out[f"kv_k_{l}"] = pkv[l]["key_states"][0].reshape(Lp, -1).float().numpy()
+-        out[f"kv_v_{l}"] = pkv[l]["value_states"][0].reshape(Lp, -1).float().numpy()
++        # DynamicCache.layers[l].keys / .values: [1, kv_heads, Lp, head_dim] -> [Lp, kv_heads, head_dim] -> [Lp, kv_heads * head_dim]
++        out[f"kv_k_{l}"] = pkv.layers[l].keys[0].transpose(0, 1).reshape(Lp, -1).float().numpy()
++        out[f"kv_v_{l}"] = pkv.layers[l].values[0].transpose(0, 1).reshape(Lp, -1).float().numpy()
+     print(f"[ref] prefix length {Lp}, valid tokens {int(prefix_pad_masks.sum())}, KV per layer {out['kv_k_0'].shape}, "
+           f"|K| max {max(np.abs(out[f'kv_k_{l}']).max() for l in range(16)):.2f} |V| max {max(np.abs(out[f'kv_v_{l}']).max() for l in range(16)):.2f}")
+     np.savez(a.out + ".kv.npz", **out)
+@@ -167,7 +174,8 @@ def phase_kv(a) -> dict:
+ 
+ 
+ def phase_expert(a, kv: dict | None) -> None:
+-    from lerobot.policies.smolvla.modeling_smolvla import create_sinusoidal_pos_embedding
++    from lerobot.policies.common.vla_utils import create_sinusoidal_pos_embedding
++    from transformers import DynamicCache
+     if kv is None:
+         kv = dict(np.load(a.out + ".kv.npz"))
+     cfg, policy = build_policy(a.ckpt)
+@@ -176,8 +184,12 @@ def phase_expert(a, kv: dict | None) -> None:
+     print(f"[ref] expert layers {we.num_expert_layers}, hidden {we.expert_hidden_size}, heads {we.num_attention_heads}/{we.num_key_value_heads}, "
+           f"head_dim {we.vlm.config.text_config.head_dim}, rms eps {we.lm_expert.config.rms_norm_eps}, intermediate {we.lm_expert.config.intermediate_size}", flush=True)
+     Lp = int(kv["prefix_valid"].shape[0])
+-    pkv = {l: {"key_states": torch.from_numpy(kv[f"kv_k_{l}"]).reshape(1, Lp, we.num_key_value_heads, -1),
+-               "value_states": torch.from_numpy(kv[f"kv_v_{l}"]).reshape(1, Lp, we.num_key_value_heads, -1)} for l in range(we.num_vlm_layers)}
++    # the reverse of the dump: [Lp, kv_heads * head_dim] -> [1, kv_heads, Lp, head_dim], one DynamicCache layer per VLM layer
++    pkv = DynamicCache()
++    for l in range(we.num_vlm_layers):
++        k = torch.from_numpy(kv[f"kv_k_{l}"]).reshape(1, Lp, we.num_key_value_heads, -1).transpose(1, 2).contiguous()
++        v = torch.from_numpy(kv[f"kv_v_{l}"]).reshape(1, Lp, we.num_key_value_heads, -1).transpose(1, 2).contiguous()
++        pkv.update(k, v, l)
+     prefix_pad_masks = torch.from_numpy(kv["prefix_valid"]).bool()[None]
+     noise = torch.from_numpy(kv["noise"])[None]
+     s0: dict[str, np.ndarray] = {}

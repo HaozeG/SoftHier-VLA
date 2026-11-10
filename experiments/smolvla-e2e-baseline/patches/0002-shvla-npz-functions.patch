@@ -1,0 +1,147 @@
+Subject: [PATCH 2/5] Resolve the weight npz paths at call time
+
+what:     frontend/smolvla_e2e.py: the constants MODELS, VISION_NPZ, VLM_NPZ, EXPERT_NPZ become functions models_dir(),
+          vision_npz(), vlm_npz(), expert_npz() that read SHVLA_SMOLVLA_DIR when called; the default arguments that bound
+          them at import (prepare ckpt, emit_vision, vlm_data, expert_data) become None and are resolved inside (the
+          parameters shadow the functions there, so private aliases _vision_npz etc. are used). tests/gvsoc/run.py reads
+          E.expert_npz() / E.vlm_npz() instead of E.EXPERT_NPZ / E.VLM_NPZ (run_expert_cost).
+why:      a default bound at import keeps the first folder; one process may prepare both checkpoints.
+evidence: grep -rn 'MODELS\|VISION_NPZ\|VLM_NPZ\|EXPERT_NPZ' --include=*.py: no use left.
+upstream: yes.
+applies-to: softhier-mlir b11cd5fa4f3e717374d1e9ba14442ff302d1f970
+
+---
+diff --git a/softhier_mlir/frontend/smolvla_e2e.py b/softhier_mlir/frontend/smolvla_e2e.py
+index 07042a0..3316393 100644
+--- a/softhier_mlir/frontend/smolvla_e2e.py
++++ b/softhier_mlir/frontend/smolvla_e2e.py
+@@ -41,10 +41,32 @@ from softhier_mlir.frontend import smolvla_expert as X
+ from softhier_mlir.frontend.siglip import _Emitter, gemm_tile_attrs
+ from softhier_mlir.sim.preload import sentinel_array
+ 
+-MODELS = Path(os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base"))
+-VISION_NPZ = MODELS / "vision_s1024.npz"      # SigLIP weights in library layout + the full 1024-row position table
+-VLM_NPZ = MODELS / "vlm_c1.npz"               # text tower + connector weights (fp16 library layout)
+-EXPERT_NPZ = MODELS / "expert.npz"            # expert weights + time table (fp16 library layout)
++
++
++def models_dir() -> Path:
++    """Checkpoint folder, read from SHVLA_SMOLVLA_DIR on every call (not bound at import)."""
++    return Path(os.environ.get("SHVLA_SMOLVLA_DIR", "/app/models/smolvla_base"))
++
++
++def vision_npz() -> Path:
++    """SigLIP weights in library layout + the full 1024-row position table."""
++    return models_dir() / "vision_s1024.npz"
++
++
++def vlm_npz() -> Path:
++    """Text tower + connector weights (fp16 library layout)."""
++    return models_dir() / "vlm_c1.npz"
++
++
++def expert_npz() -> Path:
++    """Expert weights + time table (fp16 library layout)."""
++    return models_dir() / "expert.npz"
++
++
++# the emitters take parameters of the same names, which shadow the functions inside them
++_vision_npz, _vlm_npz, _expert_npz = vision_npz, vlm_npz, expert_npz
++
++
+ D, FF, HEADS, VLAYERS, PATCH = V.D, V.FF, V.HEADS, V.LAYERS, V.PATCH
+ PS = V.PIX_SCALE * V.PIX_SCALE                # 16 SigLIP tokens per image token
+ HBM_DATA_START = V.HBM_DATA_START
+@@ -58,8 +80,10 @@ def im2col(pixels: np.ndarray) -> np.ndarray:
+     return np.ascontiguousarray(pixels.reshape(c, g, PATCH, g, PATCH).transpose(1, 3, 0, 2, 4).reshape(g * g, -1))
+ 
+ 
+-def prepare(ref: str | Path, out: str | Path, ckpt: str | Path = MODELS / "model.safetensors") -> Path:
++def prepare(ref: str | Path, out: str | Path, ckpt: str | Path | None = None) -> Path:
+     """Chain inputs + host tables + lerobot reference -> npz (small: no weights)."""
++    if ckpt is None:
++        ckpt = models_dir() / "model.safetensors"
+     r = dict(np.load(ref))
+     cams = int(r["images"].shape[0])
+     side = int(r["images"].shape[-1])
+@@ -101,18 +125,18 @@ def info(e2e) -> dict:
+ 
+ 
+ # ----------------------------------------------------------------------------- phase V: vision + connector
+-def emit_vision(e2e, cluster: int = -1, nsamples: int = 128, tiles: str = "model", vision_npz=VISION_NPZ,
+-                vlm_npz=VLM_NPZ, layers: int = VLAYERS) -> tuple[str, dict[int, np.ndarray]]:
++def emit_vision(e2e, cluster: int = -1, nsamples: int = 128, tiles: str = "model", vision_npz=None,
++                vlm_npz=None, layers: int = VLAYERS) -> tuple[str, dict[int, np.ndarray]]:
+     """SigLIP (12 layers, the layer loop and head loop of frontend.smolvla.emit) inside one scf.for over the
+     cameras, then the pixel shuffle of every camera's output and one connector GEMM over all image tokens.
+     Marks: start, vemb<c>, attn<c*12+l>, layer<c*12+l>, vis<c> (post-LN), conn, end. Dumps: VIS (samples of the
+     SigLIP outputs, row = c*T + token), IMG (every element of the connector output: the hand-over)."""
+     it = info(e2e)
+     cams, T, n_img = it["cams"], it["T"], it["n_img"]
+-    vw = np.load(vision_npz)
++    vw = np.load(_vision_npz() if vision_npz is None else vision_npz)
+     PV = {k[2:]: vw[k] for k in vw.files if k.startswith("p_") and k != "p_pos"}
+     pos = np.ascontiguousarray(vw["p_pos"][e2e["vis_pos_ids"]])
+-    wc = np.load(vlm_npz)["p_wc"]
++    wc = np.load(_vlm_npz() if vlm_npz is None else vlm_npz)["p_wc"]
+     dh = D // HEADS
+     e = _Emitter()
+     e.next_off = HBM_DATA_START
+@@ -258,11 +282,11 @@ class _Merged(dict):
+ 
+ 
+ def vlm_data(e2e, x_img: np.ndarray | None = None, x_init: np.ndarray | None = None, layers_from: int = 0,
+-             layers: int = 8, vlm_npz=VLM_NPZ) -> dict:
++             layers: int = 8, vlm_npz=None) -> dict:
+     """npz-like dict for frontend.smolvla.emit_vlm: text weights of layers [layers_from, layers_from + layers) (fp16),
+     the chain's host tables, the hand-over (x_img for the first prefix program, x_init for a later one)."""
+     it = info(e2e)
+-    w = np.load(vlm_npz)
++    w = np.load(_vlm_npz() if vlm_npz is None else vlm_npz)
+     d = _Merged()
+     for k in ("p_gfin", "p_wc"):
+         d[k] = w[k]
+@@ -280,10 +304,10 @@ def vlm_data(e2e, x_img: np.ndarray | None = None, x_init: np.ndarray | None = N
+     return d
+ 
+ 
+-def expert_data(e2e, kv: dict[int, tuple[np.ndarray, np.ndarray]], expert_npz=EXPERT_NPZ) -> dict:
++def expert_data(e2e, kv: dict[int, tuple[np.ndarray, np.ndarray]], expert_npz=None) -> dict:
+     """npz-like dict for frontend.smolvla_expert.emit_flow / np_flow: expert weights + time table from expert.npz, the
+     chain's prefix tables (token classes, RoPE of the self layers at n_valid + i, noise) and the device's KV cache."""
+-    w = np.load(expert_npz)
++    w = np.load(_expert_npz() if expert_npz is None else expert_npz)
+     d = _Merged()
+     for k in w.files:
+         if k.startswith("p_") and not k.startswith(("p_kp", "p_vp")) and k not in ("p_tok", "p_rq_self", "p_rq_cross", "p_x0"):
+@@ -310,7 +334,7 @@ def main() -> None:
+     pp = sub.add_parser("prepare")
+     pp.add_argument("--ref", required=True)
+     pp.add_argument("--out", required=True)
+-    pp.add_argument("--ckpt", default=str(MODELS / "model.safetensors"))
++    pp.add_argument("--ckpt", default=None, help="default: $SHVLA_SMOLVLA_DIR/model.safetensors")
+     pe = sub.add_parser("emit-vision")
+     pe.add_argument("npz")
+     a = ap.parse_args()
+diff --git a/tests/gvsoc/run.py b/tests/gvsoc/run.py
+index 237b7f1..28dee89 100644
+--- a/tests/gvsoc/run.py
++++ b/tests/gvsoc/run.py
+@@ -746,14 +746,14 @@ def run_expert_cost(kv_src: str, chunk: int = 50, steps: int = 10, trace: bool =
+         d = E.expert_data(e2e, {L: (co[f"kv_k_{L}"], co[f"kv_v_{L}"]) for L in range(16)})
+         ref_xt, lp, tag = e2e["ref_xt"], it["n"], f"c{it['cams']}_t{it['T']}"
+     elif kv_src == "expert":
+-        d = dict(np.load(E.EXPERT_NPZ))
++        d = dict(np.load(E.expert_npz()))
+         ref_xt, lp, tag = d["ref_xt"], int(d["p_tok"].shape[1]), "expert241"
+     elif kv_src == "vlm_c1":
+-        v = np.load(E.VLM_NPZ)
++        v = np.load(E.vlm_npz())
+         lp = int(v["meta"][0])
+         lay = smolvla.prefix_layout(int(v["meta"][2]), v["lang_mask"])
+         n_valid = int(lay["pad"].sum())
+-        w = np.load(E.EXPERT_NPZ)
++        w = np.load(E.expert_npz())
+         d = {k: w[k] for k in w.files if k.startswith("p_") and not k.startswith(("p_kp", "p_vp"))}
+         d["p_tok"] = XE.prefix_tok(lay["pad"].astype(np.float32))
+         d["p_rq_self"] = XE.rope_table(n_valid + np.arange(XE.S))
