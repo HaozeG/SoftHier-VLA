@@ -14,7 +14,8 @@ Independent of softhier-mlir code (decision A4). The layout follows softhier-mli
 
     --obs synthetic:<cams>:<side>:<seed>   seeded images in [-1, 1] at <side>, state, noise (softhier-mlir's RNG order)
     --obs from-npz:<path>                  images, lang_tokens, lang_mask, state, noise read from a reference npz
-    --obs libero:<suite>:<task>:<seed>     (G2.4, not implemented yet)
+    --obs libero:<suite>:<task>:<seed>     first frame after env.reset(seed) of LIBERO <suite> task <task>, put through
+                                           lerobot-eval's own chain (see libero_inputs); noise from torch.Generator(seed)
     --crosscheck <ref.npz>                 compare the written keys with another reference npz and exit 1 at the
                                            first key above --tol (relative max error)
 
@@ -74,6 +75,12 @@ def set_deterministic() -> None:
 # --------------------------------------------------------------------------------------------------------------
 # Observation modes
 # --------------------------------------------------------------------------------------------------------------
+RENAME_MAP = {  # same map libero_eval.py passes to lerobot-eval
+    "observation.images.image": "observation.images.camera1",
+    "observation.images.image2": "observation.images.camera2",
+}
+
+
 def parse_obs(obs: str) -> tuple[str, list[str]]:
     mode, _, rest = obs.partition(":")
     if mode not in ("synthetic", "from-npz", "libero"):
@@ -87,7 +94,10 @@ def parse_obs(obs: str) -> tuple[str, list[str]]:
         if not rest:
             raise GoldenRefError("--obs from-npz needs from-npz:<path>")
         return mode, [rest]
-    return mode, rest.split(":")
+    parts = rest.split(":")
+    if len(parts) != 3 or not parts[0] or not parts[1].isdigit() or not parts[2].lstrip("-").isdigit():
+        raise GoldenRefError(f"--obs libero needs libero:<suite>:<task id>:<seed>, got {obs!r}")
+    return mode, parts
 
 
 def tokenize(tokenizer, max_length: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -113,6 +123,88 @@ def synthetic_inputs(cams: int, side: int, seed: int, tokenizer, cfg):
     state[0, :6] = torch.randn(6, generator=g)
     noise = torch.randn(1, cfg.chunk_size, cfg.max_action_dim, generator=g)
     return images, lang_tokens, lang_masks, state, noise
+
+
+def libero_inputs(policy, cfg, checkpoint: str, revision: str, suite: str, task: int, seed: int, device: str):
+    """One LIBERO observation through the chain lerobot-eval 0.7.0 uses (scripts/lerobot_eval.py, `rollout`):
+
+      env.reset(seed=[seed])                      the sim already returns canonical observations (images rotated by
+                                                  180 degrees, 8-D state: eef pos, axis-angle, gripper), 360x360 uint8
+      prepare_canonical_observation               (preprocess_observation for non-canonical envs; picked by
+                                                  env.metadata, as rollout does) -> float [0,1] BCHW
+      observation["task"] = env.call("task_description")
+      env_preprocessor                            from make_env_pre_post_processors (empty for LIBERO in 0.7.0)
+      policy preprocessor                         the checkpoint's saved pipeline with eval's overrides: rename to
+                                                  camera1/camera2, batch, "\n", tokenizer, device, normaliser
+      policy.prepare_images / prepare_state       resize-with-pad to 512x512, [-1, 1]; state padded to 32
+
+    Returns a dict with the batch after the preprocessor (`batch`), the model inputs (`images` rounded to fp16,
+    `lang_tokens`, `lang_masks`, `state`, `noise`) and the raw material (`raw_obs`, `task_text`, `state_raw`).
+    """
+    from lerobot.envs.configs import LiberoEnvConfig
+    from lerobot.envs.factory import make_env, make_env_pre_post_processors
+    from lerobot.envs.utils import prepare_canonical_observation, preprocess_observation
+    from lerobot.policies.factory import make_pre_post_processors
+
+    env_cfg = LiberoEnvConfig(task=suite, task_ids=[task])  # lerobot-eval --env.type=libero --env.task=... --env.task_ids=[...]
+    try:
+        envs = make_env(env_cfg, n_envs=1)
+        env = envs[suite][task]
+    except Exception as e:
+        raise GoldenRefError(f"cannot build LIBERO env {suite}:{task}: {type(e).__name__}: {e}") from e
+    try:
+        # Record the raw (pre-canonical) observation the sim returns, for the exactness test of the rotation.
+        raw: list = []
+        orig_reset = env._reset_envs
+
+        def reset_and_record(seeds):
+            out = orig_reset(seeds)
+            raw.extend(out)
+            return out
+
+        env._reset_envs = reset_and_record
+        env_pre, _ = make_env_pre_post_processors(env_cfg=env_cfg, policy_cfg=cfg)
+        pre, _ = make_pre_post_processors(
+            policy_cfg=cfg,
+            pretrained_path=checkpoint,
+            pretrained_revision=revision,
+            preprocessor_overrides={
+                "device_processor": {"device": device},
+                "rename_observations_processor": {"rename_map": RENAME_MAP},
+            },
+        )
+        policy.reset()
+        pre.reset()
+        observation, _ = env.reset(seed=[seed])
+        assert len(raw) == 1, "expected exactly one raw observation from env.reset"
+        prepare = prepare_canonical_observation if env.metadata.get("canonical_observations", False) else preprocess_observation
+        observation = prepare(observation)
+        task_text = list(env.call("task_description"))
+        observation["task"] = task_text
+        observation = env_pre(observation)
+        state_raw = observation["observation.state"].clone()  # [1, 8], before normalisation
+        batch = pre(observation)
+    finally:
+        env.close()
+
+    images, img_masks = policy.prepare_images(batch)
+    state = policy.prepare_state(batch)
+    assert len(images) == 2 and all(bool(m.all()) for m in img_masks), "expected two present cameras"
+    assert list(policy.config.image_features) == ["observation.images.camera1", "observation.images.camera2"]
+    assert tuple(images[0].shape) == (1, 3, 512, 512), tuple(images[0].shape)
+    assert state.shape[-1] == cfg.max_state_dim
+    return {
+        "batch": batch,
+        "raw_obs": raw[0],
+        "task_text": task_text[0],
+        "state_raw": state_raw,
+        "images_unrounded": images,
+        "images": [im.half().float() for im in images],  # design rule: feed the fp16-rounded values
+        "lang_tokens": batch["observation.language.tokens"],
+        "lang_masks": batch["observation.language.attention_mask"].bool(),
+        "state": state,
+        "noise": torch.randn(1, cfg.chunk_size, cfg.max_action_dim, generator=torch.Generator().manual_seed(seed)),
+    }
 
 
 def npz_inputs(path: str):
@@ -353,7 +445,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     try:
         return run(args)
-    except (GoldenRefError, NotImplementedError) as e:
+    except GoldenRefError as e:
         print(f"golden_ref.py: error: {e}", file=sys.stderr)
         return 1
 
@@ -361,8 +453,6 @@ def main(argv: list[str] | None = None) -> int:
 def run(args) -> int:
     t0 = time.time()
     mode, parts = parse_obs(args.obs)
-    if mode == "libero":
-        raise NotImplementedError("--obs libero is implemented in step G2.4; use synthetic or from-npz")
     if not args.out and not args.crosscheck:
         raise GoldenRefError("give --out and/or --crosscheck")
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -375,10 +465,17 @@ def run(args) -> int:
     n = check_weights(policy, args.checkpoint, args.revision)
     print(f"[golden] loaded {args.checkpoint}@{args.revision} fp32 on {args.device}; {n} checkpoint tensors equal the loaded weights")
 
+    extra_info: dict = {}
     if mode == "synthetic":
         cams, side, seed = (int(p) for p in parts)
         tok = policy.model.vlm_with_expert.processor.tokenizer
         inputs = synthetic_inputs(cams, side, seed, tok, cfg)
+    elif mode == "libero":
+        suite, task, seed = parts[0], int(parts[1]), int(parts[2])
+        lib = libero_inputs(policy, cfg, args.checkpoint, args.revision, suite, task, seed, args.device)
+        inputs = (lib["images"], lib["lang_tokens"].cpu(), lib["lang_masks"].cpu(), lib["state"].cpu(), lib["noise"])
+        extra_info = {"info_prompt": lib["task_text"], "info_state_raw": lib["state_raw"][0].cpu().numpy().astype(np.float32)}
+        print(f"[golden] LIBERO {suite} task {task} seed {seed}: {lib['task_text']!r}; raw state {extra_info['info_state_raw'].tolist()}")
     else:
         inputs = npz_inputs(parts[0])
 
@@ -391,6 +488,7 @@ def run(args) -> int:
     rc = 0
     if args.out:
         out.update(build_info(args, cfg, mode, args.device))
+        out.update({k: (np.str_(v) if isinstance(v, str) else v) for k, v in extra_info.items()})
         out["info_selfcheck_maxabs"] = np.array(selfcheck, dtype=np.float64)
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         np.savez(args.out, **out)  # uncompressed: deterministic bytes
