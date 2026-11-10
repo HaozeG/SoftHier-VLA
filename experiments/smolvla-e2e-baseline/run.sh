@@ -85,6 +85,7 @@ fi
 # ---------------------------------------------------------------------------------------------- fetch
 do_fetch() {
     [ $# -eq 0 ] || usage
+    apply_patches
     local snap
     echo "[fetch] $SHVLA_CKPT_ID @ $SHVLA_CKPT_REV"
     # `hf download --quiet` prints only the snapshot folder (huggingface-cli no longer exists in huggingface_hub 1.x)
@@ -143,8 +144,9 @@ print_record() {   # app-dir, exit code
     echo "---- record block (paste into LOG.md) ----"
     echo "command:    run.sh $CONFIG sim $RUN_NAME -- ${SIM_ARGS[*]}"
     echo "run name:   $RUN_NAME   app dir: $app"
-    echo "softhier-mlir: $(git -C "$SHMLIR" rev-parse HEAD) (+ patches)"
-    echo "gvsoc:      $(git -C "$SHVLA_ROOT/third_party/gvsoc" rev-parse HEAD 2>/dev/null || echo unknown)"
+    echo "permalinks:"
+    python "$SHVLA_ROOT/infra/softhier/stamp.py" permalinks | sed 's/^/  /'
+    echo "  softhier-mlir: https://github.com/runwangdl/softhier-mlir/tree/$(git -C "$SHMLIR" rev-parse HEAD) (+ patches)"
     echo "stamp:      $STAMP_LINE"
     echo "patches:    $(for f in "$PATCHES"/[0-9][0-9][0-9][0-9]-*.patch; do printf '%s:%s ' "$(basename "$f")" "$(sha256sum "$f" | cut -c1-8)"; done)"
     echo "exit code:  $rc"
@@ -156,7 +158,7 @@ for f in sorted(app.glob("*.json"), key=lambda p: p.stat().st_mtime):
         d = json.loads(f.read_text())
     except ValueError:
         continue
-    if "roi_ns" in d and "wall_s" in d:
+    if "roi_ns" in d and "wall_s" in d and f.with_suffix(".log").exists():
         roi = d["roi_ns"]
         print(f"phase {f.stem:<10} ok={d.get('ok')} roi={roi / 1e6 if roi is not None else float('nan'):.3f} ms simulated, "
               f"wall={d['wall_s']} s, max child RSS={d.get('max_child_rss_mb', float('nan')):.0f} MB")
@@ -200,27 +202,31 @@ do_sim() {
     fi
 
     echo "[sim] $CONFIG/$RUN_NAME: ${cmd[*]}   (limit ${SHVLA_SIM_TIMEOUT} s per simulator process)"
-    local rc=0
+    local rc=0 start=0
+    [ -f "$app/run.log" ] && start=$(stat -c %s "$app/run.log")
     set +e
     ( cd "$SHMLIR" && "${cmd[@]}" ) 2>&1 | tee -a "$app/run.log"
     rc="${PIPESTATUS[0]}"
     set -e
 
     # 5. classify
+    # only the text this invocation appended (a resumed run keeps the earlier output in the same file)
+    tail -c +$((start + 1)) "$app/run.log" >"$app/.this_run.log"
     local code=0
-    if [ "$rc" -eq 124 ] || grep -q "TimeoutExpired" "$app/run.log"; then
+    if [ "$rc" -eq 124 ] || grep -q "TimeoutExpired" "$app/.this_run.log"; then
         code=3
     elif [ "$rc" -ne 0 ]; then
         code=1
     fi
-    if grep -Eq "$SIDE_NOTE_RE" "$app/run.log"; then
+    if grep -Eq "$SIDE_NOTE_RE" "$app/.this_run.log"; then
         echo "[sim] side-note error strings in run.log (see the side-note table in the design):"
-        grep -E "$SIDE_NOTE_RE" "$app/run.log" | sort | uniq -c | head -10
+        grep -E "$SIDE_NOTE_RE" "$app/.this_run.log" | sort | uniq -c | head -10
     fi
     if [ "$code" -ne 0 ]; then
         echo "[sim] last 40 lines of $app/run.log:"
-        tail -n 40 "$app/run.log"
+        tail -n 40 "$app/.this_run.log"
     fi
+    rm -f "$app/.this_run.log"
     print_record "$app" "$code"
     exit "$code"
 }
