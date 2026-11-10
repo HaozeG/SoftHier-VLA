@@ -18,7 +18,7 @@ Status values: planned, in progress, done, failed, skipped, blocked (waiting for
 | G1.3 | 8, 9 | GVSoC uv project, `setup.sh`; run it | `softhier_preparation` finished; toolchain present | done | infra 7251468 |
 | G1.4 | 10, 12 | `stamp.py`, `build_arch.sh` | `stamp.py check` passes after a build with `implementation/`'s arch | done | infra bce9a99 |
 | G1.5 | 11 | `run_kernel_tests.sh`; read the kernel make targets and pass strings; run | `gemm`, `norm`, `acti`, `attn` PASS | done | infra 74fbf46 |
-| G1.6 | 7 | `infra/softhier/README.md` with measured times | — | planned | |
+| G1.6 | 7 | `infra/softhier/README.md` with measured times | — | done | infra 89b92d8 |
 | G6a.1 | 14, 15 | LeRobot uv project and env; settle OQ1 | `smolvla_libero` loads at its revision | done | infra b3382eb |
 | G6a.2 | 17 | `libero_eval.py`; 1 task × 1 episode smoke run | `summary.json` written | done | infra 3d1607c |
 | G2.1 | 16, 18 | `golden_ref.py` synthetic and from-npz modes; tests (a)–(c) | published ref written; tests pass | done | infra 6aa2bd2 |
@@ -352,3 +352,12 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Commit: infra 74fbf46(`[G1.5] infra: run_kernel_tests.sh; setup.sh sets LD_LIBRARY_PATH for the DRAMSys self-test`)。
 - Paths under `$SHVLA_DATA`: `softhier/g1/<k>-pre.log`、`softhier/g1/<k>.log`。
 - What to inspect: `grep Performance $SHVLA_DATA/softhier/g1/*.log`;`gemm.log` 开头的命令行(`--trace=/chip/cluster_0/redmule`)。
+
+### G1.6 — `infra/softhier/README.md` (done)
+
+- Time: 2026-11-10。
+- What and why: 写 `infra/softhier/README.md`:前置条件(含 apt 列表)、各脚本和 `stamp.py`、`gvsoc_env.sh`、stamp 规则、kernel 目标会重建硬件、toolchain 选择(GCC 14.2)、`read -t 30`/dash 说明、DRAMSys 自检需要 `LD_LIBRARY_PATH`、切换到 fork 的步骤(D2)、实测时间和磁盘占用;side-note 表只引用设计文档。
+- Result: 实测数字取自 G1.3–G1.5(preparation 1857 s,首次 `make hw` 98 s,`<k>-pre` 10–12 s,gemm 67 s,norm 4 s,acti 4 s,attn 1280 s;磁盘 4.8 GB → 5.4 GB)。没有跑过"自检通过"那条路径的 preparation,README 里如实写了没测。
+- Files changed: `infra/softhier/README.md`(infra 提交);本次 LOG.md(本 entry,step list 状态)。
+- Commit: infra 89b92d8(`[G1.6] infra: infra/softhier/README.md`)。
+- What to inspect: README 的 "Kernel tests rebuild the hardware" 和 "Notes from setup" 两节。
