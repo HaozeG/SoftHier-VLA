@@ -85,7 +85,7 @@ G1 and the G6a → G2 → G6b branch can run at the same time; G3 needs both. G6
 *   **G3: numerical match, published configuration.** softhier-mlir's flow runs on the G1 simulator and is checked rung by rung (the ladder table in the Technical Plan), ending with the full chain compared against G2. Without the private simulator patches, failures are expected. Each failure is traced with the side-note table, then fixed (a commit on the GVSoC fork, or a patch on softhier-mlir) or recorded as a known deviation with its size. G3 ends at the **validity gate**:
     *   total simulated time within **±5 %** of 119.1 ms;
     *   action-chunk max-abs error **≤ 0.10** against G2 (published: 0.032).
-    If the gate is missed, G4 still runs, and its results are reported as "environment deviates from published by X", naming the suspected side-note items. Time-box: if G3 has not reached the gate after **5 working days** of effort, stop and ask the owner.
+    If the gate is missed, G4 still runs, and its results are reported as "environment deviates from published by X", naming the suspected side-note items. G3 has no overall time-box. Every single simulator process (one phase of the chain, or one standalone simulation) is limited to **2 hours** of wall time; a process that reaches the limit is stopped, and the session asks the owner before going on (R2).
 *   **G4: LIBERO latency.** The same chain in the LIBERO configuration (decision A1: staged):
     *   **G4a, staged estimate:** each stage kind is run partly at LIBERO shapes: one SigLIP layer at 1024 tokens per camera, prefix layers 1–8 at 177 tokens, a 2-step expert flow at prefix length 177. The per-stage times are measured, the full-chain time is composed (labelled **estimate**), and each partial run's hand-over is compared with G2 (LIBERO). The measured wall-time ratio gives a projection of the full run.
     *   **G4b, full run:** the whole 4-program chain at LIBERO shapes, every stage simulated (labelled **measured, simulated**), compared with G2 at every hand-over.
@@ -124,8 +124,8 @@ Labels follow wiki-design decision 0004 (evidence tiers): simulator cycle counts
 
 | id | risk | trigger | response |
 | --- | --- | --- | --- |
-| R1 | G4b is infeasible in wall time | the G4a projection exceeds **48 h** for the full chain | stop and ask the owner: run anyway, report G4a only, or reduce scope |
-| R2 | G3 does not converge | the G3 time-box (5 working days) passes without reaching the gate | stop and ask the owner; G4 can run with "deviates by X" |
+| R1 | G4b is infeasible in wall time | the G4a projection puts any G4b phase above the **2 h per-process limit** (expected for the vision phase: 2 cameras × 12 layers at 1024 tokens) | stop and ask the owner before G4b: raise the limit for that run, report G4a only, or reduce scope |
+| R2 | a simulator process runs too long or does not converge | a process reaches the 2 h limit, or G3 keeps failing at one rung | stop and ask the owner; G4 can run with "deviates by X" |
 | R3 | softhier-mlir lacks something the LIBERO shapes need | a G4a partial run fails to emit, build or fit (HBM, TCDM, 64 KB instruction memory) | patch per the LIBERO changes list; a change outside that list is designed in LOG.md first and reported to the owner before applying |
 | R4 | upstream drift | a softhier-mlir or GVSoC update breaks a patch or changes results | submodules are frozen from G3 to G5; bumps happen only between experiments |
 
@@ -156,6 +156,8 @@ Resolved:
 | A2 | softhier-mlir's LIBERO changes designed up front (Technical Plan) |
 | A4 | golden reference: thin, independent, on `main`, in softhier-mlir's layout |
 | SR | success rate by SR-A first; SR-B and SR-C recorded as later options |
+| A6 | G3 validity gate: total within ±5 % of 119.1 ms and action max-abs ≤ 0.10 |
+| limits | 2 h wall time per simulator process, then stop and ask; no overall G3 time-box; G4b only if every projected phase fits in 2 h, otherwise ask |
 
 ## Technical Plan (Architecture)
 
@@ -233,7 +235,7 @@ per-phase logs + chain summary --> run.sh appends to LOG.md / RESULTS.md
     3. Resets the softhier-mlir submodule and applies `patches/*.patch` once per invocation.
     4. Runs the given `tests/gvsoc/run.py` command with `--app-dir` under `$SHVLA_DATA/runs/<run-id>/`, tees the log, and enforces two limits:
         *   an idle limit: no new `[mark]` line in a phase log for the configured time;
-        *   a wall limit per phase.
+        *   a wall limit of 2 h per simulator process (each phase of the chain is its own GVSoC process), configurable per config file for an owner-approved exception.
        It also greps the log for the side-note error strings ("No entry found for burst", "Executing illegal instruction", "Received out-of-bound request").
     5. On a stop or a FAIL, prints the last marks and log lines; the side-note table is then consulted by hand.
     6. Records the command, run id, permalinks, stamp, patches, exit status, wall time and peak RSS (`/usr/bin/time -v`) as a block for LOG.md.
@@ -300,7 +302,7 @@ Rung 6 is the published-configuration chain. G4 is a different configuration (LI
 | G4a.4 | composition: vision = 2 cameras × (embed + 12 × layer + post-LN); prefix = 2 × layers 1–8; expert = KV projection + 10 × step | the estimate and, from the wall-time ratios, the G4b projection |
 | G4b | `smolvla-e2e --npz <libero e2e.npz> --e2e-trace` | the full chain, measured |
 
-If the projection exceeds the R1 ceiling (48 h), the session stops and asks the owner before G4b.
+The projection is made per phase: G4b runs as four simulator processes (V, Pa, Pb, X), each under the 2 h limit. If any projected phase exceeds 2 h (R1), the session stops and asks the owner before G4b.
 
 ### softhier-mlir changes for the LIBERO configuration (decision A2)
 
@@ -584,7 +586,7 @@ Before committing in the wiki: `softhier_vla_wiki/tools/wiki.py setup` once if t
     *   `SHVLA_SMOLVLA_DIR`;
     *   the `golden_ref.py --obs` string;
     *   the weight-prepare commands (`smolvla.py prepare --ckpt <ckpt>/model.safetensors --seq 1024`, `prepare-vlm`, `smolvla_expert.py prepare`);
-    *   expected stage times (published values or G4a results) and the idle and wall limits for `run.sh`.
+    *   expected stage times (published values or G4a results), the idle limit, and the wall limit (default 2 h per simulator process) for `run.sh`.
 
 ##### 27. `experiments/smolvla-e2e-baseline/run.sh` (Create)
 *   **Type / Scope**: Shell script (the only run tool).
@@ -645,7 +647,7 @@ Before committing in the wiki: `softhier_vla_wiki/tools/wiki.py setup` once if t
     *   ladder rungs 1–6 via `run.sh`;
     *   softhier-mlir's `bash tests/run_filecheck.sh` with patches applied;
     *   the validity gate result recorded.
-*   **G4**: G4a.1–G4a.4 with the projection recorded; G4b run, or the R1 stop with the owner's decision recorded.
+*   **G4**: G4a.1–G4a.4 with the per-phase projection recorded; G4b run with every phase under 2 h, or the R1 stop with the owner's decision recorded.
 *   **G5**: every RESULTS.md permalink opens after the push; every number carries its label.
 *   **G6**: `libero_eval.py` on `libero_spatial` 10 × 10 writes `summary.json` with the interval.
 *   **Wiki**: `wiki.py check` passes with no new warnings.
