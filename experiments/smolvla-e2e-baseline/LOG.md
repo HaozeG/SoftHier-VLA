@@ -392,3 +392,10 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Files changed: 只有 `LOG.md`(本 entry,step list 状态)。没有 infra 提交。
 - Paths under `$SHVLA_DATA`: `eval/g6b_spatial_10x10_b2/`(`eval_info.json`、`summary.json`、`task_descriptions.json`、`videos/libero_spatial_<t>/eval_episode_<e>.mp4`);`eval/g6b_spatial_10x10/` 是失败的 batch-5 尝试。
 - What to inspect: `$SHVLA_DATA/eval/g6b_spatial_10x10_b2/summary.json` 和 `eval_info.json`;task 5(1/10)、7、8(4/10)的 mp4。
+
+#### G6b.1 addendum(补充核对)
+
+- OQ3 补充:checkpoint 的 `config.json` 里 `chunk_size = n_action_steps = 50`,所以每次推理后整段 50 个动作都执行,在 20 Hz 下一个 chunk 是 2.5 s 仿真时间(30 Hz 则 1.67 s);`train_config.json` 里 env 段是 `fps: 30`、`task: libero_spatial`、`observation 360 × 360`、`dataset lerobot/libero`、25000 步、batch 32。env 的 20 Hz 与 `train_config.json` 的 30 不一致(设计文档 OQ3 已预期这一点);eval 用的是 20 Hz(没有传 `--env.fps`)。
+- 对 59 % 的解读:设计文档 G6b 没有设验收区间,只要求报告成功率和区间并与已发表数字并列。这里没有已发表的 spatial 数字(model card 全文 62 行,没有 results 或 model-index,只有 `datasets: lerobot/libero`)。一个值得先查的疑点是训练配置写 30 Hz 而 eval 默认 20 Hz;另一个是 `n_action_steps = 50` 开环执行 2.5 s。这两点不是已确认的原因,只是没有证伪的假设,本步没有试。
+- OOM 的原因没有查清:`journalctl --user` 在那个时间段没有 oom 记录,不能区分 12 G cap 触发(batch 5 时约 6 个进程 × 约 3 GB 本身就可能超过 12 G)和整机 OOM(当时整机可用内存只有约 2 GB)。所以上面"并发作业占着内存"只是可能因素之一,不是定论。
+- 内存补充:batch 2 时进程树里有 3 个进程各约 3 GB(合计约 9 GB);"最大单个进程 RSS 4145 MiB"低估了 cap 实际约束的整棵树的占用。
