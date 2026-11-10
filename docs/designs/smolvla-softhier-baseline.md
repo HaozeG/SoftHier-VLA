@@ -125,7 +125,7 @@ Labels follow wiki-design decision 0004 (evidence tiers): simulator cycle counts
 | id | risk | trigger | response |
 | --- | --- | --- | --- |
 | R1 | G4b is infeasible in wall time | the G4a projection puts any G4b phase above the **2 h per-process limit** (expected for the vision phase: 2 cameras × 12 layers at 1024 tokens) | stop and ask the owner before G4b: raise the limit for that run, report G4a only, or reduce scope |
-| R2 | a simulator process runs too long or does not converge | a process reaches the 2 h limit, or G3 keeps failing at one rung | stop and ask the owner; G4 can run with "deviates by X" |
+| R2 | a simulator process runs too long or does not converge | a process reaches the 2 h limit, or G3 keeps failing at one rung | consult the reference notes listed under the side-note table (host speed, patch procedures), then stop and ask the owner with a proposed fix; G4 can run with "deviates by X" |
 | R3 | softhier-mlir lacks something the LIBERO shapes need | a G4a partial run fails to emit, build or fit (HBM, TCDM, 64 KB instruction memory) | patch per the LIBERO changes list; a change outside that list is designed in LOG.md first and reported to the owner before applying |
 | R4 | upstream drift | a softhier-mlir or GVSoC update breaks a patch or changes results | submodules are frozen from G3 to G5; bumps happen only between experiments |
 
@@ -354,6 +354,13 @@ From softhier-mlir `docs/SIMULATOR_NOTES.md`. The current `soft_hier_release` ma
 | 12 | out-of-bound TCDM request after a RedMulE trigger | register clobber in `flex_redmule_trigger`; the library uses its own trigger |
 | 13, 14 | in-network REDADD adds stale data; fp16 REDADD truncates | iDMA burst buffers not cleared; `floonoc.cpp` truncates fp16 |
 | models_fast | wall time above about 24 s per simulated ms | host-speed rebuild of the Snitch models, not public |
+
+**Reference for fixes (owner's local notes, read when a run hits the 2 h limit or a side-note symptom).** `/home/haoze/SmolVLA/SmolVLA/` holds the notes of the earlier work behind softhier-mlir, in Chinese. They are not part of this repo and may be missing on other machines. What they give:
+*   `softhier_vla_summary_2026-10.md` §6: the 15 simulator and SDK pitfalls in softhier-mlir's numbering, with the original patch names (`gvsoc_snitch_fp_ss_pending.patch`, `gvsoc_redmule_fp16_rne.patch`, `gvsoc_snitch_fp_int_nseq.patch`, installed as `install/models_fix`).
+*   The same file, host speed: `models_fast` was two changes with unchanged cycle counts. One is the RedMulE functional model vectorised with NEON (190×). That is aarch64-only, so on this x86_64 host an equivalent must be found by profiling first. The other removes by-value copies and idle trace formatting from the ISS (2–4×).
+*   `deeploy_softhier_progress.md` §3: the exact fix for #1 (`Iss::handle_event` in `core/models/cpu/iss/src/snitch/snitch_fp_ss.cpp` waits while `exec.is_stalled()`). It also gives the partial rebuild procedure: build only `gen_isa_snitch_fp_ss_rv32imfdva_cpp_*_{optim,debug}` with `SYSTEMC_HOME=third_party/systemc_install`, then copy the `.so` files into `install/models/` and `install/models/debug/`.
+*   `repro/softhier_fp_hbm_repro.c`: a reproducer for #1 that prints `out=1.7500` when the fix works.
+The `.patch` files themselves (`../SoftHier/dse/patches/`) are not on this machine. Fixes are re-implemented from these descriptions as commits on the GVSoC fork (D2), each citing the note it follows.
 
 ## Alternatives Considered
 
