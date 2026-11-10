@@ -1,0 +1,28 @@
+[project]
+name = "softhier-lerobot-env"
+version = "0.1.0"
+description = "LeRobot + LIBERO environment for the SmolVLA baseline (golden reference, closed-loop eval); not a package"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "lerobot[smolvla,libero]==0.7.0",
+    "torch",
+    "torchvision",
+    "numpy",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.uv]
+package = false
+
+# CUDA wheels: cu134 is the highest PyTorch wheel index not above the driver's
+# CUDA version (nvidia-smi reports CUDA 13.4).
+[[tool.uv.index]]
+name = "pytorch-cu134"
+url = "https://download.pytorch.org/whl/cu134"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu134" }
+torchvision = { index = "pytorch-cu134" }
