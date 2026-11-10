@@ -22,7 +22,7 @@ dependencies = [
     "pytablewriter>=1.2.0",
     "PyYAML>=6.0.1",
     "rich>=13.7.1",
-    "setuptools>=59.6.0",
+    "setuptools>=59.6.0,<81",  # reggen imports pkg_resources, removed in setuptools 81
     "six>=1.16.0",
     "jsonref",
     "tqdm",
