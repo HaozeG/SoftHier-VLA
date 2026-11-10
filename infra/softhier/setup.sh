@@ -88,6 +88,11 @@ else
     mkdir -p "$log_dir"
     # shellcheck disable=SC1091
     . "$here/.venv/bin/activate"
+    # The Makefile's DRAMSys self-test dlopens the prebuilt library, which needs libsystemc.so.2.3
+    # (built by the step before). Without this path the test segfaults, the Makefile then rebuilds
+    # DRAMSys (~40 min), and that rebuild links against SystemC 2.3.4 headers, which do not match
+    # the 2.3.3 runtime and fail at simulation time. gvsoc's own sourceme.sh sets the same path.
+    export LD_LIBRARY_PATH="$gvsoc/third_party/systemc_install/lib64:$gvsoc/third_party/DRAMSys${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     echo "Running make softhier_preparation (log: $log_dir/preparation.log)"
     start=$SECONDS
     rc=0
