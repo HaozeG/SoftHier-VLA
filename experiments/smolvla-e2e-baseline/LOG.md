@@ -6,7 +6,7 @@
 
 ## Step list
 
-Status values: planned, in progress, done, failed, skipped.
+Status values: planned, in progress, done, failed, skipped, blocked (waiting for an owner action).
 
 | step | files | action | checkpoint | status | commits |
 | --- | --- | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ Status values: planned, in progress, done, failed, skipped.
 | G0.2 | 3, 4 | `.gitignore`, README layout section | — | done | infra 5eb1064 |
 | G1.1 | 1, 2 | add the GVSoC submodule (infra commit with only that entry in `.gitmodules`) | `git submodule status` shows `soft_hier_release` | done | infra 5c6a71b |
 | G1.2 | 5 | `infra/env.sh`, `env.local.sh.example` | `env.sh --show` prints every variable | done | infra daa21be |
-| G1.3 | 8, 9 | GVSoC uv project, `setup.sh`; run it | `softhier_preparation` finished; toolchain present | planned | |
+| G1.3 | 8, 9 | GVSoC uv project, `setup.sh`; run it | `softhier_preparation` finished; toolchain present | blocked | infra 7251468 |
 | G1.4 | 10, 12 | `stamp.py`, `build_arch.sh` | `stamp.py check` passes after a build with `implementation/`'s arch | planned | |
 | G1.5 | 11 | `run_kernel_tests.sh`; read the kernel make targets and pass strings; run | `gemm`, `norm`, `acti`, `attn` PASS | planned | |
 | G1.6 | 7 | `infra/softhier/README.md` with measured times | — | planned | |
@@ -117,3 +117,27 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Paths under `$SHVLA_DATA`: none。
 - What to inspect: `bash infra/env.sh --show` 的输出。
 
+### G1.3 — GVSoC uv project and `setup.sh` (blocked)
+
+- Time: 2026-11-10。
+- What and why: 写 `infra/softhier/pyproject.toml`(Python 3.12,非 package)和 `setup.sh`(prerequisite check、submodule init、`uv sync`、`make softhier_preparation`、permalinks),然后运行。**状态 blocked:** apt 前置包缺失,需要 owner 批准 `sudo apt-get install`。我没有试任何绕过的办法,`softhier_preparation` 没有跑。
+- Commands: `uv sync`(在 `infra/softhier`,成功,生成 `uv.lock` 和 `.venv`);`bash infra/softhier/setup.sh` → exit 1。
+- Result: gcc/g++ 11.4.0(≥ 11.2)、cmake 3.22.1(≥ 3.18.1)、uv、wget、bzip2、xz 都满足。缺失的 apt 包,owner 需要运行:
+
+  ```
+  sudo apt-get install -y doxygen libsdl2-dev gtkwave autoconf automake texinfo libtool libsdl2-ttf-dev
+  ```
+
+  装完后再运行 `bash infra/softhier/setup.sh`(它会跳过已经完成的 step)。
+- Notes / deviations from the design:
+  - `pyproject.toml` 合并了 `requirements.txt`、`gapy/requirements.txt`、`core/requirements.txt`,取较严的下界(`pyelftools>=0.29`,`PyYAML>=6.0.1`)。去掉了 `argparse` 和 `dataclasses`:Python 3.12 的标准库里已有,PyPI 上的 `dataclasses` 只支持 Python < 3.7。`prettytable` 和 `pyelftools` 本来就在文件里。
+  - apt 检查在 README 的列表之外加了 `wget`、`bzip2`、`xz-utils`(Makefile 的 toolchain 下载和解压要用);这三个已安装。用 `dpkg-query` 的 Status 字段判断,不用 `dpkg -s` 的 exit code。
+  - Makefile 的 `SYSTEMC_INSTALL_DIR := $(PWD)/...` 读 shell 的 `PWD`,所以脚本用 `cd third_party/gvsoc && make`,不用 `make -C`;不传 `-j`(prerequisite 是串行的,内部是裸 `make`)。
+  - "已完成"的判断比设计更严:检查 `systemc_install/lib64/libsystemc.so`、`third_party/DRAMSys/libDRAMSys_Simulator.so` 和 toolchain 里的 `riscv*-gcc`,因为 Makefile 先 `mkdir -p` 再下载,下载失败后只检查文件夹会误判。路径都相对 GVSoC checkout。
+  - Makefile 的 `read -t 30`:只在 DRAMSys 预编译库的自检失败时才出现。stdin 为 `/dev/null` 时 `read` 立即失败,`user_input` 为空,而 Makefile 只在输入 `n` 时退出,所以默认是 yes:重新编译 DRAMSys(Makefile 估计约 40 分钟)。脚本在 preparation 之后 grep `Test libaray succeeded/failed` 来记录走了哪个分支。
+  - DRAMSys 重编译分支的 exit status 是最后一条命令 `make clean` 的,所以脚本在结束后检查 `.so` 是否存在。
+  - 没有跑 preparation,所以没有 wall time;disk use 仍是 40 MB(`du -sh third_party/gvsoc`)。shellcheck 没有安装。
+- Files changed: `infra/softhier/pyproject.toml`,`infra/softhier/uv.lock`,`infra/softhier/setup.sh`。
+- Commit: infra 7251468(`[G1.3] infra: GVSoC uv project and setup.sh`)。
+- Paths under `$SHVLA_DATA`: none(`softhier/setup/preparation.log` 还没有创建)。
+- What to inspect: `setup.sh` 的 prerequisite 部分和上面的 apt 命令。
