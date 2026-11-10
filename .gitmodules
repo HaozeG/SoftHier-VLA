@@ -6,3 +6,8 @@
 	url = https://github.com/gvsoc/gvsoc.git
 	branch = soft_hier_release
 	ignore = dirty
+[submodule "experiments/smolvla-e2e-baseline/softhier-mlir"]
+	path = experiments/smolvla-e2e-baseline/softhier-mlir
+	url = https://github.com/runwangdl/softhier-mlir.git
+	branch = main
+	ignore = dirty
