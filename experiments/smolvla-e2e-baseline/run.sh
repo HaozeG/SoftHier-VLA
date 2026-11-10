@@ -191,6 +191,14 @@ do_sim() {
     STAMP_LINE="$(echo "$STAMP_LINE" | tail -n 1)"
     apply_patches
 
+    # 2. simulator runtime library path. softhier-mlir's build_sw finds the GCC 14.2 toolchain under
+    # $SOFTHIER_HOME itself, and run_sim sets PATH, PYTHONPATH, SYSTEMC_HOME and the install/ library path for
+    # gapy; what it does not set is the DRAMSys directory, without which the simulator segfaults at start
+    # (exit 139, G3.1). gvsoc_env.sh is not sourced: it would activate the GVSoC venv, but the experiment
+    # venv's python must run softhier-mlir.
+    export SYSTEMC_HOME="$SOFTHIER_HOME/third_party/systemc_install"
+    export LD_LIBRARY_PATH="$SYSTEMC_HOME/lib64:$SOFTHIER_HOME/third_party/DRAMSys${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
     local app="$SHVLA_DATA/runs/$CONFIG/$RUN_NAME"
     mkdir -p "$app"
     local cmd=(python "${SIM_ARGS[@]}")
