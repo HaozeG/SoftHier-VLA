@@ -25,7 +25,7 @@ Status values: planned, in progress, done, failed, skipped, blocked (waiting for
 | G2.2 | 23, 24, 26, 27, 28 (0001–0005) | softhier-mlir submodule at `b11cd5f` (experiment commit), experiment uv project, configs, `run.sh`, patches | `run.sh published fetch` and `prepare` finish; patches apply | done | experiment 0c2fefe, ceb1249, e5af70f, ec9c6a7, 8c8efc8, 31795c1 (setuptools pin), the run.sh fixes commit and the log commits (see entry) |
 | G2.3 | — | crosscheck: `run.sh apply`; then in the LeRobot environment `python experiments/smolvla-e2e-baseline/softhier-mlir/softhier_mlir/frontend/smolvla_expert_ref.py --ckpt $SHVLA_DATA/smolvla_base --cams 1 --img-size 256 --out $SHVLA_DATA/golden/xc_ref.npz` (by file path, not `-m`, so the package `__init__` and its xdsl import are not loaded; the script itself imports only stdlib, numpy, torch and LeRobot), then `golden_ref.py --obs from-npz:$SHVLA_DATA/golden/xc_ref.npz --device cpu --crosscheck $SHVLA_DATA/golden/xc_ref.npz` | every key within tolerance (Verification Plan) | done | no infra commit (golden_ref.py unchanged); the log commit |
 | G2.4 | 16, 18 | libero mode; test (d), (e) | LIBERO ref written; tests pass | done | infra 59218d9; the log commit |
-| G2.5 | 13 | `infra/lerobot/README.md` | — | planned | |
+| G2.5 | 13 | `infra/lerobot/README.md` | — | done | infra 84ad868; the log commit |
 | G6b.1 | — | `libero_spatial` 10 × 10; settle OQ2–OQ4 | success rate with interval in LOG.md | planned | |
 | G3.0 | 25 | arch file; `build_arch.sh` with it | `stamp.py check` passes | planned | |
 | G3.1–G3.6 | — | ladder rungs 1–6; fork commits (33) when a fix is needed, owner first | each rung's pass column | planned | |
@@ -305,3 +305,13 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Commit: infra 59218d9(`[G2.4] infra: golden_ref libero mode, tests (d)(e)`);本 entry 在紧接着的 experiment commit 里。
 - Paths under `$SHVLA_DATA`: `golden/libero.npz`;`smolvla_libero/{vision_s1024,vlm_c1,vlm_c2,expert,e2e_c2_t1024}.npz`。
 - What to inspect: `golden_ref.py` 的 `libero_inputs`(链的顺序)和 `tests/test_golden_ref.py` 的 (d)(e);`np.load('$SHVLA_DATA/golden/libero.npz')['info_prompt']`、`info_state_raw`、`meta`。
+
+### G2.5 — `infra/lerobot/README.md` (done)
+
+- Time: 2026-11-10。
+- What and why: 写 `infra/lerobot/README.md`:setup(`uv sync`、`source env.sh`)、osmesa / libstdc++ 说明、LIBERO `config.yaml` 首次 import 的处理、内存 cap 命令、`golden_ref.py` 三个 mode 的用法(含 LIBERO 链的顺序)、`libero_eval.py` 的用法和已核实的 `lerobot-eval` flag、key 表(指向设计文档的 "Golden reference layout",只写了 LIBERO 的形状)、确定性设置、实测速度(golden ref 稳定约 9 s,eval 约 6.5 it/s)、测试命令。
+- Result: README 里的数字都来自上面的 LOG entry(G6a.1、G6a.2、G2.1、G2.4);没有新的测量。
+- Deviations: 无。
+- Files changed: `infra/lerobot/README.md`(infra 84ad868);`LOG.md`(本 entry,step list 状态)。
+- Commit: infra 84ad868(`[G2.5] infra: lerobot README`);本 entry 在紧接着的 experiment commit 里。
+- What to inspect: `infra/lerobot/README.md`。
