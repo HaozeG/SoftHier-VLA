@@ -17,7 +17,7 @@ Status values: planned, in progress, done, failed, skipped, blocked (waiting for
 | G1.2 | 5 | `infra/env.sh`, `env.local.sh.example` | `env.sh --show` prints every variable | done | infra daa21be |
 | G1.3 | 8, 9 | GVSoC uv project, `setup.sh`; run it | `softhier_preparation` finished; toolchain present | done | infra 7251468 |
 | G1.4 | 10, 12 | `stamp.py`, `build_arch.sh` | `stamp.py check` passes after a build with `implementation/`'s arch | done | infra bce9a99 |
-| G1.5 | 11 | `run_kernel_tests.sh`; read the kernel make targets and pass strings; run | `gemm`, `norm`, `acti`, `attn` PASS | planned | |
+| G1.5 | 11 | `run_kernel_tests.sh`; read the kernel make targets and pass strings; run | `gemm`, `norm`, `acti`, `attn` PASS | done | infra 74fbf46 |
 | G1.6 | 7 | `infra/softhier/README.md` with measured times | — | planned | |
 | G6a.1 | 14, 15 | LeRobot uv project and env; settle OQ1 | `smolvla_libero` loads at its revision | done | infra b3382eb |
 | G6a.2 | 17 | `libero_eval.py`; 1 task × 1 episode smoke run | `summary.json` written | done | infra 3d1607c |
@@ -325,3 +325,30 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Files changed: `infra/lerobot/README.md`(infra 84ad868);`LOG.md`(本 entry,step list 状态)。
 - Commit: infra 84ad868(`[G2.5] infra: lerobot README`);本 entry 在紧接着的 experiment commit 里。
 - What to inspect: `infra/lerobot/README.md`。
+
+### G1.5 — `run_kernel_tests.sh`, the four kernels (done)
+
+- Time: 2026-11-10。
+- What and why: 写 `run_kernel_tests.sh` 并运行 `gemm`、`norm`、`acti`、`attn`。
+- Makefile 读出的事实(`third_party/gvsoc/implementation/Makefile`,README 只写了 `make <Kernel>-run`):
+  - `<k>-run` 依赖 `<k>-pre`;`<k>-pre` = `<k>-clean <k>-cfg <k>-pld <k>-hs`;`<k>-hs` = `cfg=<implementation/config/arch/arch.py> app=<sw dir> make -C .. hs`,顶层 `hs` = `config` + 硬件 `all` + `sw`。**所以每个 kernel 目标都会重建硬件**(用 `implementation/config/arch/arch.py`,与 G1.4 同一个 arch),而不只是 preload。`<k>-run` 本身只跑 `pld=<preload.elf> make -C .. run`。
+  - 因此脚本不是 `make <k>-pre <k>-run`(会重复一次 pre),而是 `make <k>-pre`(不计时)再 `cd third_party/gvsoc && timeout $SHVLA_SIM_TIMEOUT make run pld=<preload.elf>`(与 `<k>-run` 的 recipe 相同),这样 2 h 上限只覆盖模拟器。这是对设计里 `make <k>-pre <k>-run` 的偏离。脚本结尾总是 `stamp.py write implementation/config/arch/arch.py`(失败时也写,因为硬件被重建了)。
+  - 软件目录:gemm `SummaGEMM`,norm `RMSNorm`,acti `Activation`,attn `FlatAttention`。
+  - **四个 `main.c` 都没有任何结果打印或检查**:只有 `flex_timer_start/end` 和 `flex_eoc(0)`;`*_preload.py` 里的 `O_golden` 只是占位,没有地方比较输出。所以没有"kernel 自己的 check 字符串"。Pass 规则:模拟器 exit 0 + 出现 `[Performance Counter]: Execution period is N ns`(与 softhier-mlir `PERF_RE` 相同的正则)+ 没有 `No entry found for burst`、`Executing illegal instruction`、`Received out-of-bound request`。这是对设计"kernel 自己的 check output"的偏离,没有编造字符串。
+- 第一次运行 FAIL(gemm,模拟器启动即报错):`libDRAMSys_Simulator.so: undefined symbol: ..sc_api_version_2_3_4..`。诊断:G1.3 的 `setup.sh` 没有设 `LD_LIBRARY_PATH`,Makefile 的 DRAMSys 自检 dlopen `libsystemc.so.2.3` 找不到,段错误,于是误判预编译库坏了,走了 40 分钟重编译;重编译用 DRAMSys 自带的 SystemC 2.3.4 头文件,与 2.3.3 的运行时不匹配。预编译的 `soft_hier/libDRAMSys_Simulator.so` 引用的是 `sc_api_version_2_3_3`,与我们的 SystemC 2.3.3 匹配。修:把预编译库拷回 `third_party/DRAMSys/`(重编译的留作 `libDRAMSys_Simulator.so.rebuilt-234`),设了 `LD_LIBRARY_PATH` 后自检 `a.out` 退出码 0(`close dram: 0`),没设时 139。`setup.sh` 现在在 make 之前 export 这个路径(以后不会再误重编译)。这不是模拟器模型 bug,不在 side-note 表里。
+- Command: `bash infra/softhier/run_kernel_tests.sh`(第二次运行,全部通过)。
+- Result(`sim ns` 来自 `[Performance Counter]: Execution period is N ns`;`build s` 是 `<k>-pre`,含 clean、config、preload、硬件增量重建和 SDK 编译;`sim wall s` 是 `make run`):
+
+  | kernel | result | sim ns | build s | sim wall s |
+  | --- | --- | --- | --- | --- |
+  | gemm | PASS | 21708 | 10 | 67 |
+  | norm | PASS | 13177 | 11 | 4 |
+  | acti | PASS | 8060 | 11 | 4 |
+  | attn | PASS | 298126 | 12 | 1280 |
+
+  - 硬件在未改动的树上增量重建加软件编译,每个 kernel 约 10–12 s;没有接近 2 h 上限(最长的 attn 约 21 min)。
+  - 之后 `stamp.py check` 输出 `stamp OK`;`du -sh third_party/gvsoc` 5.4 GB;日志 40–85 KB,不大。
+- Files changed: `infra/softhier/run_kernel_tests.sh`、`infra/softhier/setup.sh`(都在 74fbf46);本次 LOG.md(本 entry,step list 状态)。`third_party/gvsoc/third_party/DRAMSys/` 里的库是构建产物,不提交。
+- Commit: infra 74fbf46(`[G1.5] infra: run_kernel_tests.sh; setup.sh sets LD_LIBRARY_PATH for the DRAMSys self-test`)。
+- Paths under `$SHVLA_DATA`: `softhier/g1/<k>-pre.log`、`softhier/g1/<k>.log`。
+- What to inspect: `grep Performance $SHVLA_DATA/softhier/g1/*.log`;`gemm.log` 开头的命令行(`--trace=/chip/cluster_0/redmule`)。
