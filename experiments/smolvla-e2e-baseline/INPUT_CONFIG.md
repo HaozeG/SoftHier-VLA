@@ -22,3 +22,7 @@ Files under `$SHVLA_DATA/smolvla_libero/` (`run.sh libero prepare`): `vision_s10
 ## Caveat: `vlm_c2.npz` has 5 valid prompt tokens, the golden has 20
 
 `prepare-vlm` encodes its own default prompt (5 valid tokens of 48), while the golden and `e2e_c2_t1024.npz` use the task prompt (20 valid). Checked on the host (G4a): the prefix program emitted by `smolvla.emit_vlm` for 8 layers is **identical** (MLIR text, preload keys, shapes and data) with `vlm_c2.npz`'s mask and with the golden's 20-token mask. The G4a.2 timing input is therefore unaffected. G4b reads `e2e_c2_t1024.npz`, which carries the golden mask.
+
+## Status at the end of G5
+
+G4b (the full LIBERO chain, `e2e_c2_t1024.npz`) was **not run** (owner decision after R1: the vision phase is projected at 3.72 h against the 2 h limit). The LIBERO latency in [RESULTS.md](RESULTS.md) is the G4a estimate of 479.1 ms, composed from partial runs. The values in the table above (tokens, S_pad, prefix 177 with 149 valid, 50-step chunk at 20 Hz) are the ones the G4a runs used and match RESULTS. The `vlm_c2.npz` caveat applies only to G4a.2, where it was shown to have no effect on the timed program.
