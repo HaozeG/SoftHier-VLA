@@ -28,7 +28,7 @@ Status values: planned, in progress, done, failed, skipped, blocked (waiting for
 | G2.5 | 13 | `infra/lerobot/README.md` | — | done | infra 84ad868; the log commit |
 | G6b.1 | — | `libero_spatial` 10 × 10; settle OQ2–OQ4 | success rate with interval in LOG.md | done | the log commit |
 | G3.0 | 25 | arch file; `build_arch.sh` with it | `stamp.py check` passes | done | experiment 0c8e7a2 |
-| G3.1–G3.6 | — | ladder rungs 1–6; fork commits (33) when a fix is needed, owner first | each rung's pass column | G3.1 flex_alloc fix done (infra 22d549c); rung 1 FAIL, stopped; power-capture theory refuted, K-tile-256 shapes still exceed the memory cap (see the G3.1 follow-up entry); rungs 2-5 not run | experiment (run.sh + LOG), infra 18ad903, infra 2088d59 (GVSoC d42c382) |
+| G3.1–G3.6 | — | ladder rungs 1–6; fork commits (33) when a fix is needed, owner first | each rung's pass column | G3.1 flex_alloc fix done (infra 22d549c); iDMA fix applied (GVSoC 0e4d719) and verified; rung 1 PASS (7/7, timing +46 % vs published on the 16-cluster shapes); rung 2 FAIL/STOPPED: `gemm1024_summa.mlir` memory blow-up (8 GB in 18 s), `siglip_encoder_layer.mlir` killed at the 8G cap after 502 s (see G3.1-rung2); rungs 3-5 not run | experiment (run.sh + LOG), infra 18ad903, infra 2088d59 (GVSoC d42c382) |
 | G3.7 | 34 | `gate.py g3` on the rung-6 run | gate outcome recorded (PASS or MISS with values) | planned | |
 | G4a.1–G4a.4 | 31 | `run.sh libero prepare`; G4 table steps; `gate.py g4a`; INPUT_CONFIG.md | projection per phase recorded; R1 decision if any phase > 2 h | planned | |
 | G4b | — | full LIBERO chain | every phase finished or the R1 stop recorded | planned | |
@@ -530,3 +530,47 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - 状态:**尚未重编、尚未跑任何仿真**(owner 要重启 WSL,按指示暂停)。此时 `stamp.py check` 会 MISMATCH(pulp diff 已变),这是预期的。
 - 下一步(新 agent 接手):(1) `free -g` 确认 >=14 GB;(2) `infra/softhier/build_arch.sh experiments/smolvla-e2e-baseline/arch/softhier_mlir_arch.py`(增量,`-j8`),`stamp.py check` 通过,确认没有 `SOFTHIER_MODEL_DIR` 指向 deeploy `.so`;(3) `run.sh published sim fix-check -- tests/gvsoc/run.py gemm --shapes 128x128x256:128,128,256`(预期 PASS,ROI 约 6174 ns),再 `256x256x256`(约 13136 ns);(4) rung 1-5 按设计表顺序。
 - What to inspect: 重编后 ROI 是否与 diag3 的 `.so` 交换结果(6174 / 13136 ns)一致;peak memory 应几百 MB。
+
+### G3.1-rebuild — rebuild after the iDMA fix, fix-check, rung 1 (`gemm`): PASS
+
+- 做了什么:`unset SOFTHIER_MODEL_DIR`,`build_arch.sh experiments/smolvla-e2e-baseline/arch/softhier_mlir_arch.py`(增量)用了 **7.4 s**(`make hw` 7 s),`stamp.py check` 通过(stamp OK)。`SHVLA_SIM_MEMMAX=8G` 导出,每次跑之前 `free -g` 可用 >= 11 GB。
+- **fix-check(验证修复)**:`128x128x256:128,128,256` PASS,ROI **6174 ns**(与 diag3 的 `.so` 交换结果一致),wall 3.9 s,peak **578 MB**;`256x256x256` PASS,ROI **13136 ns**(一致),wall 5.9 s,peak **350 MB**。重编后的真实 tree 与 `.so` 交换结果逐 ns 相同。
+- **Rung 1** (`run.sh published sim rung1-gemm -- tests/gvsoc/run.py gemm`,所有默认 shape):exit 0,**7/7 PASS**,wall 合计约 96 s(各 shape wall 之和,不是 run.sh 总 wall),peak **616 MB**,oom 0。
+
+| shape | ROI ns | wall s | published |
+| --- | --- | --- | --- |
+| 256x256x256 | 13136 | 3.2 | docs/DSE.md: 14.7-16.7 us(1 cluster) |
+| 256x768x192:256,256,192 | 32048 | 3.2 | - |
+| 512x768x768:256,256,256 | 131955 | 8.4 | 138.9 us(gemm test) / 150.8 us(ubench) |
+| 256x256x256:256,256,256,0 | 13108 | 3.4 | - |
+| 256x256x512:256,256,256,1,1 | 19595 | 4.9 | - |
+| 1024x768x768:256,256,256,1,0,all | 177462 | 14.5 | 120.1 us |
+| 1024x3072x768:256,256,256,1,0,all | **759705** | 58.8 | **520.5-520.8 us** (docs/DSE.md, SIMULATOR_NOTES.md) |
+
+- **Known deviation(记录大小,没有修)**:16 个 cluster 的大 shape 比 published 慢约 **+46 %**(1024x3072x768: 759705 vs 520521 ns;1024x768x768: 177462 vs 120134 ns,+48 %),单 cluster 的 shape 持平或略快(512x768x768 -5 % 至 -12 %,256^3 在 published 范围内或略快)。形态指向多 cluster 的 DMA/互连时序,不是算术。这个偏差在修复之前就存在:diag3 里 `.so` 交换的 759705 ns 完全一致,所以不是重编引入的;deeploy 全套仿真器的 shape 1-6 也比 published 慢,说明与 release 的 GVSoC 补丁集(side-note table 里私有 `.patch` 缺失)有关,不是这次的 iDMA 修复。该偏差会让后面各 rung 的 sim time 同样偏长,应该算 known deviation 而不是 failure(rung 1 的 pass 列只要求所有 shape PASS)。
+- What to inspect: (1) 重编后 ROI 6174/13136 与 diag3 完全一致;(2) rung 1 的 7 个 PASS 和 peak 616 MB(不再有内存膨胀);(3) 最后两行 16 cluster 的 +46 % / +48 % 偏差,是否要在 G3 gate 的 timing 判定里按 known deviation 处理。
+- 复现:`run.sh published sim rung1-gemm -- tests/gvsoc/run.py gemm`(run dir `$SHVLA_DATA/runs/published/rung1-gemm`)。
+
+### G3.1-rung2 — rung 2 (`mlir examples/*.mlir`): FAIL, STOPPED (R2: memory-cap kills, not a known side-note item)
+
+- 命令:`run.sh published sim rung2-mlir -- tests/gvsoc/run.py mlir examples/{add_test,gemm1024_summa,gemm256,gemm512,gemm512_linalg,gemm_nonconst,mlp,mlp_linalg,siglip_encoder_layer}.mlir`(`examples/*.mlir` 展开的 9 个文件)。exit **4**(内存上限 kill,oom_kill events 2),peak 8192 MB。
+- 结果:
+
+| example | result | ROI ns | wall s | self-check |
+| --- | --- | --- | --- | --- |
+| add_test | PASS | 910393 | 4.3 | ADD_TEST_CHECK ok=65536/65536 |
+| gemm1024_summa | **FAIL** (killed at the 8G cap) | - | 21.0 | has GEMM_CHECK in the generated main |
+| gemm256 | PASS | 100462 | 6.4 | none (runs to the end) |
+| gemm512 | PASS | 86408 | 3.8 | GEMM512_CHECK 262144/262144 |
+| gemm512_linalg | PASS | 86408 | 3.9 | 262144/262144 |
+| gemm_nonconst | PASS | 86206 | 3.8 | 262144/262144 |
+| mlp | PASS | 1064054 | 5.8 | MLP_CHECK 65536/65536 |
+| mlp_linalg | PASS | 1064054 | 5.6 | 65536/65536 |
+| siglip_encoder_layer | **FAIL** (killed at the 8G cap) | - | 501.8 | - |
+
+  所以 7 个 PASS(6 个有 self-check PASS:add_test, gemm512, gemm512_linalg, gemm_nonconst, mlp, mlp_linalg;1 个没有 self-check 的 gemm256 build-and-run-to-end),2 个 FAIL。
+- **gemm1024_summa**:单独重跑(`rung2-summa`,同一个 8G 上限)再次 18 s 内涨到 8 GB 被 kill,没有 ROI,没有任何错误信息,也不是 iDMA 修复前已知的那个 FSM 挂死的同一个形态?症状(模拟器空转并吃内存)与 K-tile-256 一样,但这次 rung 1 / mlp / gemm512 里用到的 iDMA 路径都正常,SUMMA 额外用 cluster 间 multicast DMA(FlooNoc)。**根因未验证**。假设:SUMMA 走的某条 cluster-to-cluster / multicast 路径上还有一个和 `IDmaBe::update()` 同类的漏唤醒(`transfer_regulation` 队列改动的另一处,或 floonoc 的 multicast),待用 `--trace=/chip/cluster_0/idma/be` 和 floonoc 路径的 trace 确认。我想抓 trace 时发现 `cap.py` 只适配 `gemm`,`mlir` 路径要通过 run.sh 的环境(`/opt/x86-ort/run`),没有继续。
+- **siglip_encoder_layer**:502 s 后到 8G 上限。published 是 17,851,422 ns 模拟、wall 447 s(docs/SIMULATOR_NOTES.md:320)。注意:rung 1 的内存是 350 MB(6 us)到 616 MB(760 us),随模拟时间大致线性涨(约 0.3 MB/us);外推 17.85 ms 约 6-7 GB 加上程序本身,所以这个 kill 可能是**真实需求略超 8G 的缓慢增长(泄漏),不一定是挂死**。未区分。这个线性增长同样意味着 rung 3(5.36 ms published)约 2 GB、完整链 119 ms 会远超 8G,需要 owner 决定。
+- 未执行:rung 3-5(按 "stop at the first unresolved failure")。
+- 提议(待 owner):(1) 对 `gemm1024_summa` 抓 iDMA be + floonoc trace(<=50 MB)找最后一个 stall;若同类漏唤醒则在 `gvsoc_pulp.patch` + 补丁后的工作树里补一行;(2) 查 GVSoC 里随模拟时间线性增长的内存(trace/stat buffer 或 event 记录);(3) 或 owner 批准把 `SHVLA_SIM_MEMMAX` 对 siglip_encoder_layer 提高到 13G 做一次区分(违反本次 8G 硬限,所以没做);(4) rung 3-5 可以先跑(它们预计在 8G 内:rung 3 约 2 GB),但按指示没有继续。
+- What to inspect: `rung2-mlir` / `rung2-summa` 的 record block(exit 4,oom_kill);siglip 的 peak 8192 MB 与 502 s;上表里 7 PASS / 2 FAIL;summa 在 18 s 内涨 8 GB 的速度(~450 MB/s,远快于线性增长,所以是挂死/空转而不是泄漏)。
