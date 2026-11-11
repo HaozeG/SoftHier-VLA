@@ -1,0 +1,24 @@
+[peek] kk=0 after-wait y=b647 part=bec8f900
+[peek] kk=1 after-wait y=b57c part=3d4a4f40
+[peek] kk=2 after-wait y=b21d part=3e1b6000
+[peek] kk=3 after-wait y=c000 part=3e43abf8
+[peekX] 0 be14 b371 33c6 b77e 3bb3 2b78 30c9 a9b0 3b34 3cfb 3814 bf50 bca2 2ff2 3fd5 becd
+[peekW] 0 a600 2400 a000 2400 2a00 ab00 ac00 2000 0000 2000 2600 2000 ab00 ab00 a600 2400
+[peekX] 16 ba16 3cf4 379c 36a2 3f56 3894 b937 3346 3427 3c54 35aa 3c0a 2d28 b7d2 be4d 3eab
+[peekW] 16 2800 2400 2c00 2600 a000 a900 2600 2800 aa00 2900 a000 2a00 2b00 a000 a900 2c00
+[peekX] 32 3cf4 3c7b b673 b3be 3cce 3915 b9b5 b73c aef6 bacc c06a be8d 34a2 af7b 3c5a 9f34
+[peekW] 32 2600 ab00 2c00 a900 0000 2900 2900 a400 a600 0000 2600 2400 a900 a800 2000 2b00
+[peekX] 48 b9ef 3c23 b5b8 b51f 3d33 3839 3e32 3dbc 3e94 3d6a 3a6e 3c9b 3ee3 37f0 28d8 3766
+[peekW] 48 aa00 ac00 a000 a900 ac00 2a00 a400 0000 ac00 2600 a400 2a00 ac00 2000 a400 a800
+[peekX] 64 b176 bcd5 361a bacc 28d8 b4bb 3fd6 b9f3 3b8e 38fe baf6 b3cc 3c52 3e4d bb70 3e14
+[peekW] 64 ac00 0000 a000 2600 ab00 a400 0000 aa00 aa00 a400 2000 2400 a800 a400 2800 aa00
+[peekX] 80 3314 3d1c 3d8a bcc5 b877 39a8 b516 bbf3 c099 bf55 3878 b4c0 38b8 3bce b77e 2646
+[peekW] 80 a000 a400 2a00 2600 2000 a000 ac00 a900 2900 2000 a800 2a00 ac00 2600 0000 a000
+[peekX] 96 bf77 413b 3c7a 38b3 3469 3f35 bdea 3cce a9d8 be4a 3a73 3cb6 3e8e b9a1 3866 3a15
+[peekW] 96 a800 2900 2900 aa00 2000 2c00 ab00 2900 2b00 a900 a000 2000 a800 a000 2900 a600
+[peekX] 112 3fd5 b080 403b ba60 ba60 b994 28b0 bdd2 bbdf 3d52 be14 2d28 3d1a 3c95 334a 40eb
+[peekW] 112 2400 2600 a900 ab00 ab00 2c00 2600 2b00 0000 a600 ab00 2800 2c00 2600 2400 2400
+[peek] kk=4 after-wait y=c146 part=bf236224
+[peek] kk=5 after-wait y=c188 part=be050880
+[peek] pre-store y=c188
+[peek] post-store hbm=c188 tcdm=c188

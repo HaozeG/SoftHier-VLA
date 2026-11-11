@@ -1,0 +1,59 @@
+diff --git a/runtime/sh_gemm.inc.c b/runtime/sh_gemm.inc.c
+index e2baa59..441dc08 100644
+--- a/runtime/sh_gemm.inc.c
++++ b/runtime/sh_gemm.inc.c
+@@ -50,6 +50,15 @@ static inline void sh_store_block_sync(uint64_t hbm, uint32_t l1_off, uint32_t r
+     bare_dma_wait_all();
+ }
+ 
++
++/* diag8 peek (patch 0007, temporary): value of Q[23,273] at each K-tile boundary of cluster 0's first sh_gemm into hbm 790528 */
++static inline uint32_t sh_dbg_h2f(uint16_t h) {
++    uint32_t s = (uint32_t)(h >> 15) << 31, e = (h >> 10) & 31, m = h & 1023, o;
++    if (e == 0) { float f = (float)m * (1.0f / 16777216.0f); union { float f; uint32_t u; } c; c.f = f; return s | c.u; }
++    o = s | ((e + 112) << 23) | (m << 13); return o;
++}
++static inline float sh_dbg_u2f(uint32_t u) { union { float f; uint32_t u; } c; c.u = u; return c.f; }
++
+ int sh_gemm(uint64_t x, uint64_t w, uint64_t z, uint32_t M, uint32_t N, uint32_t K,
+             uint32_t ldx, uint32_t ldw, uint32_t ldz, const sh_gemm_cfg *cfg, uint32_t cluster) {
+     const uint32_t cid = flex_get_cluster_id(), P = ARCH_NUM_CLUSTER_X * ARCH_NUM_CLUSTER_Y;
+@@ -72,6 +81,8 @@ int sh_gemm(uint64_t x, uint64_t w, uint64_t z, uint32_t M, uint32_t N, uint32_t
+     const uint32_t y  = w1 + wb;
+     const uint32_t MT = M / c.tm, NT = N / c.tn, KT = K / c.tk;
+     const redmule_compute_format_t fmt = sh_redmule_fmt[c.fmt & 3];
++    const int dbg = (cid == 0 && z == hbm_addr(790528) && c.tm == 256 && c.tn == 384);
++    const uint32_t dbg_off = (23 * c.tn + 273) * 2;
+ 
+     if (first) flex_redmule_config(c.tm, c.tk, c.tn);
+ 
+@@ -97,6 +108,19 @@ int sh_gemm(uint64_t x, uint64_t w, uint64_t z, uint32_t M, uint32_t N, uint32_t
+                     sh_load_block_async(wnxt, w + ((uint64_t)(kk + 1) * c.tk * ldw + col * c.tn) * 2, c.tk, c.tn, ldw);
+                 }
+                 if (first) { flex_redmule_trigger(xcur, wcur, y, fmt); flex_redmule_wait(); }
++                if (first && dbg) {
++                    const volatile uint16_t *xp = (const volatile uint16_t *)(uintptr_t)local(xcur), *wp = (const volatile uint16_t *)(uintptr_t)local(wcur);
++                    float acc = 0.0f;
++                    for (uint32_t k = 0; k < c.tk; ++k) acc += sh_dbg_u2f(sh_dbg_h2f(xp[23 * c.tk + k])) * sh_dbg_u2f(sh_dbg_h2f(wp[k * c.tn + 273]));
++                    union { float f; uint32_t u; } a; a.f = acc;
++                    sh_printf("[peek] kk=%u after-wait y=%04x part=%08x\n", kk, (uint32_t)*(const volatile uint16_t *)(uintptr_t)local(y + dbg_off), a.u);
++                    if (kk == 3) {
++                        for (uint32_t g = 0; g < c.tk; g += 16) {
++                            sh_printf("[peekX] %u %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x\n", g, xp[23*c.tk+g], xp[23*c.tk+g+1], xp[23*c.tk+g+2], xp[23*c.tk+g+3], xp[23*c.tk+g+4], xp[23*c.tk+g+5], xp[23*c.tk+g+6], xp[23*c.tk+g+7], xp[23*c.tk+g+8], xp[23*c.tk+g+9], xp[23*c.tk+g+10], xp[23*c.tk+g+11], xp[23*c.tk+g+12], xp[23*c.tk+g+13], xp[23*c.tk+g+14], xp[23*c.tk+g+15]);
++                            sh_printf("[peekW] %u %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x\n", g, wp[g*c.tn+273], wp[(g+1)*c.tn+273], wp[(g+2)*c.tn+273], wp[(g+3)*c.tn+273], wp[(g+4)*c.tn+273], wp[(g+5)*c.tn+273], wp[(g+6)*c.tn+273], wp[(g+7)*c.tn+273], wp[(g+8)*c.tn+273], wp[(g+9)*c.tn+273], wp[(g+10)*c.tn+273], wp[(g+11)*c.tn+273], wp[(g+12)*c.tn+273], wp[(g+13)*c.tn+273], wp[(g+14)*c.tn+273], wp[(g+15)*c.tn+273]);
++                        }
++                    }
++                }
+                 if (dm && kk + 1 < KT) bare_dma_wait_all();
+             } else {
+                 if (first) { flex_redmule_trigger(x0, w0, y, fmt); flex_redmule_wait(); }
+@@ -109,7 +133,9 @@ int sh_gemm(uint64_t x, uint64_t w, uint64_t z, uint32_t M, uint32_t N, uint32_t
+             }
+             flex_intra_cluster_sync();
+         }
++        if (first && dbg) sh_printf("[peek] pre-store y=%04x\n", (uint32_t)*(const volatile uint16_t *)(uintptr_t)local(y + dbg_off));
+         if (dm) sh_store_block_sync(zt, y, c.tm, c.tn, ldz);
++        if (dm && dbg) sh_printf("[peek] post-store hbm=%04x tcdm=%04x\n", (uint32_t)*(const volatile uint16_t *)(uintptr_t)(zt + (23 * ldz + 273) * 2), (uint32_t)*(const volatile uint16_t *)(uintptr_t)local(y + dbg_off));
+         flex_intra_cluster_sync();
+     }
+     if (cluster == SH_ALL) flex_global_barrier_xy();

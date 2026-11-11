@@ -754,3 +754,46 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - **Y 清零实验(未保留).** 假设:偏差 ≈ ±2.0 恰好是 x 的取值范围(LCG ±16 × 0.125),-511 像 layernorm 留下的 fp32 参数被当成 fp16 读,即 Y tile 里有几个元素没被 iDMA(ZOMEM)清零,带着 TCDM 的残留值进了累加。临时补丁(`sh_gemm.inc.c`:iDMA 清零之后再用所有 core 把 Y 写零并同步)跑 rung c(`diag7-corezero`):QG/KG/VG、OF、H/G/OUT 与不加时**逐位相同**(Q 5、K 3、V 1)。所以不是 Y 清零不完整;该临时补丁已删除(`run.sh apply` 回到 6 patches)。
 - **剩下的.** 误差是确定的、加性的(≈ ±2 或 -511)、只在一个 cluster 的输出 tile 内个别元素、不是单个乘积能解释(≤0.19)、不是坏的 X/W 输入元素(那会污染整行/整列)、不是 Y 初值、不是 add_bias。还没有排除:RedMulE 内部累加/写回的瞬态(GVSoC `light_redmule`)、输出 tile 经 `sh_store_block_sync`(256 个 1-D iDMA,`sh_gemm.inc.c:47-51`)写回 HBM 时与其它写的交叠、以及 dump 之外的读取时机。这些都需要 GVSoC 侧的 trace 才能继续,按规则 STOP。推荐下一步(需 owner 批准):对 cluster 0 的 Q gemm 做 `--trace` 的 RedMulE 记录,看坏元素所在输出行块的 RedMulE 事件是否异常;或在 GVSoC 里对该 GEMM 的 Y 读回做 checksum。
 - **`layer_reference` 的修正(grep 的结果).** 调用者有两个:`tests/gvsoc/run.py:307`(`run.py siglip`)对 ref 里**每个** key 要求设备打印,缺了就 `MISSING` 并判 FAIL;`:346`(`siglip-mlir`)才跳过没打印的 tag。所以 0006 的初版(无条件返回多余的 key)会破坏 `run.py siglip`。已改:多余的 key 只在 `SHVLA_SIGLIP_H_DUMPS` 设置时返回,默认返回的 key 集合和顺序与未打补丁相同(`X LN1 Q K KT P0 V O0 O6 O H G OUT`,已验证);补丁文件重新生成,`run.sh apply` 6 patches。默认 rung c(`diag7-default`)结果与 diag6 一致:H 16.3091 / G 8959.3789 / OUT 8174.5742,exit 1,wall 49.5 s,ROI 1526876 ns。
+
+### G3.2-diag8 — Q[23,273] 的写者追踪:**RedMulE 模型本身写错**(verdict a)。根因 = GVSoC `light_redmule.cpp` 的 `float_to_fp16` 在 fp16 次正规范围(|v| < 2^-14)的转换 bug;输入 TCDM 正确、没有额外写者、HBM 与 TCDM 一致;未改 GVSoC(STOP,给出 proposal)
+
+- 摘要:owner 批准做 simulator 写 trace。结论:Q[23,273] 的坏值 **-2.0(0xc000)是 cluster 0 的 RedMulE 在第 4 个 K-tile(kk=3)的输出**。该 K-tile 的真实累加结果是 **+4.5657e-5**(落在 fp16 次正规范围,< 6.1035e-5),GVSoC `float_to_fp16` 的 `exponent <= 0` 分支位移写错(`>> (1 - exponent)`,应为 `>> (14 - exponent)`),mantissa 溢出到指数/符号位,得到垃圾 0xc000。bit-exact 复现:Python 按模型逻辑(fp32 顺序 FMA + 该 `float_to_fp16`)算 kk=3,得到 `0xc000`;用修正后的位移得到 `0x02fe`(= 4.5657e-5,等于精确值)。其它三个坏元素(Q/K/V)同类(次正规/近零的输出被误转),与 diag7 的"±2.0 / -511 的孤立元素、随 tiling 移动、纯 GEMM 干净(数据不同,几乎没有 |v|<6e-5 的累加终值)"全部吻合,但这三个只是推断,没有逐个 peek。
+- **地址映射.**
+  - HBM:Q = `hb3 = sh_hbm_addr(790528)`,fp16,ld=768。`Q[23,273]` = 0xc0000000 + 790528 + (23*768+273)*2 = **0xc00c9c22**(行 23 起点 0xc00c9a00,iDMA 第 56 个 1D txn:src 0x54500 → dst 0xc00c9a00,size 0x300)。
+  - TCDM(cluster 0,`sh_gemm.inc.c` 布局 `X0|X1|W0|W1|Y`,tm=256 tn=384 tk=128 pipeline=1):xb=0x10000,wb=0x18000,x0=0,x1=0x10000,w0=0x20000,w1=0x38000,**y=0x50000**(单缓冲,K-tile 间原地累加)。`Y[23,273]` 的偏移 (23*384+273)*2 = 18210 → **TCDM 0x54722**。
+  - bank:bank 宽 **8 B**(不是 64 B:`Building Memory size 0x4008` = 0x100000/64 + 8;`hwpe_interleaver.cpp:55-58` 同一公式),64 bank,`bank = (addr>>3)&63`,`bank_off = ((addr>>9)<<3) | (addr&7)`。所以 0x54722 → **`/chip/cluster_0/tcdm/bank_36`,bank 内 offset 0x1518(8 B 字,元素在字内 +2)**。(第一版我按 64 B 算成 bank_28,advisor 指出后改正;pilot 里的 bank_28 0x1400 = 0x500E0,是 Y 清零的第一个字。)
+- **trace 命令与 filter**(无源码改动;`diag8/trace_wrap.py` 在进程内 monkeypatch `softhier_mlir.sim.gvsoc.subprocess`,给 gapy 加 `--trace=`,**流式过滤**,没有被过滤的行不落盘;规则 `[路径子串, 保留 regex, cap, 起, 止(ps)]`;`D8_STOP_PS` 到点 kill gapy;输出上限 50 MB)。run 1(`diag8/run1.sh`,rung c,`SHVLA_SIM_MEMMAX=8G`,看到 187 k 行,保留 265 行 / 72 KB,wall 约 20 s,RSS peak 520 MB):
+  - `--trace=/chip/cluster_0/tcdm/bank_36/trace`,保留 `offset: 0x15[0-3][0-9a-f],`(该字所在的 64 B 窗口)。
+  - `--trace=/chip/cluster_0/pe[0-2]/insn` 与 `fp_ss[0-2]/insn`:保留访问 TCDM 的 store/amo:(a) `PA:(000|300)5472[0-7]`(该字),(b) 330-363.5 us 窗口里所有 TCDM store(只为判断窗口内有没有核写 TCDM)。insn trace 带 `PA:` 地址和数据寄存器值,所以核的写者可以直接定位。
+  - `--trace=/chip/cluster_0/redmule/trace`、`.../idma/fe/trace`:只留 `Finished` 行(默认级别,不开 LEVEL_TRACE,否则每个 TCDM req 都打印)。
+  - 注意:gvsoc trace 行首第一个时间戳在个别行有 1 ms 偏移,窗口/停止改用第二个字段(ns)。`Memory access` 行只有 offset/size/is_write/op,**没有数据也没有 initiator**;iDMA/RedMulE 的 trace 也不带数据。所以 trace 只能回答"谁、何时访问",值要靠 peek(见下)。
+- **访问时间线(bank_36 offset 0x1518 = TCDM 0x54720,含 Q[23,272..275])**,时间 ns(Q GEMM:iDMA 清零 333.7 us,RedMulE 6 个 op 336.7-358.8 us,iDMA 存储 358.8-362.1 us):
+  - 333706:W(8 B) —— iDMA ZOMEM 清零 `Y` 的 1D txn(Finished 334054,src 0x18000000 → dst 0x50000,size 0x20000)。
+  - 每个 K-tile 一次 R 一次 W(RedMulE,Y 读-改-写):kk0 R 337508 / W 338968;kk1 R 341209 / W 342668;kk2 R 344914 / W 346374;kk3 R 348616 / W 350075;kk4 R 352321 / W 353781;kk5 R 356004 / W 357412。
+  - 359123:R(8 B)—— iDMA 存储读出(txn 33-288 之一,Finished 362149)。
+  - 窗口 0x1500-0x153f 共 112 次访问 = 8 (清零) + 6x16 (RedMulE) + 8 (iDMA 读),**没有任何额外访问**;cluster 0 的 3 个核 + 3 个 FP 子系统在 330-363.5 us **没有任何 TCDM store**(363.08 us 起才有 `sh_rowop` 的 `fsw` 到 0x5000-0x58xx,那是下一个 op `add_bias`,而且在 Q 存储完成之后)。别的 cluster 的写会作为额外 bank 访问出现,没有。**所以不是 (c)。**
+- **值 peek(临时补丁,`diag8/peek-q23-273.patch`,run.sh 重新 apply 后已清掉,没进 patches/)**:cluster 0、首个 `sh_gemm`(z = hbm 790528)里,每个 `flex_redmule_wait()` 之后由 first core 打印 Y[23,273] 的 fp16 位、并用核在 fp32 里按 TCDM 里的 xcur/wcur 算这个 K-tile 的部分和(kk=3 另外打印 X[23,0..127]、W[0..127,273] 的 fp16 位,`diag8/peek_output.txt`);dm core 在存储后读 TCDM 和 HBM。
+  | kk | Y 之后(fp16) | 值 | 核用 TCDM 输入算的部分和 | 差值 |
+  | --- | --- | --- | --- | --- |
+  | 0 | b647 | -0.39233 | -0.39252 | -0.39233 |
+  | 1 | b57c | -0.34277 | +0.04939 | +0.04956 |
+  | 2 | b21d | -0.19104 | +0.15173 | +0.15173 |
+  | **3** | **c000** | **-2.00000** | +0.19109 | **-1.809(应为 +0.19109)** |
+  | 4 | c146 | -2.63672 | -0.63822 | -0.63672 |
+  | 5 | c188 | -2.76563 | -0.12992 | -0.12891 |
+  "差值" = 本 op 的 Y 变化(fp16 取整,约 1e-3),除 kk=3 外都和部分和一致(kk=0 的部分和 -0.39252 对 Y 变化 -0.39233 同样一致)。kk=3 的精确结果:`y0 + Σ x*w` = -0.19104 + 0.19109 = **+4.5657e-5**,RedMulE 给出 -2.0。之后 kk=4/5 的增量都正确(只是在错的 -2.0 上累加),pre-store TCDM = c188 = post-store HBM(0xc00c9c22 读回 c188):**TCDM 与 HBM 一致,存储没问题,不是 (b)**。
+  - 周边证据:inputs 正确(部分和用 TCDM 里的 X/W 算,与 y 的其它 K-tile 增量吻合);kk=3 之前 Y 正确;trace 里没有额外写者。所以只剩 RedMulE 在 kk=3 的 op 内部算错。
+- **根因(GVSoC,未改).** `third_party/gvsoc/soft_hier/flex_cluster/light_redmule.cpp:1248-1262` `float_to_fp16`:
+  ```
+  int32_t exponent = floatBits.parts.exponent - 127 + 15;
+  if (exponent <= 0) {                       // fp16 subnormal / underflow
+      if (exponent < -10) return sign;
+      mantissa = (floatBits.parts.mantissa | 0x800000) >> (1 - exponent);   // <-- 位移错
+      return sign | mantissa;                // 且没有掩码,高位溢出到指数/符号
+  }
+  ```
+  fp16 次正规尾数 = ((1<<23)|m23) >> (14 - exponent)(exponent <= 0)。现在的 `1 - exponent` 少移 13 位,结果的高位进入指数和符号位。`matmul_fp16`(:1284-1295)每个输出元素在 fp32 里累加再 `float_to_fp16` 一次,所以任何 |终值| < 2^-14 且非零的输出都会变成垃圾(大小/符号随尾数位而定,本例得到 0xc000 = -2.0,V 里得到 ~-512)。这也解释了为什么只在 siglip 里出现:LN 输出有正有负,K 维累加在部分 K-tile 终点会相消到接近 0,而前面纯 GEMM 的数据(X 为 0..0.0156 非负、W ±2)很少落到 |v|<6e-5。坏元素集合随 tiling 变是因为每个 K-tile 的 Y 终值(RedMulE 每 op 写一次)取决于 tile 边界。同一函数的 `fp16_to_float`(:1267-1275)对 fp16 次正规输入设 exponent=0 把它当成 fp32 次正规(值约 1e-40,等于 0),误差 <6e-5,也该一并改(次正规:`ldexp(m, -24)`)。另外 `float_to_fp16` 是截断而不是 RTNE,与 numpy 差 1 ulp 量级,不是本问题。
+  - **Proposal(未应用,GVSoC 源码,按规则 STOP):** (1) `>> (14 - exponent)`(并保持 `exponent < -10` 的下限);(2) `fp16_to_float` 加次正规分支;(3)(可选)改 RTNE。bit 级验证(`diag8/emul.py`):用 kk=3 的真实 X/W/Y,现模型 → 0xc000;改位移后 → 0x02fe = 4.5657e-5(精确值)。**不需要也不能**在 softhier-mlir 侧补(RedMulE 的数值转换在 GVSoC 里;只有用 FP32 acc 之类的 cfg 才能绕过,但 `flex_redmule` 本身是 fp16 输出)。不动 GVSoC 就无法修复,所以这次没有跑回归 / rung 1/2/3-5。
+- **没有 fix 应用:** patches 仍是 6 个(`run.sh apply` 确认);0007 是一次性 peek 补丁,存放在 `diag8/` 做记录,没有放进 `patches/`。
+- **下一步(需 owner 批准):** 在 GVSoC 私有 patch 上做 (1)(2),重建 RedMulE model(`SOFTHIER_MODEL_DIR` 指向单独的 model 目录,不动共享 install),跑 rung c(SHVLA_SIGLIP_H_FULL),预期 Q/K/V 0 bad,H/G/OUT 恢复;然后全回归(rung 1: 7 shapes,1024x3072x768:256,256,256,1,0,all ≈ 520114 ns;rung 2: 9/9;rung 3-5)。同时这个 bug 影响所有用 RedMulE fp16 的 GEMM(包括之前"通过"的 SmolVLA 阶段:64 点采样看不到)——建议修复后重新验 G3.2 之前的结果。
+- 文件:`experiments/smolvla-e2e-baseline/diag8/{trace_wrap.py, run1.sh, emul.py, peek-q23-273.patch, peek_output.txt, run1_bank36_idma_redmule.trace.txt}`。Logs:`~/.cache/softhier-vla/runs/published/diag8-{pilot,pilot2,tl,run1,peek,peek2}/`。运行次数:2 次 pilot(gemm,18 s)+ tl(siglip,trace redmule/idma,73 s)+ run1 + 2 次 peek。Simulators 全部已停止;memory peak ≤ 870 MB(cap 8G),oom 0。
