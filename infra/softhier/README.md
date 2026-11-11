@@ -54,6 +54,17 @@ rebuilds by itself. After any change to the arch file or the simulator sources, 
 checkouts; this shows up as a diff and is part of the stamp. Untracked files (build products) are
 not covered.
 
+## Ideal HBM
+
+The local GVSoC branch `shvla/soft_hier_release` has a switch that stock GVSoC lacks: with
+`SOFTHIER_IDEAL_HBM=1`, `soft_hier/flex_cluster/flex_cluster.py` instantiates gvsoc's ideal memory
+(`Memory`, zero latency, infinite bandwidth, same ports, bindings and address map) for every HBM
+channel instead of `memory.dramsys.Dramsys`. softhier-mlir's `run_sim` sets the variable to `1`, and all
+its published numbers assume it. The variable is read when `gapy` generates the config, so it is a
+run-time switch, not a build option: `build_arch.sh` needs no extra variable and the stamp does not
+record it; the source change is covered by the GVSoC commit in the stamp. Kernel tests started from
+`run_kernel_tests.sh` (not through `run_sim`) use DRAMSys unless you export `SOFTHIER_IDEAL_HBM=1`.
+
 ## Kernel tests rebuild the hardware
 
 The `implementation/Makefile` targets `<k>-pre` (and so `<k>-run`) run `make hs`, which rebuilds
