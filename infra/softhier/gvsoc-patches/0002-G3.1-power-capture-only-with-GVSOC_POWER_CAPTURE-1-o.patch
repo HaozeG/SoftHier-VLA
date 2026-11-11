@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <haozegao0602@gmail.com>
+Date: Wed, 11 Nov 2026 08:57:56 +0100
+Subject: [PATCH 02/10] [G3.1] power capture only with GVSOC_POWER_CAPTURE=1
+ (owner-approved gate; did not stop the memory growth)
+
+Symptom: tests/gvsoc/run.py gemm with K-tile 256 (256x256x256:256,256,256, 256x768x256:...)
+grows the simulator to the 13 GB cap in 30-50 s. TimeEngine::init now calls start_capture
+only if env GVSOC_POWER_CAPTURE=1; power_capture_advance already returns early when capture
+was not started. This removes the failing make ice_power system() call, but it is NOT the
+cause of the growth: with it (and with pwr_interval_ps=9e15) run rung1a-gemm256 was still
+killed at the cap (LOG experiments/smolvla-e2e-baseline/LOG.md, G3.1 follow-up). The change
+lives in soft_hier/gvsoc_core.patch (hunk for engine/src/time/time_engine.cpp) and is applied
+to the core working tree.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ soft_hier/gvsoc_core.patch | 24 +++++++++++++++---------
+ 1 file changed, 15 insertions(+), 9 deletions(-)
+
+diff --git a/soft_hier/gvsoc_core.patch b/soft_hier/gvsoc_core.patch
+index db36513..a3cd3ac 100644
+--- a/soft_hier/gvsoc_core.patch
++++ b/soft_hier/gvsoc_core.patch
+@@ -177,7 +177,7 @@ index 7f56b6a6..25cf1182 100644
+  double vp::PowerEngine::get_average_power(double &dynamic_power, double &static_power)
+  {
+ diff --git a/engine/src/time/time_engine.cpp b/engine/src/time/time_engine.cpp
+-index 7b40a98f..8ac0c4b6 100644
++index 7b40a98f..f12ba08f 100644
+ --- a/engine/src/time/time_engine.cpp
+ +++ b/engine/src/time/time_engine.cpp
+ @@ -22,7 +22,37 @@
+@@ -218,12 +218,18 @@ index 7b40a98f..8ac0c4b6 100644
+  
+  namespace vp
+  {
+-@@ -52,6 +82,34 @@ void vp::TimeEngine::init(vp::Component *top)
++@@ -52,6 +82,40 @@ void vp::TimeEngine::init(vp::Component *top)
+  {
+      this->top = top;
+      this->stop_event = new vp::Time_engine_stop_event(this->top);
+-+    this->top->power.get_engine()->start_capture();
+-+    this->power_capture_started = true;
+++    // shvla (LOG G3.1): power capture only when GVSOC_POWER_CAPTURE=1. Always on, it grows the simulator
+++    // past 13 GB within seconds (G3.1 rung 1: rung1a-gemm256).
+++    const char *capture = std::getenv("GVSOC_POWER_CAPTURE");
+++    if (capture != NULL && capture[0] == '1')
+++    {
+++        this->top->power.get_engine()->start_capture();
+++        this->power_capture_started = true;
+++    }
+ +}
+ +
+ +void vp::TimeEngine::power_capture_advance(int64_t time)
+@@ -253,7 +259,7 @@ index 7b40a98f..8ac0c4b6 100644
+  }
+  
+  int64_t vp::TimeEngine::exec()
+-@@ -64,6 +122,7 @@ int64_t vp::TimeEngine::exec()
++@@ -64,6 +128,7 @@ int64_t vp::TimeEngine::exec()
+          current->time.is_enqueued = false;
+  
+          // Update the global engine time with the current event time
+@@ -261,7 +267,7 @@ index 7b40a98f..8ac0c4b6 100644
+          this->time = current->time.next_event_time;
+  
+          while (1)
+-@@ -82,6 +141,7 @@ int64_t vp::TimeEngine::exec()
++@@ -82,6 +147,7 @@ int64_t vp::TimeEngine::exec()
+                  {
+                      if (likely(!this->stop_req))
+                      {
+@@ -269,7 +275,7 @@ index 7b40a98f..8ac0c4b6 100644
+                          this->time = time;
+                          continue;
+                      }
+-@@ -134,6 +194,7 @@ int64_t vp::TimeEngine::exec()
++@@ -134,6 +200,7 @@ int64_t vp::TimeEngine::exec()
+              current->time.is_enqueued = false;
+  
+              // Update the global engine time with the current event time
+@@ -277,7 +283,7 @@ index 7b40a98f..8ac0c4b6 100644
+              this->time = current->time.next_event_time;
+          }
+      }
+-@@ -302,6 +363,7 @@ bool vp::TimeEngine::enqueue(vp::Block *client, int64_t full_time)
++@@ -302,6 +369,7 @@ bool vp::TimeEngine::enqueue(vp::Block *client, int64_t full_time)
+  {
+      bool update = false;
+  
+@@ -285,7 +291,7 @@ index 7b40a98f..8ac0c4b6 100644
+      vp_assert(full_time >= get_time(), NULL, "Time must be higher than current time\n");
+  
+      if (client->time.is_running())
+-@@ -424,4 +486,4 @@ void vp::TimeEngine::retain_inc(int inc)
++@@ -424,4 +492,4 @@ void vp::TimeEngine::retain_inc(int inc)
+  void vp::TimeEngine::flush_all()
+  {
+      this->top->flush_all();

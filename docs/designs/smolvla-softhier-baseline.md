@@ -151,7 +151,7 @@ Resolved:
 | Q7 | LIBERO setup as in the configuration table (owner-confirmed) |
 | Q8 | latency measured in the same configuration as the robot evaluation |
 | Q9 / D1 | one simulator build per worktree, rebuilt per arch, stamp-guarded |
-| D2 | simulator fixes in a GVSoC fork; softhier-mlir changes as patch files |
+| D2 | simulator fixes as a patch series on upstream GVSoC (no fork, owner 2026-11-11); softhier-mlir changes as patch files |
 | A1 | G4 staged: estimate first, then the full run (with the R1 stop rule) |
 | A2 | softhier-mlir's LIBERO changes designed up front (Technical Plan) |
 | A4 | golden reference: thin, independent, on `main`, in softhier-mlir's layout |
@@ -171,7 +171,7 @@ SoftHier-VLA repo
 +-- main (permanent) -------------------------------------------------+
 | softhier_vla_wiki/   submodule: decision (G0)                       |
 | docs/designs/        this design                                    |
-| third_party/gvsoc/   submodule: GVSoC soft_hier_release (fork, D2)  |
+| third_party/gvsoc/   submodule: GVSoC soft_hier_release + patches (D2)|
 | infra/env.sh         paths and defaults                             |
 | infra/softhier/      setup, build_arch, kernel tests, stamp (G1)    |
 | infra/lerobot/       uv env: golden_ref (G2), libero_eval (G6)      |
@@ -354,14 +354,15 @@ A failure there is handled under R3.
 ### Design decisions
 
 *   **D1: one simulator build per worktree.** `build_arch.sh` rebuilds for an arch file and writes a stamp: arch path and SHA-256, GVSoC and nested submodule commits, and a hash of `git diff` in each. It also records the model folders `run_sim` will pick at run time and are invisible to `git diff`: whether `install/models_fast` and `install/models_fix` exist, with a SHA-256 over their `.so` files, and the values of `SOFTHIER_MODEL_DIR` and `SOFTHIER_STOCK_MODELS`. `run.sh` refuses to run on a mismatch and does not rebuild by itself, so two runs never rebuild under each other. Runs that need different arch files run one after another. The rebuild time is measured in G1.
-*   **D2: simulator fixes in a fork, softhier-mlir changes as patch files.**
-    *   GVSoC: the submodule points to `HaozeG/gvsoc` (branch `shvla/soft_hier_release`) once the first fix exists. The first expected fix is adding `flex_alloc_api.h`, which softhier-mlir's runtime includes but `soft_hier_release` lacks (present on the GVSoC branch `bowwang-dev/softhier-deeploy`). Nested `core`/`pulp` forks are created only if a fix touches them. Creating the forks waits for the owner.
+*   **D2: GVSoC fixes shipped as a patch series, no fork (owner, 2026-11-11); softhier-mlir changes as patch files.**
+    *   GVSoC: the submodule `third_party/gvsoc` is pinned at upstream `soft_hier_release` `d806a84` and `.gitmodules` keeps the upstream URL. The fixes are ten `git format-patch` files in `infra/softhier/gvsoc-patches/` (with `series`, `expected` and a README holding the finding table and the dev workflow). `setup.sh` applies them with `git am` (fixed committer identity and date, idempotent: a tree that already equals base + series is left alone) before `make softhier_preparation`. `stamp.py` records the series SHA-256 and the tree id, and `check` fails if the tree is not base + series. The original decision (a `HaozeG/gvsoc` fork, owner approval for creating it) was replaced on 2026-11-11: a fork needs a public or private repository to be kept in sync, a patch series needs none and a fresh clone reproduces the baseline from this repository alone. The patches keep the original commit messages (finding, evidence, run id), so an upstream pull request can still be made from them with `git am`.
+    *   The nested `core` and `pulp` repositories are never forked: the series changes `soft_hier/gvsoc_core.patch` and `gvsoc_pulp.patch`, which GVSoC's own preparation applies to them.
     *   softhier-mlir: patch files with a header (what, why, evidence), listed in `patches/README.md`, which doubles as the inspection record of this initial implementation.
     *   Boundary: a change goes to the repository that owns the file; the SDK and model files belong to GVSoC.
 
 ### Simulator findings: softhier-mlir's SIMULATOR_NOTES items and what G3 found
 
-Rows `F1..F19` are this design's own numbering; "SN #" is the number in softhier-mlir `docs/SIMULATOR_NOTES.md`. Status is as of the end of G5. Evidence is in LOG.md (entry names in the last column). All GVSoC commits are on the local branch `shvla/soft_hier_release` and are not pushed (D2). Of the SN rows, #7 and models_fast affect speed and the rest correctness; the rows without a number cover hangs, wrong values, timing, memory and build findings. "no number" means the finding is not in SIMULATOR_NOTES.
+Rows `F1..F19` are this design's own numbering; "SN #" is the number in softhier-mlir `docs/SIMULATOR_NOTES.md`. Status is as of the end of G5. Evidence is in LOG.md (entry names in the last column). The GVSoC fixes are the patch series `infra/softhier/gvsoc-patches/` (D2); in this table "GVSoC `<hash>`" is the commit id on the original local dev branch `shvla/soft_hier_release`, which has the same tree as base + series (the patch number is in the series README). Of the SN rows, #7 and models_fast affect speed and the rest correctness; the rows without a number cover hangs, wrong values, timing, memory and build findings. "no number" means the finding is not in SIMULATOR_NOTES.
 
 | F | SN # | symptom | cause in the model | status here | evidence |
 | --- | --- | --- | --- | --- | --- |
@@ -392,7 +393,7 @@ Upstream candidates (generic bugs in the release tree): F13, F14, F15 (with F3),
 *   The same file, host speed: `models_fast` was two changes with unchanged cycle counts. One is the RedMulE functional model vectorised with NEON (190×). That is aarch64-only, so on this x86_64 host an equivalent must be found by profiling first. The other removes by-value copies and idle trace formatting from the ISS (2–4×).
 *   `deeploy_softhier_progress.md` §3: the exact fix for #1 (`Iss::handle_event` in `core/models/cpu/iss/src/snitch/snitch_fp_ss.cpp` waits while `exec.is_stalled()`). It also gives the partial rebuild procedure: build only `gen_isa_snitch_fp_ss_rv32imfdva_cpp_*_{optim,debug}` with `SYSTEMC_HOME=third_party/systemc_install`, then copy the `.so` files into `install/models/` and `install/models/debug/`.
 *   `repro/softhier_fp_hbm_repro.c`: a reproducer for #1 that prints `out=1.7500` when the fix works.
-The `.patch` files themselves (`../SoftHier/dse/patches/`) are not on this machine. Fixes are re-implemented from these descriptions as commits on the GVSoC fork (D2), each citing the note it follows.
+The `.patch` files themselves (`../SoftHier/dse/patches/`) are not on this machine. Fixes are re-implemented from these descriptions as patches of the GVSoC series (D2), each citing the note it follows.
 
 ## Alternatives Considered
 
@@ -412,7 +413,7 @@ SR-B and SR-C are deferred, not rejected (G0).
 *   **A repo-local data folder for weights.** Rejected: checkpoints are large binaries (git would need LFS), and the Hugging Face cache is shared across projects and placed per user. Recording the Hub revision keeps runs reproducible. Pro: one simple path.
 *   **One install copy per arch.** Rejected: several GB per copy, refreshed after every simulator fix, with the risk of mixing patched and unpatched copies. Pro: runs with different arch files at once.
 *   **G1 only on `main`, experiment build fixed to its arch.** Rejected: two full builds, and fixes in the experiment must reach `main` before the G1 build has them. Pro: no arch switching.
-*   **Patch files for the simulator too.** Rejected: each simulator fix would be traced by two pieces (upstream commit plus patch), with no path to an upstream pull request. Pro: no forks.
+*   **Patch files for the simulator too.** First rejected (each fix would be traced by two pieces, upstream commit plus patch), then adopted on 2026-11-11 (D2): a fork needs a repository to host and sync, and the patches (with their commit messages) can still be turned into upstream pull requests.
 *   **Forks for softhier-mlir too.** Rejected: up to four forks to sync, and a fork contradicts following softhier-mlir's latest `main` as an implementation under inspection. Pro: one permalink per code state.
 *   **Pin softhier-mlir, or record bare hashes.** Rejected: the owner follows latest `main` between experiments (frozen within one, R4), and a bare hash is not a link. Pro: exact reruns.
 
@@ -507,7 +508,7 @@ Each step ends with its LOG.md entry; the checkpoint is what must hold before th
 
 ##### 1. `.gitmodules` (Modify)
 *   **Type / Scope**: Git configuration.
-*   **Proposed Changes**: Add `third_party/gvsoc` with URL `https://github.com/gvsoc/gvsoc.git` (switched to the fork when the first fix exists, D2), `branch = soft_hier_release`, `ignore = dirty`.
+*   **Proposed Changes**: Add `third_party/gvsoc` with URL `https://github.com/gvsoc/gvsoc.git` (unchanged: the fixes are a patch series applied by `setup.sh`, D2), `branch = soft_hier_release`, `ignore = dirty`.
 
 ##### 2. `third_party/gvsoc` (Create, submodule)
 *   **Type / Scope**: Git submodule.
@@ -536,7 +537,7 @@ Each step ends with its LOG.md entry; the checkpoint is what must hold before th
 
 ##### 7. `infra/softhier/README.md` (Create)
 *   **Type / Scope**: Documentation.
-*   **Proposed Changes**: prerequisites, the three scripts, the stamp rule, the fact that kernel tests rebuild the hardware, switching to the fork, measured build and rebuild times, disk use, the findings table by reference.
+*   **Proposed Changes**: prerequisites, the three scripts, the stamp rule, the fact that kernel tests rebuild the hardware, the GVSoC patch series and its dev workflow, measured build and rebuild times, disk use, the findings table by reference.
 
 ##### 8. `infra/softhier/pyproject.toml`, `uv.lock` (Create)
 *   **Type / Scope**: uv project.
@@ -721,9 +722,9 @@ Before editing: `git submodule update --init softhier_vla_wiki` if the worktree'
 
 #### Outside this repo
 
-##### 33. `HaozeG/gvsoc`, branch `shvla/soft_hier_release` (Create when needed, owner approval)
-*   **Type / Scope**: Fork commits.
-*   **Proposed Changes**: First commit adds `soft_hier/flex_cluster_sdk/runtime/include/flex_alloc_api.h` from the GVSoC branch `bowwang-dev/softhier-deeploy`, with its origin in the message. Later commits each name a side-note number and a run id.
+##### 33. `infra/softhier/gvsoc-patches/`, `apply_gvsoc_patches.sh` (Create; replaces the planned `HaozeG/gvsoc` fork, D2)
+*   **Type / Scope**: Patch series (`git format-patch d806a84..<dev tip>`), `series`, `expected` (base commit, tree id, series SHA-256), README with the finding table and the dev workflow; `setup.sh` calls the apply script; `stamp.py` records and checks the series hash and the tree.
+*   **Proposed Changes**: Patch 0001 adds `soft_hier/flex_cluster_sdk/runtime/include/flex_alloc_api.h` from the GVSoC branch `bowwang-dev/softhier-deeploy`, with its origin in the message. Later patches each name a side-note number or finding and a run id.
 
 ### Verification Plan
 
@@ -751,6 +752,7 @@ Before editing: `git submodule update --init softhier_vla_wiki` if the worktree'
 
 Written at the end of G5; every item has its LOG.md entry.
 
+*   **Decision: GVSoC fixes shipped as patch series, no fork (owner, 2026-11-11, G5.2).** Replaces the planned `HaozeG/gvsoc` fork (D2, item 33). Provenance: GVSoC upstream `soft_hier_release` `d806a84` plus `infra/softhier/gvsoc-patches/` (ten patches, tree `def18fe6856947bab3009fa551cc43282c5ddbf1`, the tree of the dev commit `f99d5a2` that produced every measured number). `setup.sh` applies the series (idempotent), the stamp records the series SHA-256 and the tree. Checked on a fresh upstream checkout: same tree, same commit messages, same tree after each patch.
 *   **G3 gate: PASS.** `gate.py g3` on `fixi-rung6`: 120.716 ms against 119.1 ms (+1.4 %, window 113.14..125.05), action max-abs 0.0068 (limit 0.10). Getting there took simulator fixes F13-F16 and F5, plus F1, F3 and F8 from the owner's notes; see the findings table.
 *   **G4b was not run (owner decision, "report G4a only").** R1 triggered: the vision phase was projected at 13386 s (3.72 h) against the 7200 s limit. The G4a staged estimate, 479.1 ms, is the LIBERO latency result. It is an estimate in the wiki's sense (composed from partial simulated runs). The other three phases were projected inside the limit (0.17, 0.17, 0.81 h). The step is marked "skipped (owner)" in LOG.md. The full-chain comparison of the LIBERO configuration with G2 therefore does not exist.
 *   **G4a checks are weaker than designed.** `run_prefix_cost` writes no accuracy dump, so G4a.2 only shows that the run completes (the design asked for a check against softhier-mlir's fp16 reference). G4a.3 compares `xt[2]` only, not `xt[1..2]`. The vision accuracy threshold is `0.03 * max|ref|`. G4a.4 takes the connector term from G4a.2; the one-camera connector of G4a.1 is a cross-check.
@@ -760,4 +762,4 @@ Written at the end of G5; every item has its LOG.md entry.
 *   **Memory cap.** `run.sh sim` runs under `systemd-run --user --scope` with `MemoryMax=${SHVLA_SIM_MEMMAX:-13G}` and no swap, and exits 4 on a cgroup OOM kill. Not in the plan; added in G3.1 after a runaway simulation (F13). The runs used 8G.
 *   **Kernel tests (G1.5)** do not check the kernels' output (their `main.c` print nothing); the pass rule is exit 0, the performance counter line and no error strings. They ran on DRAMSys, before F5 and F16, so their timings are not comparable with later runs.
 *   **Rungs 3-5** were last run before F16 (`instr_mem`) and not re-run (owner choice); their accuracy is unaffected by it, their timings predate it. Rung 1, rung 2, rung c and rung 6 were re-run.
-*   **Unresolved:** F19 (iDMA transpose 2.3x slower than published); the G6b success rate of 59.0 % has no published figure for this checkpoint; the GVSoC fixes exist only on the local branch (`.gitmodules` still points at the upstream URL, so a fresh clone cannot fetch the pinned commit until the fork exists and the URL is switched).
+*   **Unresolved:** F19 (iDMA transpose 2.3x slower than published); the G6b success rate of 59.0 % has no published figure for this checkpoint; ~~the GVSoC fixes exist only on the local branch~~ resolved in G5.2: the fixes ship as the patch series `infra/softhier/gvsoc-patches/` on the upstream base (D2), checked on a fresh upstream checkout (tree identical to the measured one).

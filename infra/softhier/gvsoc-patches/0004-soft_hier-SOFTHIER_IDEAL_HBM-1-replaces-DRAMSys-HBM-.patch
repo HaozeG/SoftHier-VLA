@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <haozegao0602@gmail.com>
+Date: Wed, 11 Nov 2026 11:33:27 +0100
+Subject: [PATCH 04/10] soft_hier: SOFTHIER_IDEAL_HBM=1 replaces DRAMSys HBM
+ channels by gvsoc ideal memory
+
+What: flex_cluster.py instantiates flex_cluster Memory (width_log2=0 = infinite bandwidth,
+latency=0, no atomics, size = whole HBM window) instead of memory.dramsys.Dramsys for every
+HBM channel when env SOFTHIER_IDEAL_HBM=1. Same 'input' port, same hbm_ctrl bindings and
+address map, channel placement unchanged. Read when gapy generates the config (run time).
+Why: softhier-mlir docs/SIMULATOR_NOTES.md item 5 describes this switch as a private patch
+that is in neither public branch; all published softhier-mlir numbers use ideal HBM.
+Evidence: LOG G3.1-rung1/2: with DRAMSys 16-cluster GEMMs are +46-48 pct vs published
+(1024x3072x768 759705 ns vs ~520.5 us); gemm1024_summa and siglip_encoder_layer hit the 8G cap.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ soft_hier/flex_cluster/flex_cluster.py | 21 +++++++++++++++++----
+ 1 file changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/soft_hier/flex_cluster/flex_cluster.py b/soft_hier/flex_cluster/flex_cluster.py
+index 9b2f316..c44b8e6 100644
+--- a/soft_hier/flex_cluster/flex_cluster.py
++++ b/soft_hier/flex_cluster/flex_cluster.py
+@@ -31,6 +31,7 @@ from pulp.chips.flex_cluster.flex_mesh_noc import FlexMeshNoC
+ from pulp.chips.flex_cluster.hbm_ctrl import hbm_ctrl
+ import memory.dramsys
+ import math
++import os
+ 
+ GAPY_TARGET = True
+ 
+@@ -162,24 +163,36 @@ class FlexClusterSystem(gvsoc.systree.Component):
+                 ni_outstanding_reqs=noc_outstanding, router_input_queue_size=noc_outstanding * num_clusters, atomics=1, collective=1)
+ 
+         #HBM channels
++        # SOFTHIER_IDEAL_HBM=1 (read when gapy generates the config, i.e. at run time) replaces each DRAMSys
++        # channel by gvsoc's ideal memory: zero latency, infinite bandwidth (width_log2=0), no atomics.
++        # Same ports ('input'), same hbm_ctrl bindings, same address map. Per-channel size is the whole
++        # HBM address window (a safe upper bound of the channel-local offsets hbm_ctrl produces; the
++        # backing store is calloc'ed, so untouched pages cost nothing).
++        ideal_hbm = os.environ.get('SOFTHIER_IDEAL_HBM', '0') == '1'
++        hbm_total_size = arch.hbm_node_addr_space * 2 * (arch.num_cluster_x + arch.num_cluster_y)
++        def make_hbm_chan(name):
++            if ideal_hbm:
++                return Memory(self, name, size=hbm_total_size, width_log2=0, latency=0, atomics=False, tech_node=arch.tech_node)
++            return memory.dramsys.Dramsys(self, name)
++
+         hbm_chan_list_west = []
+         for hbm_ch in range(arch.hbm_chan_placement[0]):
+-            hbm_chan_list_west.append(memory.dramsys.Dramsys(self, f'west_hbm_chan_{hbm_ch}'))
++            hbm_chan_list_west.append(make_hbm_chan(f'west_hbm_chan_{hbm_ch}'))
+             pass
+ 
+         hbm_chan_list_north = []
+         for hbm_ch in range(arch.hbm_chan_placement[1]):
+-            hbm_chan_list_north.append(memory.dramsys.Dramsys(self, f'north_hbm_chan_{hbm_ch}'))
++            hbm_chan_list_north.append(make_hbm_chan(f'north_hbm_chan_{hbm_ch}'))
+             pass
+ 
+         hbm_chan_list_east = []
+         for hbm_ch in range(arch.hbm_chan_placement[2]):
+-            hbm_chan_list_east.append(memory.dramsys.Dramsys(self, f'east_hbm_chan_{hbm_ch}'))
++            hbm_chan_list_east.append(make_hbm_chan(f'east_hbm_chan_{hbm_ch}'))
+             pass
+ 
+         hbm_chan_list_south = []
+         for hbm_ch in range(arch.hbm_chan_placement[3]):
+-            hbm_chan_list_south.append(memory.dramsys.Dramsys(self, f'south_hbm_chan_{hbm_ch}'))
++            hbm_chan_list_south.append(make_hbm_chan(f'south_hbm_chan_{hbm_ch}'))
+             pass
+ 
+         #HBM controllers

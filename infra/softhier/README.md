@@ -1,7 +1,7 @@
 # infra/softhier: build and test the GVSoC SoftHier simulator
 
 This folder sets up the SoftHier simulator (the `soft_hier_release` branch of GVSoC, in the
-submodule `third_party/gvsoc`), builds it for one architecture file, and checks it with the four
+submodule `third_party/gvsoc`, upstream base plus the patch series `gvsoc-patches/`), builds it for one architecture file, and checks it with the four
 kernels that ship with GVSoC. Design: `docs/designs/smolvla-softhier-baseline.md` (D1, D2).
 
 ## Prerequisites
@@ -21,10 +21,12 @@ kernels that ship with GVSoC. Design: `docs/designs/smolvla-softhier-baseline.md
 
 | file | what it does |
 | --- | --- |
-| `setup.sh` | one time: prerequisite check, submodule init, `uv sync`, `make softhier_preparation` (SystemC, DRAMSys, RISC-V toolchain), permalinks |
+| `setup.sh` | one time: prerequisite check, submodule init, `uv sync`, GVSoC patch series (`apply_gvsoc_patches.sh`), `make softhier_preparation` (SystemC, DRAMSys, RISC-V toolchain), permalinks |
+| `apply_gvsoc_patches.sh [dir]` | applies `gvsoc-patches/` on the upstream base with `git am`; idempotent (already applied: no-op); refuses any other state |
+| `gvsoc-patches/` | the ten GVSoC fixes as `git format-patch` files, `series`, `expected` (base, tree, series hash), README with the finding table and the dev workflow |
 | `build_arch.sh <arch.py>` | `cfg=<abs arch> make hw` in the submodule, then `stamp.py write`; on failure the stamp is deleted and the exit code is non-zero |
 | `run_kernel_tests.sh` | runs the kernels `gemm`, `norm`, `acti`, `attn`; prints a table |
-| `stamp.py` | `write <arch>`, `check <arch>` (exit 0 match, 1 with the difference), `permalinks` |
+| `stamp.py` | `write <arch>`, `check <arch>` (exit 0 match, 1 with the difference), `permalinks`, `series-hash` |
 | `gvsoc_env.sh` | sourced by the scripts: PATH, PYTHONPATH, SYSTEMC_HOME, LD_LIBRARY_PATH as GVSoC's `sourceme.sh` sets them, plus the uv venv |
 | `pyproject.toml`, `uv.lock` | Python 3.12 environment for GVSoC's tools (not a package); setuptools is pinned `<81` because GVSoC's `reggen` imports `pkg_resources` |
 
@@ -48,6 +50,10 @@ the arch file path and SHA-256; the commit of GVSoC and of each nested submodule
 --untracked-files=no`; and the model folders softhier-mlir's `run_sim` picks at run time
 (whether `install/models_fast` and `install/models_fix` exist, a SHA-256 over their `.so` files,
 and the values of `SOFTHIER_MODEL_DIR` and `SOFTHIER_STOCK_MODELS`).
+It also records the GVSoC patch series: SHA-256 of `series` and the listed patches, the base commit, the expected
+tree and the tree of `HEAD`. `check` fails if the series files differ from the SHA-256 in `gvsoc-patches/expected`,
+if `HEAD^{tree}` is not the expected tree (the tree of base + series), or if the base is not an ancestor of `HEAD`;
+commit ids of the applied patches do not matter, the tree does.
 Rule: one simulator build per worktree. A run is refused when `stamp.py check` fails, and nothing
 rebuilds by itself. After any change to the arch file or the simulator sources, run
 `build_arch.sh` explicitly. GVSoC's own preparation patches the nested `core` and `pulp`
@@ -56,7 +62,7 @@ not covered.
 
 ## Ideal HBM
 
-The local GVSoC branch `shvla/soft_hier_release` has a switch that stock GVSoC lacks: with
+GVSoC patch 0004 (`gvsoc-patches/`) adds a switch that stock GVSoC lacks: with
 `SOFTHIER_IDEAL_HBM=1`, `soft_hier/flex_cluster/flex_cluster.py` instantiates gvsoc's ideal memory
 (`Memory`, zero latency, infinite bandwidth, same ports, bindings and address map) for every HBM
 channel instead of `memory.dramsys.Dramsys`. softhier-mlir's `run_sim` sets the variable to `1`, and all
@@ -108,14 +114,22 @@ and cannot build `-march=rv32imafdv_zfh`, which the SDK uses when the arch file 
   `make hw` (default 9000000000000000 ps = 9000 s, set in `env.sh`); `stamp.py` records the build's
   `PWR_INTERVAL_PS` from `build/CMakeCache.txt` and `check` fails if it differs from the variable.
 
-## Switching the submodule to the fork (D2)
+## GVSoC fixes: patch series, no fork (D2)
 
-When the first simulator fix exists, the submodule moves to `HaozeG/gvsoc`
-(branch `shvla/soft_hier_release`): change the URL in `.gitmodules`, run
-`git submodule sync third_party/gvsoc`, fetch and check out the fork's commit, commit the new
-pointer, then `build_arch.sh` again (the stamp changes with the commit).
-Nested `core`/`pulp` forks are created only if a fix touches them. Side-note table of simulator
-symptoms and their fixes: see the design document, "Reference for fixes".
+The fixes to GVSoC (`gvsoc-patches/`, table in its README) are not in a fork. `third_party/gvsoc` is pinned at
+upstream `soft_hier_release` `d806a84` (`.gitmodules` keeps the upstream URL), and `setup.sh` runs
+`apply_gvsoc_patches.sh`, which `git am`s the ten patches before the preparation (two of them change
+`soft_hier/gvsoc_core.patch` and `gvsoc_pulp.patch`, which the preparation applies to the nested repositories). The
+script is idempotent: a tree that already has the series (second run; the developer's tree on the local branch
+`shvla/soft_hier_release`) is recognised by its tree id and left alone; a tree at any other commit is refused.
+
+*   Expected: after `setup.sh`, `git status` in the superproject shows `third_party/gvsoc` as "modified (new
+    commits)", because the submodule HEAD is the applied series on top of the pinned base. **Never stage it**
+    (`git add -u`, `commit -a`); the gitlink must stay at `d806a84`.
+*   `git submodule update` on an initialised, patched checkout would move it back to the base and leave the applied
+    commits dangling; run `apply_gvsoc_patches.sh` again afterwards, then `build_arch.sh`.
+*   Developing a fix and re-exporting the series: `gvsoc-patches/README.md`, "Developing a fix".
+*   Nested `core`/`pulp` repositories are not forked or patched by commits; their changes are the `.patch` files.
 
 ## Measured (host: 20 cores, ~19 GB RAM, 2026-11-10)
 
