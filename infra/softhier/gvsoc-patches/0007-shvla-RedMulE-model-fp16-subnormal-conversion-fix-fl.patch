@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <haozegao0602@gmail.com>
+Date: Wed, 11 Nov 2026 15:49:18 +0100
+Subject: [PATCH 07/10] [shvla] RedMulE model: fp16 subnormal conversion fix
+ (float_to_fp16 shift 14-exp + mask, fp16_to_float subnormal/inf/NaN decode)
+
+float_to_fp16 shifted the subnormal significand by (1 - exp) instead of (14 - exp) and did not mask, so any non-zero result with |v| < 2^-14 became garbage (0, +-2.0, ...). fp16_to_float flushed subnormals to ~0 and mapped inf/NaN to finite values. Still truncating (RNE follows in a separate commit).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ soft_hier/flex_cluster/light_redmule.cpp | 29 +++++++++++++++++-------
+ 1 file changed, 21 insertions(+), 8 deletions(-)
+
+diff --git a/soft_hier/flex_cluster/light_redmule.cpp b/soft_hier/flex_cluster/light_redmule.cpp
+index be3e677..9f12cd7 100644
+--- a/soft_hier/flex_cluster/light_redmule.cpp
++++ b/soft_hier/flex_cluster/light_redmule.cpp
+@@ -1244,7 +1244,10 @@ void matmul_int16(int16_t * z, int16_t * y, int16_t * x, int16_t * w, uint16_t m
+ }
+ 
+ 
+-// Convert float to FP16 (half-precision)
++// Convert float to FP16 (half-precision), truncating (round toward zero).
++// fp16 subnormals (|v| < 2^-14, 2^-24 granularity) are encoded with the
++// 24-bit significand shifted right by (14 - exponent); the result is at most
++// 0x3FF there, so it never reaches the exponent / sign bits.
+ fp16 float_to_fp16(float value) {
+     FloatBits floatBits;
+     floatBits.f = value;
+@@ -1253,23 +1256,33 @@ fp16 float_to_fp16(float value) {
+     int32_t exponent = floatBits.parts.exponent - 127 + 15; // adjust bias from 127 to 15
+     uint32_t mantissa = floatBits.parts.mantissa >> 13;     // reduce to 10 bits
+ 
++    if (floatBits.parts.exponent == 0xFF) {
++        // inf stays inf, NaN stays a (quiet) NaN
++        return sign | 0x7C00 | (floatBits.parts.mantissa ? 0x200 : 0);
++    }
+     if (exponent <= 0) {
+-        if (exponent < -10) return sign;   // too small
+-        mantissa = (floatBits.parts.mantissa | 0x800000) >> (1 - exponent);
+-        return sign | mantissa;
++        if (exponent < -10) return sign;   // too small (< 2^-24)
++        mantissa = (floatBits.parts.mantissa | 0x800000) >> (14 - exponent);
++        return sign | (mantissa & 0x3FF);
+     } else if (exponent >= 0x1F) {
+         return sign | 0x7C00;  // overflow to infinity
+     }
+     return sign | (exponent << 10) | mantissa;
+ }
+ 
+-// Convert FP16 to float
++// Convert FP16 to float (exact: subnormals, inf and NaN included)
+ float fp16_to_float(fp16 value) {
+     FloatBits floatBits;
+-    floatBits.parts.sign = (value >> 15) & 0x1;
+     int32_t exponent = (value >> 10) & 0x1F;
+-    floatBits.parts.exponent = (exponent == 0) ? 0 : exponent + 127 - 15;
+-    floatBits.parts.mantissa = (value & 0x3FF) << 13;
++    uint32_t mant = value & 0x3FF;
++    if (exponent == 0) {
++        // zero or subnormal: mant * 2^-24 (exact in float)
++        floatBits.f = (float)mant * (1.0f / 16777216.0f);
++    } else {
++        floatBits.parts.exponent = (exponent == 0x1F) ? 0xFF : exponent + 127 - 15;
++        floatBits.parts.mantissa = mant << 13;
++    }
++    floatBits.parts.sign = (value >> 15) & 0x1;
+     return floatBits.f;
+ }
+ 

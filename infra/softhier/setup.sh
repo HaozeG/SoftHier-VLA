@@ -2,8 +2,9 @@
 # One-time setup of the GVSoC soft_hier_release checkout:
 #   1. prerequisite check (prints the exact apt command if anything is missing)
 #   2. submodule init (recursive) and `uv sync` of infra/softhier
+#   2b. apply the GVSoC patch series (gvsoc-patches/, apply_gvsoc_patches.sh; idempotent)
 #   3. `make softhier_preparation` (SystemC, DRAMSys, RISC-V toolchain), logged and timed
-#   4. permalinks of the GVSoC submodule and its nested submodules
+#   4. permalinks of the GVSoC upstream base (+ patch series hash) and its nested submodules
 #
 # Usage: bash infra/softhier/setup.sh
 #
@@ -72,6 +73,11 @@ else
 fi
 (cd "$here" && uv sync)
 
+# ---------------------------------------------------------------- 2b. GVSoC patch series
+# Before the preparation: two patches change soft_hier/gvsoc_core.patch and gvsoc_pulp.patch, which
+# `make softhier_preparation` applies to the nested core and pulp repositories.
+bash "$here/apply_gvsoc_patches.sh" "$gvsoc"
+
 # ---------------------------------------------------------------- 3. preparation
 # Paths are relative to the GVSoC checkout. The directory targets are created before
 # their downloads run, so check for real files, not just the folders.
@@ -111,6 +117,6 @@ else
 fi
 
 # ---------------------------------------------------------------- 4. permalinks
-echo "GVSoC: https://github.com/gvsoc/gvsoc/tree/$(git -C "$gvsoc" rev-parse HEAD)"
+python3 "$here/stamp.py" permalinks | sed -n '1p'
 git -C "$gvsoc" submodule foreach --quiet \
     'echo "  $name: $(git config --get remote.origin.url | sed "s/\.git$//")/tree/$(git rev-parse HEAD)"'

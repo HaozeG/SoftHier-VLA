@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <haozegao0602@gmail.com>
+Date: Wed, 11 Nov 2026 11:09:05 +0100
+Subject: [PATCH 03/10] [shvla] iDMA backend: re-arm FSM in IDmaBe::update()
+ (fixes K-tile-256 gemm hang)
+
+Symptom: sh_gemm with tile K=256 (e.g. 128x128x256, 256x256x256) never
+finishes; the DMA wait never returns and simulator memory grows to the cap.
+
+Root cause: the release regulation change made IDmaBe::update() enqueue only
+transfer_regulation_event instead of fsm_event. If can_accept_burst() is false
+for a cycle and the regulation queue is empty, nothing wakes the FSM again, so
+the current transfer never completes.
+
+Fix: also enqueue fsm_event in update(). Carried in soft_hier/gvsoc_pulp.patch
+(hunk for pulp/idma/be/idma_be.cpp; verified to apply on the pristine nested
+pulp file and to equal the patched working tree) and in the patched pulp tree.
+
+Evidence: experiments/smolvla-e2e-baseline/LOG.md G3.1-diag3 (single-.so A/B:
+deeploy idma .so fixes release; one-line source change in a rebuilt scratch
+tree flips FAIL to PASS, 128x128x256 6174 ns, all 7 default shapes pass).
+Candidate for an upstream report (gvsoc-pulp regulation-queue commit).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ soft_hier/gvsoc_pulp.patch | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/soft_hier/gvsoc_pulp.patch b/soft_hier/gvsoc_pulp.patch
+index af52f9f..5ec394e 100644
+--- a/soft_hier/gvsoc_pulp.patch
++++ b/soft_hier/gvsoc_pulp.patch
+@@ -920,16 +920,19 @@ index 4e3a273..b82eab5 100644
+  
+  
+  void IDmaBe::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
+-@@ -142,7 +191,7 @@ void IDmaBe::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
++@@ -142,7 +191,10 @@ void IDmaBe::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
+  void IDmaBe::update()
+  {
+      // Check if any action should be taken in the next cycle from the FSM handler
+ -    this->fsm_event.enqueue();
+ +    this->transfer_regulation_event.enqueue();
+++    // Also re-arm the FSM: it must be woken when can_accept_burst() was false and the
+++    // regulation queue is empty, otherwise the current transfer never completes (hang).
+++    this->fsm_event.enqueue();
+  }
+  
+  
+-@@ -169,6 +218,11 @@ void IDmaBe::write_data(uint8_t *data, uint64_t size)
++@@ -169,6 +220,11 @@ void IDmaBe::write_data(uint8_t *data, uint64_t size)
+      transfer->dst += size;
+      transfer->size -= size;
+  
+@@ -941,7 +944,7 @@ index 4e3a273..b82eab5 100644
+      // And forward data.
+      // Note that the source backend already checked that the destination was ready by calling
+      // our is_ready_to_accept_data method
+-@@ -181,7 +235,7 @@ void IDmaBe::write_data(uint8_t *data, uint64_t size)
++@@ -181,7 +237,7 @@ void IDmaBe::write_data(uint8_t *data, uint64_t size)
+  void IDmaBe::ack_data(uint8_t *data, int size)
+  {
+      // Get the source backend protocol for the first transfer
+@@ -950,7 +953,7 @@ index 4e3a273..b82eab5 100644
+      IdmaBeConsumer *src_be = this->get_be_consumer(transfer->src, transfer->size, true);
+  
+      // And acknowledge the data to it so that the data can be freed
+-@@ -199,8 +253,12 @@ void IDmaBe::ack_data(uint8_t *data, int size)
++@@ -199,8 +255,12 @@ void IDmaBe::ack_data(uint8_t *data, int size)
+          this->trace.msg(vp::Trace::LEVEL_TRACE, "Finished burst (transfer: %p)\n", transfer);
+  
+          // And if so, remove it and notify the middle end

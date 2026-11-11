@@ -1,0 +1,10 @@
+0001-G3.1-sdk-add-flex_alloc_api.h-from-bowwang-dev-softh.patch
+0002-G3.1-power-capture-only-with-GVSOC_POWER_CAPTURE-1-o.patch
+0003-shvla-iDMA-backend-re-arm-FSM-in-IDmaBe-update-fixes.patch
+0004-soft_hier-SOFTHIER_IDEAL_HBM-1-replaces-DRAMSys-HBM-.patch
+0005-shvla-iDMA-backend-can_accept_transfer-also-requires.patch
+0006-shvla-ISS-ISA-tables-nseq-tag-on-scalar-FP-instructi.patch
+0007-shvla-RedMulE-model-fp16-subnormal-conversion-fix-fl.patch
+0008-shvla-RedMulE-model-float_to_fp16-IEEE-round-to-near.patch
+0009-shvla-snitch-fp_ss-Iss-handle_event-waits-while-exec.patch
+0010-G3.3-gvsoc-instr_mem-width_log2-default-fetch-bandwi.patch
