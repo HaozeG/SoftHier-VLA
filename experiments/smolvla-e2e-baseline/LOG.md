@@ -715,3 +715,33 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - **地址映射阅读(只读).** (1) `flex_cluster.py:171-175`:ideal 分支 `Memory(size=hbm_total_size, width_log2=0, latency=0, atomics=False)`,`hbm_total_size = hbm_node_addr_space*2*(num_x+num_y)` = 0x4000000*2*8 = 1 GiB **每个 channel**,即整个 HBM 窗口(`virtual_interco` 映射的大小同为此值,flex_cluster.py:~237)。(2) `hbm_ctrl.cpp:131-166`:`bank_id=(offset>>il)&bank_mask`,`bank_offset=((offset>>(stage_bits+il))<<il)+(offset&((1<<il)-1))`,即 channel-local offset ≤ 窗口内偏移 / 通道数,必然 < 1 GiB(arch: `hbm_chan_placement=[4,0,0,4]`,8 个 channel,`hbm_node_aliase` 默认 1)。(3) `pulp/chips/flex_cluster/memory.cpp:282-285`:`offset+size > size` 时 `force_warning` 并返回 `IO_REQ_INVALID`,**不 mask 也不 wrap**,越界不会被静默吞掉。(4) rung c 的 buffer 布局(`siglip.mlir:3-17`)最高 offset 23.6 MB(sentinel 0x168c000,G3.2-diag5 已查无重叠),比 1 GiB 小两个数量级;per-channel local offset ≤ 3 MB。无别名、无越界。`atomics=False` 只影响 HBM 上的 atomic 操作,rung c 不使用。
 - **结论.** HBM 模型(ideal 与 DRAMSys 两种)都排除。iDMA(diag5)、HBM(diag6)都排除;剩下的仍是 diag5 的假设:H 的三步(o-proj GEMM / add_bias / residual add)里 RedMulE/FP 路径的问题(如 fesetround 状态、`light_redmule.cpp` 的 fp16 转换),需要 `dump_samples` 中间点才能分辨,需要 owner 批准改前端/手写 mlir。
 - Simulators: 全部已停止。Logs: `~/.cache/softhier-vla/runs/published/diag6-dram/run.log`。
+
+### G3.2-diag7 — H-chain dumps (patch 0006): the o-proj chain is NOT the first bad step; the raw Q/K/V GEMM outputs already contain sparse corrupt elements (Q 5, K 3, V 1 among ~67 k distinct sampled); STOPPED (GVSoC / RedMulE level, not a minimal softhier-mlir fix)
+
+- 摘要:owner 批准后加了 softhier-mlir 补丁 `0006-shvla-siglip-h-chain-dumps`(opt-in)。结论推翻了 diag-diag6 的"H 三步里有一步错"的假设:**H 的三步(o-proj GEMM / add_bias / add)没有问题**。真正的第一个错更早:`siglip-mlir` 里 Q/K/V 的 **GEMM 原始输出**(add_bias 之前)就有稀疏的坏元素(偏差约 ±2.0,V 里一个是 -511);64 个样本的 end-of-program 检查(覆盖 0.03 %)看不到它们,所以 X/LN1/Q/K/KT/P0/V/O 都显示 PASS。坏元素经 attention 放大成 O 的坏列/坏头,再经 o-proj、residual、LN2、MLP 变成 H/G/OUT 的大面积错误。
+- **补丁 0006.** 文件:`frontend/siglip.py`(`emit()`)、`testing/siglip_ref.py`(`layer_reference()` 多返回的 key)。这两个文件 0001-0005 都不碰,所以对它们 `git diff` 即 0006;`run.sh apply` 报 `6 patches applied`;README 加了一行。Opt-in:环境变量 `SHVLA_SIGLIP_H_DUMPS=<n>`(未设或 0 时 `emit()` 输出与未打补丁逐字节相同,已验证 layers=1、2 与 `fused_attention=True`);`SHVLA_SIGLIP_H_REGEMM=1`(o-proj GEMM 再跑一次:OIN2/AOR2);`SHVLA_SIGLIP_H_FULL=<m>`(q/k/v/o 的 m 个样本 QF/KF/VF/OF,以及 q/k/v 在 GEMM 后/add_bias 后的 QG/QB 等)。layer 0 内每个 dump 后面跟一个 `group_barrier`(否则 cluster 0 在打印时其他 cluster 已经就地跑下一个 op)。`run.py` 不用改(它对每个设备打印过的 tag 自动查 ref)。注意:`run.sh sim` 每次先 `apply` 重置子模块,子模块树里的临时改动会被抹掉,实验用的改动必须进补丁文件(中途踩过一次)。
+- **前置离线检查(零 sim).** 用 `last_run.log` 的 H 样本对 `x+r16(o@wo)`(缺 bias)、`x+bo`、bias 加两次、`o` 只保留前 N 列(N=64..704)等候选公式:全部 bad=56-62/64,没有一个匹配,所以不是"某一步缺失"这类简单形式。
+- **Dump 表**(rung c,`siglip-mlir --seq 256 --cluster all`,`SHVLA_SIGLIP_H_DUMPS=256`;H/G/OUT 的数字与默认运行逐位相同:maxerr 16.3091 / 8959 / 8174):
+
+| step / tag | 样本 | bad | maxerr | 模式 |
+| --- | --- | --- | --- | --- |
+| X, LN1, Q, K, KT, P0, V(4096 点) | 4096 | 0 | ≤0.0098 | 通过 |
+| QF / KF / VF(150000 点,约 67 k distinct,约 34 %) | 150000 | 5 / 3 / 1 | 2.0 / 2.0 / 511 | 孤立单元素:Q[23,273],K[1,167],K[138,278],V[182,111] |
+| QG / KG / VG(GEMM 之后、add_bias 之前) | 150000 | 5 / 3 / 1 | 2.0 / 2.0 / 511 | 与 QB/KB/VB、QF/KF/VF 是同一批元素:**GEMM 输出就已经错** |
+| 坏元素偏差(raw) | | | | Q -1.9971,K -1.9987,K +1.9941,V -511.15;add_bias 之后同样偏移,add_bias 没有引入 |
+| PH0..PH11(softmax 输出,128 点/头) | 128 | 0(PH7:1) | ≤0.0023(PH7 0.98) | PH7[153,95]=0.985 vs 0.0055 |
+| OH0..OH11(o 的列片,128 点/头) | 128 | OH1 5, OH2 4, OH5 1, OH7 75, 其余 0 | 209.8 (OH1) | OH1 坏在 col 20/47,OH2 在 col 18(同一列多行,最大 -209);OH7 整个头散布 |
+| O(4096 点) | 4096 | 163 | 36.4 | |
+| OF(150000 点) | 150000 | 3066 / 67040(4.6 %) | 693 | 坏列集中:global col 84、111、146 各约 88 个坏行(几乎所有行),head 7 的 64 列各约 50-58 个 |
+| OIN(o-proj GEMM 读到的 %o) | 256 | 10 | 1.46 | 全在 head 7(col 449-507) |
+| OIN2(第二次 o-proj 前的 %o)、OEND(程序末尾,seed 203) | 256 | 10 / 10 | 1.46 | **与 OIN 逐位相同**:O 的错是确定的,不是晚落地 / race |
+| WOI、BOI(wo0、bo0 使用前) | 256 | 0 / 0 | 0 | 参数没坏,preload 没问题 |
+| AOR(o-proj GEMM 原始输出) | 256 | 243 | 44.3 | 均匀分布在 16 个 row block 与两个 N tile;got std 7.0 vs want 0.42,与任何 `A@W`(A 取 X/LN1/Q/K/V/O,W 取 wq/wk/wv/wo)相关系数 <0.12 |
+| AOR2(同一个 GEMM 再跑一次) | 256 | 243 | 44.3 | 与 AOR **逐位相同**:确定的 |
+| AOB、HCH、H、G、OUT | 256 / 256 / 4096 / 4096 / 4096 | 245 / 241 / 3858 / 2949 / 3841 | 44.3 / 44.3 / 512 / inf / inf | 只是 O 的错的传播 |
+
+- **解读.** (1) AOR 的大面积错来自 O 里稀疏的巨大坏元素(V 里一个 -511 使 OF 的 col 111 几乎每行都坏)乘 wo 后铺满整行,不是 o-proj GEMM / add_bias / add 本身的错,也不是 group_barrier / 12→16 cluster 交接的问题(OIN = OEND = OIN2:O 在交接时已完整且稳定)。注意 diag4-6 里 "O 对" 只是 64 点采样的盲区。(2) 第一个错的 step 是 Q / K / V 的 `softhier.gemm`(raw 输出)。每个坏元素偏差约 ±2.0(或 -511),单个乘积最大 0.19(`|ln1|≤3`,`|w|≤0.062`),所以不是少加/多加了一个乘积,而是输出元素(或 RedMulE 内部累加)被一个垃圾值污染。(3) 确定性:dump/barrier 改变 timing 后 H/G/OUT 仍逐位相同,AOR=AOR2;也不依赖 HBM 模型(diag6)和 iDMA(diag5)。(4) 对比:孤立的纯 GEMM `run.py gemm --shapes 256x768x768:256,384,128,1,0,all --real --dump-z 100000`(`diag7-gemm`)exit 0,100000 个 Z 样本对 numpy 0 bad(max abs 0.00238);同 shape/tile 的纯 GEMM 在那组数据下没有这个现象。siglip 的 Q/K/V GEMM 数据不同(LN1 ±3 乘 wq ±0.062),且紧跟在 layernorm 之后,没有进一步区分(见"未做")。
+- **Root cause / 最佳假设.** 稀疏、确定、单元素、幅度远大于任何单个乘积的 fp16 输出污染,发生在 RedMulE GEMM 的输出路径(累加/回写,或输出 tile 的 TCDM→HBM 写回),而不是 softhier-mlir 的 add_bias / add / barrier 序列。这部分在 GVSoC,按规则 **STOP,不改**。dump 只能定位到 "GEMM 的 raw 输出元素",因此没有 file:line;softhier-mlir 侧的相关位置:`softhier_mlir/frontend/siglip.py:144-146`(Q/K/V GEMM + add_bias),没有证据指向 `runtime/sh_gemm.inc.c`。
+- **没有 fix。** 所以没有跑 rung 2 / rung 1 / rung 3-5 回归;补丁 0006 默认行为不变(`emit()` 对默认参数逐字节相同),不影响这些 rung 的 ROI。
+- **未做 / 建议下一步(需要 owner 决定).** (a) 对 Q/K/V GEMM 的输入(LN1、wq/wk/wv)做全覆盖 dump,确认输入没坏(LN1 的一个坏行会让整行输出坏,我们看到的是单元素,所以不太可能);(b) 在纯 GEMM 测试里用 siglip 的真实数据范围复现,区分"数据相关"(fp16 溢出/NaN 处理)和"与前序 op 的状态相关"(例如 layernorm 之后残留的 FP/CSR 状态);(c) 读 `light_redmule.cpp` 输出写回路径相对作者私有 patch 的差异(side-note #1/#3 之外的 RedMulE 部分)。
+- Simulators: 全部已停止。Logs: `~/.cache/softhier-vla/runs/published/diag7-{hdump,hdump2,regemm,oend,heads,many,full,qkvg,gemm}/run.log`。memory peak ≤ 0.9 GB(cap 8G),oom 0。
