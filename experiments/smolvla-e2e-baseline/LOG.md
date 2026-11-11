@@ -1130,3 +1130,11 @@ written /home/haoze/.cache/softhier-vla/runs/libero/g4a_estimate.json
 - Paths under `$SHVLA_DATA`:`profile/`(README.md、`published-fixi-rung6/`、`prof-vision-L1/`、`prof-prefix-L1/`、`prof-expert-S1/`、`libero-G4a/`,24 MB,单文件最大 10.8 MB `expert.log.zst`,不进 git);run 目录 `runs/published/prof-{vision-L1,prefix-L1,expert-S1}/`。
 - Simulators:全部已停止。
 - **What to inspect**:`PROFILE.md` 的 phase 表(crosscheck)、"What dominates and why"、LIBERO 一节;`~/.cache/softhier-vla/profile/README.md`;`profile/parse_profile.py ops` 能否在 `published-fixi-rung6/` 上复现 `ops.csv`。
+
+#### PROF.1 补充(advisor 后:偏差披露、fixi-rung6 未被改动的证据)
+- Commit:b33c8e7(PROFILE.md、`profile/` 脚本、PROF.1 entry);本补充在紧接着的 experiment commit。
+- **对 SAFE MODE trace 规则的两处偏差(已在 README、PROFILE.md、`prof_wrap.py` docstring 里改成如实描述)**:(1) `prof-*` 三个 run 的过滤后 log 是**明文**写进 run 目录的(wrapper 在 pipe 里已经过滤,只留 program 行、`Finished`、`Cluster Sync`),事后才由 `collect.sh` 用 zstd -19 压缩;原因是 `tests/gvsoc/run.py` 在仿真结束后立刻把 `<phase>.log` 当文本读回(`segment_stats`、`program_lines`),所以不能在 pipe 里压缩。`prof_wrap.py` 的 docstring 之前错写成"exit 时压缩",已改。(2) 50 MB cap 只计 kept 的 **trace** 字节,program 输出(mark、dump 打印)不计入;最大的过滤后 log 是 21.5 MB,没有任何文件接近 cap。另外 `insn_sample_pe0.txt.gz` 是 pe0 instruction 行的 capped raw sample(103 / 247 / 5122 行),其余 instruction 行只聚合不落盘;PROFILE.md 之前写的"instruction 行从不落盘"已改为"除这个 capped sample 外"。
+- **`fixi-rung6` 没有被动**:`prof-prefix-L1` 用 symlink 复用了 `fixi-rung6/vision.{log,json}`(只读路径);事后核对 `vision.log` / `vision.json` 的 mtime 仍是 20:09(本 session 之前),`summary.json` / `chain_outputs.npz` 仍是 21:10,`fixi-rung6` 里没有比 21:30 更新的文件;两个 symlink 已从 `runs/published/prof-prefix-L1/` 删除(以后 resume 不会写穿)。重跑 `gate.py g3 .../fixi-rung6`:`total simulated time : 120.716 ms (published 119.1 ms, window 113.14..125.05 ms, +1.4 %)  PASS`;`action max-abs error : 0.0068  (limit 0.1, published 0.032)  PASS`;`G3 gate: PASS`。
+- "vision GEMM 只有 2 个 cluster 有活"的原因已在 `vision.mlir` 里确认:`tile_m = 256, tile_n = 384`,N = 768 → 768/384 = 2 个输出 tile(之前只是推断)。
+- 标注层级(report 用):measured = `fixi-rung6` 的所有表、以及 cluster 0 的 core 级活动(采样:cluster 0、1 layer / 1 step);derived = fused attention 内部拆分、`bound` 标签、相对 spec 峰值的 FLOP/s %;estimate = 全部 LIBERO 表,以及"每步约 193 MB 权重"(由 op shape 算出)。
+- README 补充了 `fixi-rung6` 与 G4a.{1,2,3} 的原始 run 命令,以及每个 `.zst` 的生成命令(`collect.sh` → `parse_profile.py compact`)。

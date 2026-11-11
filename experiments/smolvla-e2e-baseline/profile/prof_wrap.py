@@ -9,14 +9,16 @@ It monkeypatches `softhier_mlir.sim.gvsoc.subprocess.run` for the gapy command o
   * gvsoc's stdout is read line by line. Kept lines go to the log file run.py passes (<app>/<phase>.log):
       - the program's own lines ([mark], dumps ...), re-assembled around trace lines that landed in the middle of them;
       - RedMulE / iDMA `Finished` lines and `Cluster Sync` lines (the three e2e traces);
-    everything else is dropped (start-up chatter, other trace lines). Trace bytes written are capped (PROF_MAXBYTES,
-    default 50e6); past the cap trace lines are dropped and counted, program lines are still kept.
+    everything else is dropped (start-up chatter, other trace lines). The kept TRACE lines are capped (PROF_MAXBYTES,
+    default 50e6); past the cap trace lines are dropped and counted. Program lines (marks, dump printing) are always kept and
+    are not counted against the cap.
   * instruction lines (`/pe<k>/insn`, `/fp_ss<k>/insn`) are never written: they are AGGREGATED into 1 us bins per
     (cluster, unit, instruction class) and per (cluster, unit, function, class) totals -> PROF_INSN_OUT (CSV, gz);
     a capped raw sample (PROF_SAMPLE=lo_ns:hi_ns:maxlines of pe0 of the first cluster) -> PROF_SAMPLE_OUT.
   * PROF_STOP_NS: kill gapy when a line's time passes it (the run then ends as a failure by design; marks, events and
     bins up to that time are complete).
-  * at exit the filtered log is compressed to <log>.zst next to it (zstd -19).
+  * the filtered log is written PLAIN: tests/gvsoc/run.py (segment_stats, program_lines) reads <phase>.log as text right after
+    the simulation, so it cannot be compressed in the pipe. profile/collect.sh compresses it afterwards (zstd -19).
 
 Env: PROF_TRACES, PROF_MAXBYTES, PROF_INSN_OUT, PROF_BIN_NS (1000), PROF_INSN_WINDOW=lo_ns:hi_ns, PROF_SAMPLE,
      PROF_SAMPLE_OUT, PROF_STOP_NS.
