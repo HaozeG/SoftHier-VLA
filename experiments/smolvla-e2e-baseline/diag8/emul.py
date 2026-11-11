@@ -45,3 +45,4 @@ def float_to_fp16_fixed(v):
     elif ex>=31: return sign|0x7c00
     return sign|(ex<<10)|man
 rf=float_to_fp16_fixed(float(acc)); print("fixed fp16 bits",hex(rf),float(np.array(rf,dtype=np.uint16).view(np.float16)),"vs exact",ex)
+print("acc fp32 bits", hex(struct.unpack('I',struct.pack('f',float(acc)))[0]))
