@@ -1002,3 +1002,79 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Paths:`$SHVLA_DATA/runs/libero/G4a.{1,2,3}/`(run.log、summary.json、*.log),`$SHVLA_DATA/runs/libero/g4a_estimate.json`。
 - Simulators:全部已停止。
 - **What to inspect**:`g4a_estimate.json` 的 `g4b_projection`;R1 的决定。
+
+#### G4a 补充(entry 格式字段、record blocks、偏差、R1 阈值)
+- Time:2026-11-11。Commit:781071c(代码、INPUT_CONFIG、libero.env、LOG)和本补充的 LOG commit。step list 里 "hash in G4a.4 entry" 即 781071c。
+- 修正:vision 准确度阈值改为 `0.03 * max|ref|`(之前写成 0.08 是错的,"+5 % relative" 是逐元素的);0.1633 vs 1.32,仍 PASS。重跑 `gate.py g4a`,`g4a_estimate.json` 与下面的输出一致。
+- **与设计的差距(已知偏差,不改代码,超出 patch 0001–0005 属 R3;G4b 会覆盖)**:(1) **prefix 准确度没有检查**:`run_prefix_cost` 用 `dumps=()` 且不写 `acc`,G4a.2 的 PASS 只表示 run 完成,设计说的"对 softhier-mlir 的 fp16 reference 检查"没有做;(2) expert 只比较了 `xt[2]`(`run_expert_cost` 只比 `ref_xt[steps]`),设计写的是 `xt[1..2]`。另外 patch 0006(SigLIP H-chain dumps,诊断用)在应用的 patch 列表里;它只加 dump,不影响 timed segment(G3 重测时它也在)。
+- **R1 阈值**:V 在 7200 s 内当且仅当速率 < 7200/351.8 = 20.5 s/ms。G4a.1 测到 38 s/ms(timed 分母),rung-6 vision 是 1290 s / 27.64 ms = 47 s/ms,所以任何合理分母下 R1 都成立。用 `roi_ns` 做分母得 2.7 s/ms,与 rung 6 矛盾,故弃用。G4b 四个 phase 串行投影约 17.5 ks(约 4.9 h),V 占 3.72 h,其余各 < 1 h;峰值内存预期 < 3 GB。
+- 上下文(不是 G4b 结果):20 Hz 下一个 50 动作 chunk = 2.5 s;G4a 估计 479 ms 约为 chunk 周期的 19 %(estimate,未 overlap,synchronous)。
+
+record blocks(`run.sh` 输出,原文在 `/tmp`,这里保存):
+```
+G4a.1
+---- record block (paste into LOG.md) ----
+command:    run.sh libero sim G4a.1 -- tests/gvsoc/run.py smolvla-e2e --vision-only 1024 --layers 1 --e2e-trace
+run name:   G4a.1   app dir: /home/haoze/.cache/softhier-vla/runs/libero/G4a.1
+permalinks:
+  GVSoC: https://github.com/gvsoc/gvsoc/tree/f99d5a2882abb3c208bb6aa54657d38b87c288eb
+  core: https://github.com/gvsoc/gvsoc-core/tree/bda268a4808708a48eab21981c7d6bbced1577d7
+  pulp: https://github.com/gvsoc/gvsoc-pulp/tree/3ca2016d056dda72317e27c4319fc6174b5f8c4d
+  softhier-mlir: https://github.com/runwangdl/softhier-mlir/tree/b11cd5fa4f3e717374d1e9ba14442ff302d1f970 (+ patches)
+stamp:      stamp OK
+patches:    0001-shvla-smolvla-dir.patch:145e81bb 0002-shvla-npz-functions.patch:1b9c65fe 0003-shvla-expert-ref-lerobot-0.7.patch:0664b49e 0004-shvla-timeout-flag.patch:2cd6b752 0005-shvla-expert-only-ref-kv.patch:ec77f4bb 0006-shvla-siglip-h-chain-dumps.patch:4575085c 
+exit code:  0
+memory:     peak 1196 MB (scope cap 8G), oom_kill events: 0
+phase vision     ok=True roi=222.141 ms simulated, wall=600.0 s, max child RSS=911 MB
+------------------------------------------
+G4a.2
+---- record block (paste into LOG.md) ----
+command:    run.sh libero sim G4a.2 -- tests/gvsoc/run.py smolvla-e2e --prefix-only 2 --layers 8 --e2e-trace
+run name:   G4a.2   app dir: /home/haoze/.cache/softhier-vla/runs/libero/G4a.2
+permalinks:
+  GVSoC: https://github.com/gvsoc/gvsoc/tree/f99d5a2882abb3c208bb6aa54657d38b87c288eb
+  core: https://github.com/gvsoc/gvsoc-core/tree/bda268a4808708a48eab21981c7d6bbced1577d7
+  pulp: https://github.com/gvsoc/gvsoc-pulp/tree/3ca2016d056dda72317e27c4319fc6174b5f8c4d
+  softhier-mlir: https://github.com/runwangdl/softhier-mlir/tree/b11cd5fa4f3e717374d1e9ba14442ff302d1f970 (+ patches)
+stamp:      stamp OK
+patches:    0001-shvla-smolvla-dir.patch:145e81bb 0002-shvla-npz-functions.patch:1b9c65fe 0003-shvla-expert-ref-lerobot-0.7.patch:0664b49e 0004-shvla-timeout-flag.patch:2cd6b752 0005-shvla-expert-only-ref-kv.patch:ec77f4bb 0006-shvla-siglip-h-chain-dumps.patch:4575085c 
+exit code:  0
+memory:     peak 1563 MB (scope cap 8G), oom_kill events: 0
+phase prefix_a   ok=True roi=17.024 ms simulated, wall=615.9 s, max child RSS=1121 MB
+------------------------------------------
+G4a.3
+---- record block (paste into LOG.md) ----
+command:    run.sh libero sim G4a.3 -- tests/gvsoc/run.py smolvla-e2e --expert-only ref:/home/haoze/.cache/softhier-vla/smolvla_libero/e2e_c2_t1024.npz --steps 2 --e2e-trace
+run name:   G4a.3   app dir: /home/haoze/.cache/softhier-vla/runs/libero/G4a.3
+permalinks:
+  GVSoC: https://github.com/gvsoc/gvsoc/tree/f99d5a2882abb3c208bb6aa54657d38b87c288eb
+  core: https://github.com/gvsoc/gvsoc-core/tree/bda268a4808708a48eab21981c7d6bbced1577d7
+  pulp: https://github.com/gvsoc/gvsoc-pulp/tree/3ca2016d056dda72317e27c4319fc6174b5f8c4d
+  softhier-mlir: https://github.com/runwangdl/softhier-mlir/tree/b11cd5fa4f3e717374d1e9ba14442ff302d1f970 (+ patches)
+stamp:      stamp OK
+patches:    0001-shvla-smolvla-dir.patch:145e81bb 0002-shvla-npz-functions.patch:1b9c65fe 0003-shvla-expert-ref-lerobot-0.7.patch:0664b49e 0004-shvla-timeout-flag.patch:2cd6b752 0005-shvla-expert-only-ref-kv.patch:ec77f4bb 0006-shvla-siglip-h-chain-dumps.patch:4575085c 
+exit code:  0
+memory:     peak 1819 MB (scope cap 8G), oom_kill events: 0
+phase expert     ok=True roi=23.971 ms simulated, wall=586.1 s, max child RSS=1319 MB
+------------------------------------------
+```
+
+`gate.py g4a` 原始输出(修正阈值后):
+```
+G4a composed time (ESTIMATE, simulated on GVSoC, ideal HBM, 1 GHz):
+  vision       351.827 ms  = 2 x (embed 0.230 + 12 x layer 14.594 + post-LN 0.550)
+  connector      0.534 ms  (G4a.2 start->emb; G4a.1 1-camera connector 0.395 ms, cross-check only)
+  prefix        32.954 ms  = 2 x 16.477 (8 layers)
+  expert        93.801 ms  = KV projection 0.245 + 10 x 9.356
+  total        479.117 ms
+accuracy of the partial runs:
+  vision VIS vs fp16 floor max abs 0.1633 (|ref| max 44.10)  PASS
+  expert actions vs fp16 floor 0.0029; G2 xt[2] max abs 0.0032 (limit 0.1)  PASS
+G4b projection (measured wall s per simulated ms x composed simulated ms; limit 7200 s per process):
+  V     351.827 ms x   38.05 s/ms =     13386 s =  3.72 h  OVER R1 LIMIT
+  Pa     17.011 ms x   36.21 s/ms =       616 s =  0.17 h  ok
+  Pb     16.477 ms x   36.21 s/ms =       597 s =  0.17 h  ok
+  X      93.801 ms x   30.92 s/ms =      2900 s =  0.81 h  ok
+R1: TRIGGERED: stop and ask the owner before G4b
+written /home/haoze/.cache/softhier-vla/runs/libero/g4a_estimate.json
+```

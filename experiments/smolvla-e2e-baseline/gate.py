@@ -123,7 +123,7 @@ def g4a(vision_dir, prefix_dir, expert_dir, out=None):
     if None in (vis_err, vis_ref, x_floor, x_g2):
         print('gate.py g4a: accuracy fields missing (VIS_vs_floor_max_abs, ref_max, actions_vs_floor, actions_vs_lerobot)', file=sys.stderr)
         return 2
-    vis_ok = vis_err <= 0.08 * vis_ref     # softhier-mlir's tolerance: 3 % of max|ref| (+ 5 % relative)
+    vis_ok = vis_err <= 0.03 * vis_ref     # softhier-mlir's atol: 3 % of max|ref| (its additional 5 % relative term is per element, not applied)
     x_ok = x_g2 <= EXPERT_VS_G2_MAX_ABS
     est = {
         'label': 'estimate (composed from partial simulations on GVSoC, ideal HBM)',
