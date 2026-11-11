@@ -28,7 +28,7 @@ Status values: planned, in progress, done, failed, skipped, blocked (waiting for
 | G2.5 | 13 | `infra/lerobot/README.md` | — | done | infra 84ad868; the log commit |
 | G6b.1 | — | `libero_spatial` 10 × 10; settle OQ2–OQ4 | success rate with interval in LOG.md | done | the log commit |
 | G3.0 | 25 | arch file; `build_arch.sh` with it | `stamp.py check` passes | done | experiment 0c8e7a2 |
-| G3.1–G3.6 | — | ladder rungs 1–6; fork commits (33) when a fix is needed, owner first | each rung's pass column | G3.1 flex_alloc fix done (infra 22d549c); rung 1 FAIL, stopped (see G3.1 entry) | |
+| G3.1–G3.6 | — | ladder rungs 1–6; fork commits (33) when a fix is needed, owner first | each rung's pass column | G3.1 flex_alloc fix done (infra 22d549c); rung 1 FAIL, stopped; power-capture theory refuted, K-tile-256 shapes still exceed the memory cap (see the G3.1 follow-up entry); rungs 2-5 not run | experiment (run.sh + LOG), infra 18ad903, infra 2088d59 (GVSoC d42c382) |
 | G3.7 | 34 | `gate.py g3` on the rung-6 run | gate outcome recorded (PASS or MISS with values) | planned | |
 | G4a.1–G4a.4 | 31 | `run.sh libero prepare`; G4 table steps; `gate.py g4a`; INPUT_CONFIG.md | projection per phase recorded; R1 decision if any phase > 2 h | planned | |
 | G4b | — | full LIBERO chain | every phase finished or the R1 stop recorded | planned | |
@@ -416,3 +416,26 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - Peak RSS: 13.39 GB (watchdog kill, `rung1b-gemm256`); first full run 18.5 GB (max child RSS, `/usr/bin/time`).
 - Run dirs: `$SHVLA_DATA/runs/published/rung1-gemm` and `rung1b-gemm256` (run.log of rung1-gemm is empty: python buffers stdout in the pipe; use `PYTHONUNBUFFERED=1`).
 - Rungs 2-5 not run.
+
+### G3.1 follow-up — run.sh memory cap, `pwr_interval_ps` knob, `GVSOC_POWER_CAPTURE` gate: growth NOT fixed, STOPPED
+
+- Step 1, `run.sh` (this commit): `sim` runs the command inside `systemd-run --user --scope -q -p MemoryMax=${SHVLA_SIM_MEMMAX:-13G} -p MemorySwapMax=0`, exports `PYTHONUNBUFFERED=1`, and maps a cgroup OOM kill (exit 137, or `oom_kill` > 0 in the scope's `memory.events`, or "Killed" in the log) to exit code 4 with a `MEMORY CAP` message. The record block prints `memory: peak N MB ... oom_kill events: K` from the scope's `memory.peak` (cgroup-wide, so it includes page cache; it is not the max RSS). Tested: 200 MB allocation under 13G exit 0 / peak 206 MB; 400 MB under `SHVLA_SIM_MEMMAX=100M` exit 4. For non-e2e scripts the 7200 s `timeout` covers the whole python process. Deleted the stale dirs `$SHVLA_DATA/runs/published/rung1-gemm` and `.../rung1b-gemm256` (their paths are in the G3.1 entry above; not in git).
+- Step 2, infra 18ad903: `build_arch.sh` passes `pwr_interval_ps=$SHVLA_PWR_INTERVAL_PS` (default 9000000000000000, `infra/env.sh`) to `make hw`; `stamp.py` records `build/CMakeCache.txt` `PWR_INTERVAL_PS` and `check` also fails if it differs from the variable (checked: `SHVLA_PWR_INTERVAL_PS=100000000` gives MISMATCH). Evidence the knob took effect: `CMakeCache.txt` `PWR_INTERVAL_PS:STRING=9000000000000000`, and all four `flags.make` under `build/` carry `-DPWR_INTERVAL_PS=9000000000000000LL`; `time_engine.cpp` was recompiled (19 s build). `stamp.py check` OK.
+- Step 3, results (all via `run.sh published sim`, capped):
+
+| build | shape | result | peak | wall |
+| --- | --- | --- | --- | --- |
+| G3.1 (interval 100 us), earlier | `256x256x256` | killed by watchdog at 13 GB | 13.39 GB | ~35 s |
+| knob 9e15 | `256x256x256` (`rung1a-gemm256`) | FAIL roi=None, cap kill, exit 4, no `ice_power` line in run.log | 13312 MB | 31 s |
+| knob + gate (GVSoC d42c382, env unset) | `256x256x256` | FAIL, cap kill | 13312 MB | 42 s |
+| knob + gate | `256x256x256:256,256,256` | FAIL, cap kill | 13312 MB | 48 s |
+| knob + gate | `256x768x192:256,256,192` (`rung1c-gemm768`) | PASS, GEMM_PASS, ROI 32050 ns (identical to the earlier run), samples bad=0 | 482 MB | 4.0 s |
+| knob + gate | `256x256x192:256,256,192` | PASS, ROI 11054 ns | 333 MB | 3.5 s |
+| knob + gate, cap 4G | `256x256x256:256,256,256` (`rung1d-k256`) | FAIL, cap kill | 4096 MB | ~25 s |
+| knob + gate, cap 4G | `256x768x256:256,256,256` | FAIL, cap kill | 4096 MB | 12 s |
+
+- Corrected diagnosis: the power-capture theory in the G3.1 entry is wrong as a cause. Removing the `make ice_power` calls (knob) and the capture itself (gate) leaves the growth unchanged; the `ice_power` warnings appeared only because the hung run kept going past 100 us of simulated time. 256x256x256 is about 16.8 M MACs (cheaper than the 37.7 M-MAC shape that passes in 32 us), so it should finish in tens of us. The data separates the shapes by the K tile: tile K = 192 passes, tile K = 256 (including the default tile of `256x256x256`) never prints a ROI and grows without bound (about 300 MB/s). Working hypothesis: the simulated program does not terminate (hang or livelock) with K tile 256 in this arch/SDK combination, and something in the simulator grows while it runs. Five of the seven default rung-1 shapes use K tile 256. gdb attach is blocked (`ptrace_scope`), so which model spins is unknown.
+- GVSoC commit d42c382 (amended from 6710e0a: the first message called it a fix) keeps the env gate in `soft_hier/gvsoc_core.patch` and the `core` working tree; it is harmless and removes the failing `system()` call but is not the fix. Parent pointer: infra 2088d59.
+- Proposals (need the owner, they change the simulator or arch): (a) bisect with GVSoC before 074b153 or the upstream release tree to see whether `256x256x256:256,256,256` completes; (b) check the TCDM budget of K-tile-256 against `cluster_tcdm_size = 0x100000` and the owner's real arch file (the arch here is `Arch()` output; `implementation/` arch differs in unknown fields); (c) find the spinning model with `perf`/`gdb` where ptrace is permitted, or run with `--trace=` for a short bounded time. Rungs 1 (full), 2-5 not run.
+- Run dirs (`$SHVLA_DATA/runs/published/`): `rung1a-gemm256`, `rung1c-gemm768`, `rung1d-*`.
+- **What to inspect**: the table above; `rung1a-gemm256/run.log` (no `ice_power`, no `[gemm]` line); `git -C third_party/gvsoc show d42c382`.

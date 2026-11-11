@@ -20,7 +20,13 @@
 #            again with the same run name resumes (finished phases are reused); put --fresh after `--` to
 #            re-simulate them.
 #
-# Exit codes: 0 pass, 1 fail, 2 refused (usage, stamp or patch), 3 stopped by the timeout.
+# Every sim runs in a systemd user scope with MemoryMax=$SHVLA_SIM_MEMMAX (default 13G) and no swap, so the
+# kernel kills it at the cap instead of the host swapping. The record block reports the scope's peak memory
+# (cgroup memory.peak: includes page cache). For scripts other than smolvla-e2e the timeout covers the whole
+# python process, not each simulator process.
+#
+# Exit codes: 0 pass, 1 fail, 2 refused (usage, stamp or patch), 3 stopped by the timeout,
+# 4 killed at the memory cap.
 set -euo pipefail
 
 EXP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,7 +34,7 @@ SHMLIR="$EXP/softhier-mlir"
 PATCHES="$EXP/patches"
 
 usage() {
-    sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
 
@@ -150,6 +156,7 @@ print_record() {   # app-dir, exit code
     echo "stamp:      $STAMP_LINE"
     echo "patches:    $(for f in "$PATCHES"/[0-9][0-9][0-9][0-9]-*.patch; do printf '%s:%s ' "$(basename "$f")" "$(sha256sum "$f" | cut -c1-8)"; done)"
     echo "exit code:  $rc"
+    echo "memory:     peak $(cat "$app/.mem_peak_mb" 2>/dev/null || echo '?') MB (scope cap ${SHVLA_SIM_MEMMAX:-13G}), oom_kill events: $(cat "$app/.mem_oom" 2>/dev/null || echo '?')"
     python - "$app" <<'PY'
 import json, pathlib, sys
 app = pathlib.Path(sys.argv[1])
@@ -209,7 +216,17 @@ do_sim() {
         cmd=(timeout "$SHVLA_SIM_TIMEOUT" "${cmd[@]}")
     fi
 
-    echo "[sim] $CONFIG/$RUN_NAME: ${cmd[*]}   (limit ${SHVLA_SIM_TIMEOUT} s per simulator process)"
+    export PYTHONUNBUFFERED=1
+    rm -f "$app/.mem_peak_mb" "$app/.mem_oom"
+    # The wrapper runs inside the scope and writes the scope's peak memory and OOM-kill count when the command ends.
+    local wrap='"$@"; rc=$?; d=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup);
+        echo $(( $(cat $d/memory.peak 2>/dev/null || echo 0) / 1048576 )) >"$SHVLA_MEMOUT.mem_peak_mb";
+        awk "/^oom_kill /{print \$2}" $d/memory.events >"$SHVLA_MEMOUT.mem_oom" 2>/dev/null; exit $rc'
+    cmd=(systemd-run --user --scope -q -p "MemoryMax=${SHVLA_SIM_MEMMAX:-13G}" -p MemorySwapMax=0
+         env "SHVLA_MEMOUT=$app/" bash -c "$wrap" wrap "${cmd[@]}")
+
+    echo "[sim] $CONFIG/$RUN_NAME: ${cmd[*]}   (limit ${SHVLA_SIM_TIMEOUT} s; memory cap ${SHVLA_SIM_MEMMAX:-13G}, no swap)"
+    free -g | sed -n 2p
     local rc=0 start=0
     [ -f "$app/run.log" ] && start=$(stat -c %s "$app/run.log")
     set +e
@@ -221,7 +238,12 @@ do_sim() {
     # only the text this invocation appended (a resumed run keeps the earlier output in the same file)
     tail -c +$((start + 1)) "$app/run.log" >"$app/.this_run.log"
     local code=0
-    if [ "$rc" -eq 124 ] || grep -q "TimeoutExpired" "$app/.this_run.log"; then
+    local oom=0
+    [ -f "$app/.mem_oom" ] && oom=$(cat "$app/.mem_oom")
+    if [ "$rc" -eq 137 ] || [ "${oom:-0}" -gt 0 ] || grep -Eq "oom-kill|Out of memory|^Killed$|Killed +.*gvsoc" "$app/.this_run.log"; then
+        echo "[sim] MEMORY CAP: killed at ${SHVLA_SIM_MEMMAX:-13G} (exit $rc, oom_kill events ${oom:-0}); peak $(cat "$app/.mem_peak_mb" 2>/dev/null || echo '?') MB" >&2
+        code=4
+    elif [ "$rc" -eq 124 ] || grep -q "TimeoutExpired" "$app/.this_run.log"; then
         code=3
     elif [ "$rc" -ne 0 ]; then
         code=1
