@@ -864,3 +864,53 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - **剩余差距:** rung 1 的纯 GEMM 与 published 一致;非 GEMM 段仍偏快:qkv 0.234 vs 0.324(-28 %)、attention 0.497 vs 0.831(-40 %)、rest 0.793 vs 1.040(-24 %)、layer 1.524 vs 2.195(-31 %);siglip_encoder_layer -38.6 %;rung 6 总 -23.5 %。
 - **其它未应用 / 私有的候选(未验证,不再做修复):** (a) **`models_fast`**(`gvsoc_iss_host_speed.patch`):笔记 §"Host speed of the Snitch ISS" 明说是 behaviour-neutral(只改 host 侧的拷贝 / trace / `strstr` 缓存:`iss_insn_t` 按值拷贝次数、`sprintf` trace 格式化、label 谓词缓存),所以按文字不改周期;`gvsoc_iss_host_speed.patch` 不在本机(`softhier-mlir/tools/iss_fast/` 只有 `classify.py gen_makefile.py sample.sh`,全盘无 `*host_speed*`),**没法读补丁,也没法实测**,只能引用笔记;它也没有 #1 的守卫之外的时序语义。(b) #2 zfh(库不用标量 fp16,不影响)、#6 / #8(库用软件 workaround 回避,属正确性)、#4 / #9(崩溃 / hang,不是时序)。(c) **#7 instr_router / 32 B prefetcher / 无 RVC**:笔记说一个 `instr_router`(8 B/cycle)被三个核共用、非 RVC;这是模型 / arch 配置的性质,若 published 的 119.1 ms / DSE 用的 arch(例如指令 cache 或 router 宽度,`softhier_mlir_arch.py`)与我们不同,行操作段会差很多 —— 对 -24…-40 % 且只出现在非 GEMM 段的形态最吻合,**建议 owner 对照作者的 arch 文件**(未验证)。(d) FPU 流水线 / latency 配置(`get_latency`,`flexfloat`)与作者私有分支可能不同;(e) published 的 marks 是否包含我们没算的 host 同步 / 屏障开销。以上都需要 owner 决定,按规则不再动 GVSoC。
 - Simulators:全部已停止(`pgrep gvsoc_launcher` / `gapy` 为空)。Logs:`$SHVLA_DATA/runs/published/g33-{rungc,rung1,rung2,rowops,siglipenc}/run.log`。
+
+### G3.3-gap — 时间差距定位:**verdict (a)**,环境参数 = `instr_mem` 的 `width_log2=-1`(我们的 GVSoC)vs 默认 `2`(deeploy / 作者的 GVSoC);用 scratch 生成器 shim 一次性复现 published 的 rowops 逐 op 数值(<1 %)、rung c 的 DSE §8.3 marks、rung 3 的 2.29 ms/层;**未改任何受跟踪文件**,只给出 proposal
+- **范围:** 有界定位,6 个短 sim(5 个 ≤ 12 s 的 rowops / 2 个 ~50 s 的 rung c / rung 3),`SHVLA_SIM_MEMMAX=8G`,一次一个,`free` available 11 GB,没有 perf / gdb / strace。没有改 GVSoC、arch、softhier-mlir。
+- **Q1 逐 op 对比。** published = `docs/SIMULATOR_NOTES.md` "Row-wise / elementwise fp16 ops" 表(`run.py rowops --rows 256 --cols 768`,commit **583b24a**,2026-10-08 14:05)。`runtime/sh_rowops.inc.c` 自 583b24a 之后**没有再改**(`git log -- runtime/sh_rowops.inc.c`:583b24a 是最后一个);从 DSE §8.3 的测量点 8565c57 到 b11cd5f,`git diff --stat -- runtime/` 对 `sh_simd.inc.c` / `sh_rowops.inc.c` / `sh_attention.inc.c` / `sh_l1.inc.c` 为空,`sh_ops.h`(+186)和 `sh_rt.inc.c`(+41)只有**纯插入**(新 kernel 声明、per-core stack),没有删改。所以 rowops 这张表与 b11cd5f 的 kernel 代码相同 —— **编译器 / codegen 进步不能解释 rowops 的差距**。
+
+| op | published all-16 (µs) | 我们(原状) | % | 我们 + instr_mem=2 | % | published cluster 0 (µs) | 我们 cl.0 (原状) | % |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LN | 149 | 83.98 | -43.6 | **148.7** | -0.2 | 2020 | 1054 | -47.8 |
+| SM | 145 | 81.14 | -44.0 | **145.1** | +0.1 | 2140 | 1068 | -50.1 |
+| GELU | 123 | 85.55 | -30.4 | **122.2** | -0.7 | 1810 | 1239 | -31.5 |
+| ADD | 22 | 21.50 | -2.3 | 22.1 | +0.4 | 145 | 142 | -2.1 |
+| BIAS | 27 | 20.88 | -22.7 | 27.1 | +0.5 | 158 | 148 | -6.4 |
+| SCALE | 17 | 15.77 | -7.2 | 16.8 | -1.0 | 128 | 125 | -2.7 |
+| T(iDMA 转置) | 25 | 57.94 | **+132** | 58.2 | +133 | 231 | 619 | **+168** |
+| 合计 | 508 | 366.8 | -27.8 | 541.2(含 T) | +6.5 | 6630 | 4394 | -33.7 |
+
+  形状:**差距集中在取指受限的 op(LN / SM / GELU:-30…-50 %),inner loop 不取指的 ADD / SCALE / BIAS 几乎持平**(SIMULATOR_NOTES #7 的签名:"cluster 是 instruction-fetch bound,~1 instr/cycle")。所以不是均匀的全局 core / FPU 参数,而是**指令取指路径**。(cluster-0 的 per-op 数据取自 `fixrm-rowops/run.log`;all-cluster 的第 4 列来自本次 gap run;published 值 SIMULATOR_NOTES 只给了 ms 三位,故 µs 值含舍入。)
+  **T(转置)与取指无关**(`2` 之后仍 58 µs):published 25 µs,我们 2.3× 慢。这是**独立的第二个偏差**:我们的 b11cd5f kernel 是 iDMA 2-D gather(`SH_TRANSPOSE_CORES=0`),所以疑点在 iDMA 的 2-D 路径(我们的 GVSoC 另有 `0e4d719` / `2910e62` 两个 iDMA 修复,以及 ours 多了 `TransposeEngine` 单元)。**没有追**(超出本次预算;不影响 rung c / rung 3:rung c 的 T 只有 kT 转置在 attention 里,marks 吻合),留作待办。
+- **Q1 其他已发表数值与 commit。**
+  - DSE §8.3 的行 "per-head attention, cost-model tiles"(0.324 / 0.831 / 1.040 / 2.195):`tests/gvsoc/run.py siglip-mlir` 默认就是 per-head + `tiles=model`(`run.py:330` `fused=False`),所以 rung c 与它是同一配置。测于 2026-10-08 19:xx,commit 43d72ec 之后 / **合并 origin/main(8565c57)之前**,DSE.md 末段原话:"stock Snitch ISS, on-device test data"。之后的提交对行操作 kernel 没有 perf 改动(sh_rowops 未动;`sh_gemm` 的 GEMM 部分我们与 published 一致)。siglip frontend 之后只有 8565c57 合并(untimed dumps)与 mark 同一定义 —— 见 Q4。
+  - SMOLVLA.md:22706bf 的 "2.29 ms/层"(per-head,256 tokens);rung 6 published 119.1 ms(commit 66679cd)。
+  - 没有找到 attention / softmax 单独的、我们能直接复现的新增表(`run.py attention` 的 fused 表 0.556 ms 属于 fused 路径,本次没跑,不需要)。
+- **Q2 arch / 模型 diff(所有不同的参数)。**
+  1. **`arch/softhier_mlir_arch.py` 与 `Arch()` 默认**:该文件就是 `Arch().to_py()` 生成的(文件头),按构造相同。与 deeploy 的 `soft_hier/flex_cluster/flex_cluster_arch.py` 比较:仅 `hbm_node_addr_space`(deeploy 0x00200000,我们 0x04000000 / 树内默认 0x02000000)、`hbm_node_aliase`(我们有)、`hbm_chan_placement`(deeploy 树内 [4,0,0,0],我们 [4,0,0,4])—— 都是 HBM 相关,G3.2-diag5/6 已排除 HBM 模型;`num_cluster/redmule/idma_outstand/noc_*/instruction_mem_size` 一致。
+  2. **生成器 `soft_hier/flex_cluster/cluster_unit.py`(=`pulp/pulp/chips/flex_cluster/cluster_unit.py` 同一行,安装到 `install/generators/pulp/chips/flex_cluster/`)vs deeploy:**
+     - **`:209` `instr_mem = Memory(..., width_log2=-1, ...)` vs deeploy 默认 `width_log2=2`(`:203` 无参数)** ← **决定性参数**。Memory 模型 `soft_hier/flex_cluster/memory.cpp:241-247`:`if (width_bits != 0) duration = MAX(size >> width_bits, 1)` 并串行化 `next_packet_start`。`-1` 在 x86 上 `size >> -1` 实际是 `size >> 63 = 0` → duration = 1 周期 / 包(实际无带宽限制);`2` → 32 B 取指行 8 周期 / 包(4 B/cycle)。
+     - `:212` `instr_router bandwidth=8*arch.nb_core`(生成的 config 里是 **40**)vs deeploy `bandwidth=8`(SIMULATOR_NOTES #7 的 "8 B/cycle")。单独设成 8 只回来一部分(见 Q3 run A);**设了 instr_mem=2 之后 router 带宽已不是限制**(run B ≈ run C)。
+     - `:240` `fpu_sequencer latency=0`(ours 才有,Sequencer);`:206`/`:369` `INST_PREHEAT_DONE` / `FETCH_START`(ours)vs `FETCHEN`(deeploy):启动连线不同,影响的是 ROI 之前的起跑时刻(marks / ROI 的 start 在 barrier 之后),本次没有单独测。
+     - 其它只是新功能:`TransposeEngine`、`tech_node`、`spatz_vlsu_bw`、`data_dumpper_ctrl_size 20→64`、`HBM_PRELOAD_DONE`。
+  3. **FPU 流水线 / latency(`get_latency`、flexfloat):** `snitch_fp_ss.cpp` 与 deeploy 只差我们的 side-note #1 守卫(`:249-258`);`get_latency`(`:331-392`)逐行相同;`exec_inorder.cpp` 只多两行 trace。`flexfloat.c` / `rv32v` / `spatz` 在 diff 列表里但与 Snitch FP 时序无关(spatz 不用,`spatz_attaced_core_list=[]`)。**没有 FPU latency 差异。** RVC:cores 不执行 compressed 指令(SIMULATOR_NOTES #7 / TTT #12),双方一致。
+  4. `gvsoc_core.patch` / `gvsoc_pulp.patch` 的差异:我们多了 #10 / #1 / iDMA / RedMulE 修复与 power 的 CMake 开关;时序相关的已逐一排除(G3.2-fix10、G3.2-diag5、G3.3-fix1)。
+  5. 取 `-1` 的来源:两棵树都只经 `a8b40d7` "SoftHier Squashed"(2026-02-23)进入,`git blame` 无法定年代;`-1` 是我们 release 分支比 deeploy 分支新的上游改动,不是我们的任何补丁。
+- **Q3 测试(shim,不碰受跟踪文件)。** 方法:`run_sim` 把 `--target-dir=$SOFTHIER_HOME/install/generators` 写死,.so 的 `SOFTHIER_MODEL_DIR` 换不了生成器参数,所以在 scratch(`/tmp/shvla_shim/sitecustomize.py`,通过 `PYTHONPATH` 注入;用完已删除)里用 `importlib` MetaPathFinder 在 `interco.router` / `pulp.chips.flex_cluster.memory` 加载后包装 `__init__`:`name=='instr_router'` 时覆盖 `bandwidth`,`name=='instr_mem'` 时覆盖 `width_log2`。命中次数写进 `hits.log`(每个 cluster 一行,16 个 cluster × 2 个 import 路径 = 32 或 64 行,证明 shim 生效)。全部经 `run.sh published sim`(stamp OK,cap 8G,peak ≤ 864 MB,oom 0)。
+
+| run | 参数 | 结果 |
+| --- | --- | --- |
+| A `gap-rowops-all-r8` | router 8,instr_mem -1 | LN 92.5 / SM 91.6 / GELU 88.6 / ADD 21.6 / BIAS 22.5 / SCALE 16.0 / T 58.0 µs(合计 391)—— 只回来一部分 |
+| B `gap-rowops-all-r8m2` | router 8 + instr_mem 2 | **LN 148.8 / SM 145.0 / GELU 122.9 / ADD 22.1 / BIAS 27.3 / SCALE 16.8 µs**,T 58.2 —— 与 published 149 / 145 / 123 / 22 / 27 / 17 逐项在 1 % 内 |
+| C `gap-rowops-all-m2` | **只** instr_mem 2(router 仍 40) | LN 148.7 / SM 145.1 / GELU 122.2 / ADD 22.1 / BIAS 27.1 / SCALE 16.8 / T 58.2 —— 与 B 相同 ⇒ **instr_mem 是主因,router 宽度不重要** |
+| D `gap-rungc-r8m2`(siglip-mlir --seq 256 --cluster all,router 8 + mem 2) | exit 0,11 tag PASS,ROI 2241046 ns,wall 47 s | marks **qkv 0.324 / attention 0.867 / rest 1.044 / layer 2.235 ms**;DSE §8.3 0.324 / 0.831 / 1.040 / 2.195:**0 / +4.3 / +0.4 / +1.8 %**(原状 0.234 / 0.497 / 0.793 / 1.524) |
+| E `gap-rung3-m2`(smolvla --layers 1,只 mem 2) | exit 0,EMB / L1 / OUT PASS(误差与 fix-redmule 一致) | **2.265 ms/层**(attention 1.224 + mlp+proj 1.040);published 2.29:**-1.1 %**(原状 1.625,-29 %) |
+
+  残余:attention 段 +4.3 %(0.867 vs 0.831)。它是 per-head attention(GEMM + softmax + `kT` 转置),与 T 的偏差(上表)同向(转置我们慢 2.3×)是个合理的候选;没有在本次验证,量级小。
+  跑 rung 4 / 5 / 6 / gate 要 > 2 min(sim 2 min 限制),本次没有跑;按 rowops / rung c / rung 3 的一致性,预期 expert / prefix 的偏快也同样消失,但**这是预期,不是测量**。
+- **Q4 mark 定义。** `softhier.mark` 的位置 / 含义在 b11cd5f 与 DSE §8.3 测量时相同(frontend `siglip.py` 自 1aa6534 / 8565c57 后没有再动 mark 逻辑);DSE §8 说的 "older ROI 含 ~2 ms dumps" 只影响 ROI,不影响 marks(我们本来就用 marks 段)。run D 的 marks 与 published 吻合(qkv / rest < 0.5 %)说明 mark 定义不是差距来源。run.py 里 mark 行的 start 到 qkv0 的 0.324 ms 与 published 的 0.324 完全一致。
+- **Verdict (a):特定环境参数。** 我们的 GVSoC release 分支(a8b40d7 squash 起,`soft_hier/flex_cluster/cluster_unit.py:209` 与 `pulp/pulp/chips/flex_cluster/cluster_unit.py:209`)把 `instr_mem` 建成 `width_log2=-1`(= 无取指带宽限制),作者的 deeploy 分支用默认 `2`(32 B 取指行 8 周期)。作者的 published 数字(DSE §8.3、SIMULATOR_NOTES rowops 表、rung 6 的 119.1 ms)是在取指受限的内存上测的。把 instr_mem 设回 2:rowops 6 个 op 与 published 偏差 < 1 %,rung c marks 偏差 0 / +4 / +0.4 / +1.8 %,rung 3 2.265 vs 2.29 ms。
+  **不是**(b)(rowops kernel 自 583b24a 没改,且改回 2 就吻合)。
+- **Proposal(未应用,需要 owner 批准;按"已知 side-note 之外的 GVSoC 改动先 proposal"规则):** 在**两处**(`third_party/gvsoc/soft_hier/flex_cluster/cluster_unit.py:209` 和 `third_party/gvsoc/pulp/pulp/chips/flex_cluster/cluster_unit.py:209`,GVSoC 与 pulp 子模块各一个提交,同 G3.1-fix 的 two-place 规则;`soft_hier/gvsoc_pulp.patch` 也要同步)去掉 `width_log2=-1`(回到默认 2)。`instr_router` 的 `8*arch.nb_core` 可以不动(run C 表明不重要);要完全对齐 deeploy 也可以改回 8(run B ≈ C)。改了之后:重新 `build_arch.sh`(`stamp.py write`),重跑 rung c(预期 0.324 / 0.867 / 1.044)、rung 1/2(GEMM 不应变)、rowops、然后 rung 3-6 + `gate.py g3`(预期总时间落进 119.1 ms ±5 %)。**这会让 G3 gate 的时间项从 MISS 变成(预期)PASS**,也会改变 G4 的所有周期数,所以应该先改再进 G4。
+- **T(iDMA 转置)偏差:** 与取指无关,2.3× 慢;未解决,不影响 marks;记为待办(见上)。
+- 状态:**unresolved 部分只有** attention +4.3 % 与 T。Simulators:全部已停止(`pgrep gvsoc_launcher` / `gapy` 为空);shim 已删除,`stamp.py check` OK。Logs:`$SHVLA_DATA/runs/published/gap-{rowops-all-r8,rowops-all-r8m2,rowops-all-m2,rungc-r8m2,rung3-m2}/run.log`。
