@@ -9,7 +9,7 @@
 #                                              shvla/soft_hier_release, which has the same tree)
 #   HEAD == BASE, tracked files clean      -> git am the series, then assert the tree
 #   anything else                          -> refuse (exit 1) with the reason
-# Run it after the submodule checkout and before `make softhier_preparation`: two of the patches change
+# Run it after the submodule checkout and before `make softhier_preparation`: five of the patches change
 # soft_hier/gvsoc_core.patch and gvsoc_pulp.patch, which the preparation applies to the nested repos.
 # Committer identity and date are fixed (date = author date), so the commit ids are the same everywhere.
 set -euo pipefail

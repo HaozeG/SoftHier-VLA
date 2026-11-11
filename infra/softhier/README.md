@@ -118,7 +118,7 @@ and cannot build `-march=rv32imafdv_zfh`, which the SDK uses when the arch file 
 
 The fixes to GVSoC (`gvsoc-patches/`, table in its README) are not in a fork. `third_party/gvsoc` is pinned at
 upstream `soft_hier_release` `d806a84` (`.gitmodules` keeps the upstream URL), and `setup.sh` runs
-`apply_gvsoc_patches.sh`, which `git am`s the ten patches before the preparation (two of them change
+`apply_gvsoc_patches.sh`, which `git am`s the ten patches before the preparation (five of them change
 `soft_hier/gvsoc_core.patch` and `gvsoc_pulp.patch`, which the preparation applies to the nested repositories). The
 script is idempotent: a tree that already has the series (second run; the developer's tree on the local branch
 `shvla/soft_hier_release`) is recognised by its tree id and left alone; a tree at any other commit is refused.

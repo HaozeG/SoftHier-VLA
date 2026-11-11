@@ -74,7 +74,7 @@ fi
 (cd "$here" && uv sync)
 
 # ---------------------------------------------------------------- 2b. GVSoC patch series
-# Before the preparation: two patches change soft_hier/gvsoc_core.patch and gvsoc_pulp.patch, which
+# Before the preparation: five patches (0002, 0003, 0005, 0006, 0009) change soft_hier/gvsoc_core.patch and gvsoc_pulp.patch, which
 # `make softhier_preparation` applies to the nested core and pulp repositories.
 bash "$here/apply_gvsoc_patches.sh" "$gvsoc"
 
