@@ -446,7 +446,7 @@ SR-B and SR-C are deferred, not rejected (G0).
 *   Infra and experiment commits interleave on this branch (later facts amend files 6, 7 and 13). `infra-baseline` is therefore built at the end, not set at a commit: a new branch from `main`, then `git cherry-pick` of the infra commits in order. They are listed by `git log --reverse --format=%H main..HEAD -- .gitignore README.md docs infra third_party`, plus any commit that touches only the GVSoC entry of `.gitmodules`. The branch is offered to `main` as a pull request.
 *   Because `.gitmodules` holds both submodule entries, the GVSoC entry is added in an infra commit (G1.1) and the softhier-mlir entry in a separate experiment commit (G2.2); the cherry-pick of G1.1 then applies cleanly.
 *   The wiki commits on its own branch inside the submodule, as the wiki's CLAUDE.md requires. Bumping the parent's wiki pointer is the owner's call, and the bump is offered as a separate commit.
-*   Owner approval is needed for: `sudo apt-get install` (if prerequisites are missing), creating the public forks, and pushing or opening the pull request.
+*   Owner approval is needed for: `sudo apt-get install` (if prerequisites are missing), pushing or opening the pull request.
 
 ### Step log (manual inspection)
 

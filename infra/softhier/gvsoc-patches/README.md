@@ -61,7 +61,7 @@ ancestor of `HEAD`. So a tree that is not base + series cannot pass the stamp ch
     ```
     rm infra/softhier/gvsoc-patches/0*.patch
     git -C third_party/gvsoc format-patch --no-signature --zero-commit -o <ABSOLUTE>/infra/softhier/gvsoc-patches d806a84c5785237547f504c2e34a4d9f230cb437..HEAD
-    ls infra/softhier/gvsoc-patches/0*.patch > infra/softhier/gvsoc-patches/series
+    (cd infra/softhier/gvsoc-patches && ls 0*.patch > series)
     ```
 
     Then set `TREE` in `expected` to `git -C third_party/gvsoc rev-parse 'HEAD^{tree}'` and `SERIES_SHA256` to
