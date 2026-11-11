@@ -28,7 +28,7 @@ Status values: planned, in progress, done, failed, skipped, blocked (waiting for
 | G2.5 | 13 | `infra/lerobot/README.md` | — | done | infra 84ad868; the log commit |
 | G6b.1 | — | `libero_spatial` 10 × 10; settle OQ2–OQ4 | success rate with interval in LOG.md | done | the log commit |
 | G3.0 | 25 | arch file; `build_arch.sh` with it | `stamp.py check` passes | done | experiment 0c8e7a2 |
-| G3.1–G3.6 | — | ladder rungs 1–6; fork commits (33) when a fix is needed, owner first | each rung's pass column | G3.1 flex_alloc fix done (infra 22d549c); iDMA fix applied (GVSoC 0e4d719) and verified; rung 1 PASS (7/7, timing +46 % vs published on the 16-cluster shapes); rung 2 FAIL/STOPPED: `gemm1024_summa.mlir` memory blow-up (8 GB in 18 s), `siglip_encoder_layer.mlir` killed at the 8G cap after 502 s (see G3.1-rung2); rungs 3-5 not run | experiment (run.sh + LOG), infra 18ad903, infra 2088d59 (GVSoC d42c382) |
+| G3.1–G3.6 | — | ladder rungs 1–6; fork commits (33) when a fix is needed, owner first | each rung's pass column | G3.1 flex_alloc fix done (infra 22d549c); iDMA fix applied (GVSoC 0e4d719) and verified; rung 1 PASS (7/7, timing +46 % vs published on the 16-cluster shapes); ideal-HBM switch added (GVSoC cdb56a2, infra 1d195b0): rung 1 now matches published (1024x3072x768 520114 ns vs 520.5 us); rung 2: 6 of 9 PASS, `gemm1024_summa` and `siglip_encoder_layer` hang (DMA never completes in `hbm_fill`, memory flat, see G3.1-ihbm); rungs 3-5 not run | experiment (run.sh + LOG), infra 18ad903, infra 2088d59 (GVSoC d42c382) |
 | G3.7 | 34 | `gate.py g3` on the rung-6 run | gate outcome recorded (PASS or MISS with values) | planned | |
 | G4a.1–G4a.4 | 31 | `run.sh libero prepare`; G4 table steps; `gate.py g4a`; INPUT_CONFIG.md | projection per phase recorded; R1 decision if any phase > 2 h | planned | |
 | G4b | — | full LIBERO chain | every phase finished or the R1 stop recorded | planned | |
@@ -574,3 +574,28 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - 未执行:rung 3-5(按 "stop at the first unresolved failure")。
 - 提议(待 owner):(1) 对 `gemm1024_summa` 抓 iDMA be + floonoc trace(<=50 MB)找最后一个 stall;若同类漏唤醒则在 `gvsoc_pulp.patch` + 补丁后的工作树里补一行;(2) 查 GVSoC 里随模拟时间线性增长的内存(trace/stat buffer 或 event 记录);(3) 或 owner 批准把 `SHVLA_SIM_MEMMAX` 对 siglip_encoder_layer 提高到 13G 做一次区分(违反本次 8G 硬限,所以没做);(4) rung 3-5 可以先跑(它们预计在 8G 内:rung 3 约 2 GB),但按指示没有继续。
 - What to inspect: `rung2-mlir` / `rung2-summa` 的 record block(exit 4,oom_kill);siglip 的 peak 8192 MB 与 502 s;上表里 7 PASS / 2 FAIL;summa 在 18 s 内涨 8 GB 的速度(~450 MB/s,远快于线性增长,所以是挂死/空转而不是泄漏)。
+
+### G3.1-ihbm — ideal-HBM switch (SOFTHIER_IDEAL_HBM), rung 1 re-run, rung 2: 6/9 PASS, STOPPED at a DMA hang in `hbm_fill` (R2)
+
+- **Switch (owner decision).** softhier-mlir 的 `run_sim` 设了 `SOFTHIER_IDEAL_HBM=1`,但 GVSoC 里没有任何代码读它,`flex_cluster.py` 一直实例化 `memory.dramsys.Dramsys`(SIMULATOR_NOTES #5 说的是私有 patch)。在本地分支 `shvla/soft_hier_release` 加开关:GVSoC `cdb56a2`,父仓库 infra `1d195b0`(设计文档 side-note 第 5 行 + env 说明: infra `1afd775`)。`soft_hier/flex_cluster/flex_cluster.py` 是 GVSoC 里直接 tracked 的文件(`make config` 把它拷到 `pulp/pulp/chips/flex_cluster` 和 `install/generators`),所以直接改+提交,不需要 patch 文件。`SOFTHIER_IDEAL_HBM=1` 时,每个 HBM channel(placement 不变,(4,0,0,4) 对应的 8 个)用 `flex_cluster.memory.Memory(size=整个 HBM 地址窗口, width_log2=0, latency=0, atomics=False)` 代替 Dramsys:同一个 `input` 口、同样的 `hbm_ctrl` 绑定、同样的地址映射;`width_log2=0` 即 `width_bits==0`,`soft_hier/flex_cluster/memory.cpp` 里不加带宽限制(duration 不设),latency 0 = 零额外延迟、无限带宽。size 取整个窗口是 hbm_ctrl 产生的 channel 内 offset 的安全上界(calloc,没碰的页不占内存)。
+- **Build-time vs run-time.** run-time:gapy 生成 config 时读环境变量(`os.environ`),`make hw` 不读。但 `install/generators` 里是拷贝,所以改完要 `build_arch.sh` 一次(4 s,`stamp OK`;stamp 里 GVSoC commit 已覆盖源码变化)。`build_arch.sh` / `stamp.py` 不需要改,没有给 stamp 加字段:构建时没有设该变量,`run_sim` 运行时设了,ROI 从 759705 ns 变成 520114 ns 就是证据。`infra/softhier/README.md` 新增 "Ideal HBM" 一节(注意从 `run_kernel_tests.sh` 起的 kernel 测试不经过 `run_sim`,仍是 DRAMSys,除非自己 export)。
+- **Verify.** `ihbm-check`(默认 spec `1024x3072x768`)ROI 1049223 ns,**不可比**(默认 tile/pipeline 不是 published 的那个)。可比的 spec `1024x3072x768:256,256,256,1,0,all`(`ihbm-check2`):**PASS,ROI 520114 ns**(published 520.5 us,-0.07 %),wall 10.4 s,peak 387 MB(DRAMSys: 58.8 s, 607 MB)。
+- **Rung 1 re-run** (`rung1-gemm-ihbm`):7/7 PASS,peak 395 MB(DRAMSys 616 MB),oom 0。
+
+| shape | ROI ns (ideal HBM) | wall s | DRAMSys ROI | published |
+| --- | --- | --- | --- | --- |
+| 256x256x256 | 13102 | 2.0 | 13136 | 14.7-16.7 us |
+| 256x768x192:256,256,192 | 31854 | 2.0 | 32048 | - |
+| 512x768x768:256,256,256 | 131713 | 3.5 | 131955 | 138.9 / 150.8 us |
+| 256x256x256:256,256,256,0 | 13074 | 2.0 | 13108 | - |
+| 256x256x512:256,256,256,1,1 | 19536 | 2.3 | 19595 | - |
+| 1024x768x768:256,256,256,1,0,all | 119415 | 4.5 | 177462 | 120.1 us |
+| 1024x3072x768:256,256,256,1,0,all | 520114 | 10.3 | 759705 | 520.5-520.8 us |
+
+  所以 16 cluster 的 +46-48 % 偏差完全是 DRAMSys 造成的,理想 HBM 下与 published 一致(rung 1 的 known deviation 作废)。
+- **Rung 2** (`rung2-mlir-ihbm`, 9 个 example; 之后为了避开 summa 单独跑另外 7 个 `rung2-siglip-ihbm`):`add_test` 910393 ns、`gemm256` 76984、`gemm512` 85800、`gemm512_linalg` 85800、`gemm_nonconst` 85804、`mlp` 1064054、`mlp_linalg` 1064054 都 PASS,self-check 全 ok(`add_test` 65536/65536, gemm512 系 262144/262144, mlp 系 65536/65536);`gemm256` 没有 self-check。`gemm1024_summa` 和 `siglip_encoder_layer` **不终止**。第一次 `rung2-mlir-ihbm` 在 summa 上跑了约 5 min 后我手动 kill(没有 record block);`summa-ihbm`(SHVLA_SIM_TIMEOUT=120)exit 3,peak 264 MB;`rung2-siglip-ihbm` siglip 跑了约 13 min(published wall 447 s,17.85 ms 模拟;mlp 约 4 s/模拟 ms,推算应该 <2 min)后手动 kill,gvsoc_launcher RSS 573 -> 736 MB 后完全不变(100 % CPU)。**内存不再随模拟时间增长**(DRAMSys 下 0.3 MB/us 的增长和 summa 450 MB/s 都来自 DRAMSys 路径;理想 HBM 下 summa 是平的 228 MB)。
+- **Diagnosis of summa(有界 trace,管道 `tail -c`/`head -c`,未超过 50 MB)。** 流程不是 pass table 的问题(`run.py` 的 `EXAMPLE_PASSES` 对 summa 是 `linalg-to-softhier,distribute-summa,pipeline-gemm`)。`/chip/cluster_0/.*` trace 的最后 4 MB(约 21.66 ms 模拟时间)里只有 cluster_0 `pe2` 在 `sh_test_fill_const_fp16`(`softhier.hbm_fill`,设备端填充输入)里循环 `dmstati t0,0,0x2; bne t0,0,-4`:iDMA 一直报告 busy,其他组件全空闲。核 0 先用 `sh` 往 TCDM `0xf0000..0xf0800` 填 fp16 常数,然后启动 DMA 把它复制到 HBM;TCDM 最后一次被 DMA 读是约 30.7 us(bank 读的最大时间戳),之后什么都没有。所以是 iDMA 传输永不完成(丢唤醒或死锁),不是 HBM、不是 pass、不是 timeout。DRAMSys 下同一个 hang 表现为内存暴涨,理想 HBM 下表现为内存平坦,症状不同、根相同。这和 K-tile-256 hang 同属 iDMA 后端一类,但 iDMA 修复(0e4d719)已在,所以是另一条路径(猜测:`hbm_fill` 的多维/重复 DMA 描述符,或 fix 的 `fsm_event.enqueue()` 与同步零延迟响应的交互)。注:rung 1/mlp 的 DMA 都能完成,`add_test` 也用 `hbm_fill` 但只是一个小 1D 传输。
+- **Not fixed (not a known side-note item: #13/#14 是 REDADD/burst buffer,这里没有 collective)。** 提议:(1) 给 `idma_be.cpp`/`idma_fe` 加临时 trace(或用 `--trace=/chip/cluster_0/idma` 配 `-DTRACE`),看 summa 的 `hbm_fill` DMA 描述符(size/reps/stride)和最后一个未完成的 burst;(2) A/B:在 deeploy scratch tree(`~/.cache/softhier-vla/gvsoc-deeploy`)里跑同一个 summa ELF(`/tmp/shbuild_61379/softhier.elf`,已不在持久目录),看 deeploy 的 iDMA 是否完成;(3) 若是 iDMA 同一类丢唤醒,补一行到 `gvsoc_pulp.patch` + 工作树。siglip 是否卡在同一处没有验证(RSS 平坦、100 % CPU,症状一致,没有取 trace)。
+- 未执行:rung 3-5(按 "stop at the first unresolved failure")。工作树状态:所有模拟进程已停止。
+- 复现: `run.sh published sim summa-ihbm -- tests/gvsoc/run.py mlir examples/gemm1024_summa.mlir`(设 `SHVLA_SIM_TIMEOUT=120`)。
+- What to inspect: (1) ihbm-check2 的 520114 ns 与 rung 1 表;(2) summa 的 trace 结论(pe2 在 `dmstati` 轮询,其他组件空闲);(3) 提议 (1)-(3) 由 owner 选。
