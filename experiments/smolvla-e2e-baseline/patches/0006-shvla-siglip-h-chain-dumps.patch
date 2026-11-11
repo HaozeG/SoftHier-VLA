@@ -12,9 +12,9 @@ what:     frontend/siglip.py emit() and testing/siglip_ref.py layer_reference().
           SHVLA_SIGLIP_H_REGEMM=1 as well: the o-proj gemm runs a second time into %ao (OIN2 = %o, AOR2 = %ao after it).
           SHVLA_SIGLIP_H_FULL=<m> as well: m samples (large m ~ the whole tensor) of q / k / v / o at the end (QF KF VF OF)
           and of q / k / v after their gemm (QG KG VG, raw) and after add_bias (QB KB VB), same points for G / B / F.
-          siglip_ref.layer_reference() returns the matching reference keys (OIN OEND OIN2 WOI BOI AOR AOR2 AOB HCH OH<h> PH<h>
-          QF KF VF OF QG KG VG QB KB VB); tests/gvsoc/run.py already compares every reference key whose tag the device
-          printed (and skips the others), so no checker change.
+          siglip_ref.layer_reference() returns the matching reference keys ONLY when SHVLA_SIGLIP_H_DUMPS is set (`run.py siglip` flags a missing key as MISSING) (OIN OEND OIN2 WOI BOI AOR AOR2 AOB HCH OH<h> PH<h>
+          QF KF VF OF QG KG VG QB KB VB); `run.py siglip-mlir` compares every reference key whose tag the device
+          printed (and skips the others), so no checker change there.
 why:      siglip-mlir rung c fails at H (59/64 samples) and the end-of-program dumps (64 samples, 0.03 % of a tensor) cannot
           say which of gemm / add_bias / add, or which earlier tensor, is the first bad one (add_bias is in place, so %ao is
           only visible mid-program). Dumps and barriers cost ROI time and printf: diagnosis only.
@@ -111,10 +111,19 @@ index dfa61ff..7401e64 100644
      return f"builtin.module {{\n  func.func @siglip_encoder() {{\n{body}\n    func.return\n  }}\n}}\n"
  
 diff --git a/softhier_mlir/testing/siglip_ref.py b/softhier_mlir/testing/siglip_ref.py
-index f0247b8..11bd96b 100644
+index f0247b8..118ad2c 100644
 --- a/softhier_mlir/testing/siglip_ref.py
 +++ b/softhier_mlir/testing/siglip_ref.py
-@@ -25,9 +25,11 @@ def layer_reference(S: int, D: int, F: int, H: int) -> dict[str, np.ndarray]:
+@@ -1,6 +1,8 @@
+ """numpy reference of tests/gvsoc/siglip_layer/main.c (same LCG data, fp32 math)."""
+ from __future__ import annotations
+ 
++import os
++
+ import numpy as np
+ 
+ from softhier_mlir.testing import lcg
+@@ -25,9 +27,11 @@ def layer_reference(S: int, D: int, F: int, H: int) -> dict[str, np.ndarray]:
          return a.astype(np.float16).astype(np.float32)
  
      ln1 = r16(ln(x, g1, be1))
@@ -127,7 +136,7 @@ index f0247b8..11bd96b 100644
      for hd in range(H):
          sl = slice(hd * dh, (hd + 1) * dh)
          s = r16(q[:, sl] @ k[:, sl].T) * 0.125
-@@ -35,11 +37,14 @@ def layer_reference(S: int, D: int, F: int, H: int) -> dict[str, np.ndarray]:
+@@ -35,11 +39,18 @@ def layer_reference(S: int, D: int, F: int, H: int) -> dict[str, np.ndarray]:
          if hd == 0:
              p0 = p
          o[:, sl] = r16(p @ v[:, sl])
@@ -142,5 +151,9 @@ index f0247b8..11bd96b 100644
      f2 = r16(r16(g @ w2) + b2)
      out = r16(h + f2)
 -    return {"X": x, "LN1": ln1, "Q": q, "K": k, "KT": k.T, "P0": p0, "V": v, "O0": o[:, :dh], "O6": o[:, 6 * dh:7 * dh], "O": o, "H": h, "G": g, "OUT": out}
++    base = {"X": x, "LN1": ln1, "Q": q, "K": k, "KT": k.T, "P0": p0, "V": v, "O0": o[:, :dh], "O6": o[:, 6 * dh:7 * dh], "O": o, "H": h, "G": g, "OUT": out}
++    if not os.environ.get("SHVLA_SIGLIP_H_DUMPS"):   # the extra diagnostic keys (patch 0006) exist only when asked for: `run.py siglip` flags a missing key
++        return base
 +    per_head.update({f"OH{hd}": o[:, hd * dh:(hd + 1) * dh] for hd in range(H)})
-+    return {**per_head, "X": x, "LN1": ln1, "Q": q, "K": k, "KT": k.T, "P0": p0, "V": v, "O0": o[:, :dh], "O6": o[:, 6 * dh:7 * dh], "O": o, "OIN": o, "QG": qg, "KG": kg, "VG": vg, "QB": q, "KB": k, "VB": v, "QF": q, "KF": k, "VF": v, "OF": o, "OEND": o, "OIN2": o, "AOR2": ao_raw, "WOI": wo, "BOI": bo, "AOR": ao_raw, "AOB": ao, "HCH": h, "H": h, "G": g, "OUT": out}
++    return {**per_head, **base, "OIN": o, "OEND": o, "OIN2": o, "AOR2": ao_raw, "WOI": wo, "BOI": bo, "AOR": ao_raw, "AOB": ao, "HCH": h,
++            "QG": qg, "KG": kg, "VG": vg, "QB": q, "KB": k, "VB": v, "QF": q, "KF": k, "VF": v, "OF": o}
