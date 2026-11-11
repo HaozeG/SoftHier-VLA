@@ -30,8 +30,8 @@ Status values: planned, in progress, done, failed, skipped, blocked (waiting for
 | G3.0 | 25 | arch file; `build_arch.sh` with it | `stamp.py check` passes | done | experiment 0c8e7a2 |
 | G3.1–G3.6 | — | ladder rungs 1–6; fork commits (33) when a fix is needed, owner first | each rung's pass column | G3.1 flex_alloc fix done (infra 22d549c); iDMA fix applied (GVSoC 0e4d719) and verified; rung 1 PASS (7/7, timing +46 % vs published on the 16-cluster shapes); ideal-HBM switch added (GVSoC cdb56a2, infra 1d195b0): rung 1 now matches published (1024x3072x768 520114 ns vs 520.5 us); rung 2: 9/9 complete after the second iDMA fix (GVSoC 2910e62, G3.1-diag4; `siglip_encoder_layer` has no self-check, so that only means it terminates); **G3.2-diag: rung c (siglip-mlir seq 256) FAIL, rung 3 FAIL, rung 4 FAIL, rung 5 FAIL; all four fail after the first scalar-FP row op and run 24-41 % too fast; diagnosis = the private Snitch/RedMulE patches (side-note #3, #10, ...) are absent; rung 6 and `gate.py` not run (STOP, owner decision)** **G3.2-fix-redmule: GVSoC RedMulE fp16 subnormal fix (A cd200ad) + RNE (B 7c9cd2f); rung c (QG/KG/VG 0 bad, H/G/OUT PASS), rungs 1/2/rowops/siglip_encoder_layer ROIs unchanged, rungs 3/4/5/6 all PASS (exit 0); rung 6: total 91.139 ms (-23.5 %), actions max-abs 0.0068; timing faster than published on every rung (rung c marks unchanged by the fix) = recorded, continue** **done (G3.1–G3.6 complete: rung 6 PASS; rungs 3-5 not re-run after the fix, owner choice)** **G3.3-fix-instr: `instr_mem` width_log2 default (GVSoC f99d5a2, infra 7d14f70) applied; rung 1 (7/7), rung 2 (8 self-checks + siglip ran), rung c (exit 0, marks 0.324/0.840/1.040, layer 2.204 ms) pass, new baselines; rung 6 PASS exit 0: total 120.716 ms vs 119.1 (+1.4 %), actions max-abs 0.0068; rungs 3-5 not re-run (owner choice); commits GVSoC f99d5a2, infra 7d14f70, infra b54728e, experiment c43feaa** | experiment (run.sh + LOG), infra 18ad903, infra 2088d59 (GVSoC d42c382); G3.2-fix10: #10 (`nseq`) applied (GVSoC 070936b, infra efec4c4), rung 1/2 ROIs unchanged (siglip_encoder_layer +0.95 %), rung c STILL FAIL (H/G/OUT bit-identical), `rowops` all-cluster PASS, STOPPED; next = so_D iDMA A/B and `run.py mesh` (see LOG G3.2-fix10) ; commits: experiment, infra efec4c4 (GVSoC 070936b) ; infra 83cd69d (GVSoC A), infra f56095c (GVSoC B) |
 | G3.7 | 34 | `gate.py g3` on the rung-6 run | gate outcome recorded (PASS or MISS with values) | **done (G3 gate PASS, G3.7-gate: `gate.py g3` on fixi-rung6: total 120.716 ms vs 119.1 +1.4 %, action max-abs 0.0068; see G3.7-gate)** earlier history: blocked (rungs c/3-5 fail accuracy; #10 applied (GVSoC 070936b, infra efec4c4) and did not fix it, see G3.2-fix10: H of rung c is wrong deterministically, next step = stage dumps of AO0/AO1, candidates #8 / #1) **G3.3-fix1: side-note #1 applied (GVSoC fd1124a, infra 8fdce36), rung c marks and every rung 1/2/rowops/siglip_encoder_layer ROI bit-identical, gap unchanged (-24..-40 % non-GEMM segments), STOPPED before rungs 3-6/gate (see G3.3-fix1)** **done: `gate.py g3` on fixrm-rung6: total 91.139 ms vs 119.1 +-5 % = MISS (-23.5 %), action max-abs 0.0068 <= 0.10 = PASS; gate MISS on time only (see G3.2-fix-redmule)** | |
-| G4a.1–G4a.4 | 31 | `run.sh libero prepare`; G4 table steps; `gate.py g4a`; INPUT_CONFIG.md | projection per phase recorded; R1 decision if any phase > 2 h | planned | |
-| G4b | — | full LIBERO chain | every phase finished or the R1 stop recorded | planned | |
+| G4a.1–G4a.4 | 31 | `run.sh libero prepare`; G4 table steps; `gate.py g4a`; INPUT_CONFIG.md | projection per phase recorded; R1 decision if any phase > 2 h | **done (estimate: total 479.1 ms = vision 351.8 + connector 0.53 + prefix 33.0 + expert 93.8; accuracy PASS; R1 TRIGGERED: V projected 3.72 h > 2 h, see G4a.4)** | `gate.py g4a` + INPUT_CONFIG.md: experiment commit (hash in G4a.4 entry) |
+| G4b | — | full LIBERO chain | every phase finished or the R1 stop recorded | **blocked (R1: vision phase projected 13386 s = 3.72 h > 7200 s; owner decision needed: raise the limit for V, report G4a only, or reduce scope; G4b not launched)** | |
 | G5.1 | 6, 30, 32 | RESULTS.md, SETUP.md, design update | Verification Plan passes | planned | |
 | G5.2 | — | build `infra-baseline` by cherry-pick; offer push and PR to the owner | owner decision recorded | planned | |
 
@@ -965,3 +965,40 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - **Gate**:`gate.py g3 $SHVLA_DATA/runs/published/fixi-rung6`:`total simulated time : 120.716 ms (window 113.14..125.05, +1.4 %) PASS`;`action max-abs 0.0068 (limit 0.1) PASS`;**`G3 gate: PASS`**。G3 完成。
 - 说明:时间差距的根因是 `instr_mem` 的 `width_log2=-1`(G3.3-gap verdict a);修复后 5 个层级(rowops、rung c、rung 3、rung 1、rung 6)都落在 published 的 ±5 % 内。残余(未追):iDMA 转置 T 仍比 published 慢 2.3×(G3.3-gap),attention 段 +1.1 %。G4 的所有周期数从此基于新的取指带宽模型。
 - Simulators:全部已停止。Logs:`$SHVLA_DATA/runs/published/fixi-{rung1,rung2,rungc,rung6}/run.log`。
+
+### G4a — LIBERO staged estimate(G4a.1–G4a.4):**estimate 479.1 ms**,accuracy PASS,**R1 触发(V phase 投影 3.72 h > 2 h),G4b 未启动**
+- 设计确认:G4a = 三个 partial 仿真(vision 1 层 @1024 token、prefix 8 层 @177 token、expert 2 步 @Lp 177,KV 来自 G2)+ `gate.py g4a` 合成;**G4a 只测时间**,准确度只对 softhier-mlir 自己的 fp16 floor(vision、prefix)和 G2 `xt[2]`(expert)。G4b = 完整 4-phase chain(`--npz e2e_c2_t1024.npz`),与 G2 逐 hand-over 比较。设计里 G4b 之前有 R1 stop 规则。"latency vs control rate"(20 Hz,50 动作 chunk = 2.5 s)设计里没有单独 step,只出现在 INPUT_CONFIG(见 INPUT_CONFIG.md)。
+- 实现:`gate.py g4a <vision run> <prefix run> <expert run> [--out]`,写 `g4a_estimate.json`(每个 term、source run、per-phase wall 投影、R1 判断);`INPUT_CONFIG.md`;`configs/libero.env` 的 `SHVLA_EXPECT_*` 填入 estimate。投影用 `wall_s / run 的 timed segment 总 ms`,**不用 `roi_ns`**:G4a.1 的 roi 是 222 ms,而 timed segment 只有 15.8 ms(mark 之间的 sample dump 打印也在 ROI 里),用 roi 会把 V 投影低估约 14 倍(2.7 vs 38 s/ms)。`gate.py g3` 在 fixi-rung6 上结果不变(PASS)。
+- Connector term 用 G4a.2 的 start→emb(两个相机 shuffle+GEMM + √960 scaling),G4a.1 的 1 相机 connector(0.395 ms)只作 cross-check,避免重复计数。`emit_flow` 的 `num_steps` 默认 10,所以 `--steps 2` 用的是正确的 dt=-0.1 schedule,与 G2 `xt[2]` 可比。
+- 命令(`SHVLA_SIM_MEMMAX=8G`,默认 `SHVLA_SIM_TIMEOUT` 7200,不是 21600):
+  - `run.sh libero sim G4a.1 -- tests/gvsoc/run.py smolvla-e2e --vision-only 1024 --layers 1 --e2e-trace`
+  - `run.sh libero sim G4a.2 -- tests/gvsoc/run.py smolvla-e2e --prefix-only 2 --layers 8 --e2e-trace`
+  - `run.sh libero sim G4a.3 -- tests/gvsoc/run.py smolvla-e2e --expert-only ref:$HOME/.cache/softhier-vla/smolvla_libero/e2e_c2_t1024.npz --steps 2 --e2e-trace`
+  - `gate.py g4a $SHVLA_DATA/runs/libero/G4a.{1,2,3}`
+- 三个 run 全部 exit 0:
+
+| run | simulated(timed)| wall | peak mem(cgroup)| max child RSS | trace log |
+| --- | --- | --- | --- | --- | --- |
+| G4a.1 vision 1 层 | embed 0.230 + attn 10.844 + mlp 3.751 + post-LN 0.550 + connector(1 cam)0.395 | 600 s | 1196 MB | 911 MB | 14 MB |
+| G4a.2 prefix 8 层 | connector 0.534 + 8 层 16.477(2.060 ms/层)| 616 s | 1563 MB | 1121 MB | 20 MB |
+| G4a.3 expert 2 步 | KV proj 0.245 + 9.356 ms/步 | 586 s | 1819 MB | 1319 MB | 43 MB |
+
+- **G4a phase table(ESTIMATE,GVSoC ideal HBM,1 GHz)**:
+
+| phase | ms | formula |
+| --- | --- | --- |
+| vision | 351.827 | 2 × (0.230 + 12 × 14.594 + 0.550) |
+| connector | 0.534 | G4a.2 start→emb |
+| prefix | 32.954 | 2 × 16.477 |
+| expert | 93.801 | 0.245 + 10 × 9.356 |
+| **total** | **479.117** | |
+
+  对照 published(1 相机 256 token,rung 6):120.7 ms;LIBERO 是 3.97×,主要是 vision(1024 token 的 attention 10.8 ms/层,rung c 256 token 是 2.2 ms/层)。
+- 准确度(G4a 自带检查):vision VIS vs fp16 floor max abs 0.1633(|ref| max 44.10,PASS,0.4 %);expert actions vs fp16 floor 0.0029,**vs G2 `xt[2]` 0.0032**(limit 0.10,PASS)。完整的 G2 比较在 G4b。
+- **G4b 投影 / R1**:V 351.8 ms × 38.05 s/ms = **13386 s = 3.72 h > 7200 s → R1 触发**;Pa 616 s、Pb 597 s、X 2900 s(0.81 h)都在限内。短 run 含固定启动开销,投影略偏悲观;但 rung 6 的 vision 是 47 s/ms,所以 V 实际不会低于 2 h 太多。按设计规则 **停止,G4b 未启动,等 owner 决定**:(a) 只对 V 提高 2 h 限制(约 4 h,峰值内存预期 < 3 GB),其余三个 phase 在限内;(b) 只报告 G4a;(c) 缩小范围。注意 `SHVLA_SIM_TIMEOUT=21600` 不是已记录的 owner 例外,所以用了默认 7200。
+- **`vlm_c2.npz` caveat(5 个有效 prompt token,golden 是 20)**:在 host 上用 `smolvla.emit_vlm(data, 8, ...)` 对 `vlm_c2.npz` 原样与把 `lang_mask` 换成 golden 的 20-token mask 各 emit 一次:**MLIR 文本相同(8556 字符)、preload 80 个 key 的 shape/dtype/数据全部相同**。所以 G4a.2 的 timing 输入不受影响(prefix 程序不依赖 mask);G4b 读的 `e2e_c2_t1024.npz` 本身带 golden mask(meta n_valid 149),也不受影响。
+- 局限:vision 估计只测了一层 × 12 × 2 相机(第一层冷启动、不同层间波动在 published 里 ≤ 7 %);connector 项用 2 相机的 G4a.2 值。没有已发表的参考值,按规则只记录。
+- Files changed:`gate.py`、`INPUT_CONFIG.md`、`configs/libero.env`、`LOG.md`。
+- Paths:`$SHVLA_DATA/runs/libero/G4a.{1,2,3}/`(run.log、summary.json、*.log),`$SHVLA_DATA/runs/libero/g4a_estimate.json`。
+- Simulators:全部已停止。
+- **What to inspect**:`g4a_estimate.json` 的 `g4b_projection`;R1 的决定。
