@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Haoze <haozegao0602@gmail.com>
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
 Date: Wed, 11 Nov 2026 08:57:56 +0100
 Subject: [PATCH 02/10] [G3.1] power capture only with GVSOC_POWER_CAPTURE=1
  (owner-approved gate; did not stop the memory growth)

@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Haoze <haozegao0602@gmail.com>
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
 Date: Wed, 11 Nov 2026 17:46:24 +0100
 Subject: [PATCH 09/10] [shvla] snitch fp_ss: Iss::handle_event waits while
  exec.is_stalled() (IO_REQ_PENDING FP access, SIMULATOR_NOTES #1)

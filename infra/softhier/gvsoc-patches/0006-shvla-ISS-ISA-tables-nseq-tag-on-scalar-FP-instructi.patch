@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Haoze <haozegao0602@gmail.com>
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
 Date: Wed, 11 Nov 2026 13:54:38 +0100
 Subject: [PATCH 06/10] [shvla] ISS ISA tables: nseq tag on scalar FP
  instructions with an integer operand (SIMULATOR_NOTES #10)

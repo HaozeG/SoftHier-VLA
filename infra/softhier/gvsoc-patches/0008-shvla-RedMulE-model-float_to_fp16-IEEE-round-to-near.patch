@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Haoze <haozegao0602@gmail.com>
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
 Date: Wed, 11 Nov 2026 15:49:41 +0100
 Subject: [PATCH 08/10] [shvla] RedMulE model: float_to_fp16 IEEE
  round-to-nearest-even (SIMULATOR_NOTES #3)
