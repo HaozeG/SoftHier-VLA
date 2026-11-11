@@ -82,7 +82,7 @@ G1 and the G6a → G2 → G6b branch can run at the same time; G3 needs both. G6
     This design is saved under `docs/designs/` and linked from the decision.
 *   **G1: simulator, checked with its own tests.** A fresh checkout initialises the GVSoC submodule, builds it with one documented procedure, and passes the kernel tests of `implementation/` one at a time: `gemm`, `norm`, `acti`, `attn`.
 *   **G2: golden reference.** A small independent program in the LeRobot environment (decision A4) runs `SmolVLAPolicy` in fp32 on a fixed observation and writes the tensors in softhier-mlir's reference layout (key names and shapes of its `smolvla_expert_ref.py`). It covers two configurations: published (`lerobot/smolvla_base`, 1 camera, 256 SigLIP tokens, synthetic seeded input) and LIBERO (`lerobot/smolvla_libero`, the observation from the LIBERO environment). Once, on the synthetic input, its output is cross-checked against softhier-mlir's own reference script `smolvla_expert_ref.py`, ported to the current LeRobot and transformers API (patch 0003) and run on the same inputs in the same environment.
-*   **G3: numerical match, published configuration.** softhier-mlir's flow runs on the G1 simulator and is checked rung by rung (the ladder table in the Technical Plan), ending with the full chain compared against G2. Without the private simulator patches, failures are expected. Each failure is traced with the side-note table, then fixed (a commit on the GVSoC fork, or a patch on softhier-mlir) or recorded as a known deviation with its size. G3 ends at the **validity gate**:
+*   **G3: numerical match, published configuration.** softhier-mlir's flow runs on the G1 simulator and is checked rung by rung (the ladder table in the Technical Plan), ending with the full chain compared against G2. Without the private simulator patches, failures are expected. Each failure is traced with the findings table (the former side-note table), then fixed (a commit on the GVSoC fork, or a patch on softhier-mlir) or recorded as a known deviation with its size. G3 ends at the **validity gate**:
     *   total simulated time within **±5 %** of 119.1 ms;
     *   action-chunk max-abs error **≤ 0.10** against G2 (published: 0.032).
     If the gate is missed, G4 still runs, and its results are reported as "environment deviates from published by X", naming the suspected side-note items (the F rows). G3 has no overall time-box. Every single simulator process (one phase of the chain, or one standalone simulation) is limited to **2 hours** of wall time; a process that reaches the limit is stopped, and the session asks the owner before going on (R2).
@@ -125,7 +125,7 @@ Labels follow wiki-design decision 0004 (evidence tiers): simulator cycle counts
 | id | risk | trigger | response |
 | --- | --- | --- | --- |
 | R1 | G4b is infeasible in wall time | the G4a projection puts any G4b phase above the **2 h per-process limit** (expected for the vision phase: 2 cameras × 12 layers at 1024 tokens) | stop and ask the owner before G4b: raise the limit for that run, report G4a only, or reduce scope |
-| R2 | a simulator process runs too long or does not converge | a process reaches the 2 h limit, or G3 keeps failing at one rung | consult the reference notes listed under the side-note table (host speed, patch procedures), then stop and ask the owner with a proposed fix; G4 can run with "deviates by X" |
+| R2 | a simulator process runs too long or does not converge | a process reaches the 2 h limit, or G3 keeps failing at one rung | consult the reference notes listed under the findings table (host speed, patch procedures), then stop and ask the owner with a proposed fix; G4 can run with "deviates by X" |
 | R3 | softhier-mlir lacks something the LIBERO shapes need | a G4a partial run fails to emit, build or fit (HBM, TCDM, 64 KB instruction memory) | patch per the LIBERO changes list; a change outside that list is designed in LOG.md first and reported to the owner before applying |
 | R4 | upstream drift | a softhier-mlir or GVSoC update breaks a patch or changes results | submodules are frozen from G3 to G5; bumps happen only between experiments |
 
@@ -361,7 +361,7 @@ A failure there is handled under R3.
 
 ### Simulator findings: softhier-mlir's SIMULATOR_NOTES items and what G3 found
 
-Rows `F1..F19` are this design's own numbering; "SN #" is the number in softhier-mlir `docs/SIMULATOR_NOTES.md`. Status is as of the end of G5. Evidence is in LOG.md (entry names in the last column). All GVSoC commits are on the local branch `shvla/soft_hier_release` and are not pushed (D2). #7 and models_fast affect speed; the rest affect correctness. "no number" means the finding is not in SIMULATOR_NOTES.
+Rows `F1..F19` are this design's own numbering; "SN #" is the number in softhier-mlir `docs/SIMULATOR_NOTES.md`. Status is as of the end of G5. Evidence is in LOG.md (entry names in the last column). All GVSoC commits are on the local branch `shvla/soft_hier_release` and are not pushed (D2). Of the SN rows, #7 and models_fast affect speed and the rest correctness; the rows without a number cover hangs, wrong values, timing, memory and build findings. "no number" means the finding is not in SIMULATOR_NOTES.
 
 | F | SN # | symptom | cause in the model | status here | evidence |
 | --- | --- | --- | --- | --- | --- |
@@ -536,7 +536,7 @@ Each step ends with its LOG.md entry; the checkpoint is what must hold before th
 
 ##### 7. `infra/softhier/README.md` (Create)
 *   **Type / Scope**: Documentation.
-*   **Proposed Changes**: prerequisites, the three scripts, the stamp rule, the fact that kernel tests rebuild the hardware, switching to the fork, measured build and rebuild times, disk use, the side-note table by reference.
+*   **Proposed Changes**: prerequisites, the three scripts, the stamp rule, the fact that kernel tests rebuild the hardware, switching to the fork, measured build and rebuild times, disk use, the findings table by reference.
 
 ##### 8. `infra/softhier/pyproject.toml`, `uv.lock` (Create)
 *   **Type / Scope**: uv project.
