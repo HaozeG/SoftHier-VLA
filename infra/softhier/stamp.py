@@ -9,7 +9,9 @@ The stamp holds: arch path (relative to $SHVLA_ROOT) and SHA-256; commit of GVSo
 nested submodule; per repository the SHA-256 of `git diff HEAD` plus
 `git status --porcelain --untracked-files=no`; and the model folders softhier-mlir's run_sim
 picks at run time (install/models_fast, install/models_fix: existence and SHA-256 over the .so
-files; values of SOFTHIER_MODEL_DIR and SOFTHIER_STOCK_MODELS).
+files; values of SOFTHIER_MODEL_DIR and SOFTHIER_STOCK_MODELS); and the build's effective
+PWR_INTERVAL_PS (CMake cache). `check` also fails if that value differs from $SHVLA_PWR_INTERVAL_PS
+(default 9000000000000000, as in infra/env.sh).
 Untracked files are not covered; build products are untracked by design.
 Standard library only.
 """
@@ -25,6 +27,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = Path(os.environ.get("SHVLA_ROOT") or HERE.parent.parent).resolve()
 GVSOC = Path(os.environ.get("SOFTHIER_HOME") or ROOT / "third_party" / "gvsoc").resolve()
 STAMP = GVSOC / ".shvla_stamp.json"
+DEFAULT_PWR_INTERVAL_PS = "9000000000000000"
 
 
 def git(repo, *args):
@@ -75,6 +78,16 @@ def models_entry(name):
     return {"exists": True, "so_sha256": h.hexdigest()}
 
 
+def pwr_interval_ps():
+    """PWR_INTERVAL_PS the build was configured with (build/CMakeCache.txt), None if absent."""
+    cache = GVSOC / "build" / "CMakeCache.txt"
+    if cache.is_file():
+        m = re.search(r"^PWR_INTERVAL_PS:[A-Z]+=(.*)$", cache.read_text(), re.M)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
 def current(arch):
     arch_abs = Path(arch).resolve()
     try:
@@ -84,6 +97,7 @@ def current(arch):
     return {
         "arch": {"path": rel, "sha256": sha256_file(arch_abs)},
         "repos": {k: repo_entry(v) for k, v in sorted(repos().items())},
+        "pwr_interval_ps": pwr_interval_ps(),
         "models": {n: models_entry(n) for n in ("models_fast", "models_fix")},
         "env": {k: os.environ.get(k) for k in ("SOFTHIER_MODEL_DIR", "SOFTHIER_STOCK_MODELS")},
     }
@@ -111,6 +125,10 @@ def cmd_check(arch):
     have = dict(flatten(current(arch)))
     diffs = [f"  {k}: stamp={want.get(k)!r} now={have.get(k)!r}"
              for k in sorted(set(want) | set(have)) if want.get(k) != have.get(k)]
+    expect = os.environ.get("SHVLA_PWR_INTERVAL_PS") or DEFAULT_PWR_INTERVAL_PS
+    if have.get("pwr_interval_ps") != expect:
+        diffs.append(f"  pwr_interval_ps: build={have.get('pwr_interval_ps')!r} expected "
+                     f"SHVLA_PWR_INTERVAL_PS={expect!r} (rebuild with build_arch.sh)")
     if diffs:
         print("stamp MISMATCH:")
         print("\n".join(diffs))

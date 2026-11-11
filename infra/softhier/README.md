@@ -91,6 +91,11 @@ and cannot build `-march=rv32imafdv_zfh`, which the SDK uses when the arch file 
   `soft_hier/libDRAMSys_Simulator.so` over `third_party/DRAMSys/libDRAMSys_Simulator.so`.
 - `make hw` runs `make config`, which deletes and recreates `pulp/pulp/chips/flex_cluster`; the
   `core`/`pulp` submodules therefore show as modified. Do not commit them.
+- Power capture interval: the GVSoC engine stops a power capture and runs `make ice_power` every
+  `PWR_INTERVAL_PS` of simulated time (default 100 us), which fails outside the GVSoC root and grows
+  memory past 13 GB (LOG G3.1). `build_arch.sh` passes `pwr_interval_ps=$SHVLA_PWR_INTERVAL_PS` to
+  `make hw` (default 9000000000000000 ps = 9000 s, set in `env.sh`); `stamp.py` records the build's
+  `PWR_INTERVAL_PS` from `build/CMakeCache.txt` and `check` fails if it differs from the variable.
 
 ## Switching the submodule to the fork (D2)
 
