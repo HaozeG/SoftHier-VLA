@@ -62,7 +62,11 @@ ancestor of `HEAD`. So a tree that is not base + series cannot pass the stamp ch
     rm infra/softhier/gvsoc-patches/0*.patch
     git -C third_party/gvsoc format-patch --no-signature --zero-commit -o <ABSOLUTE>/infra/softhier/gvsoc-patches d806a84c5785237547f504c2e34a4d9f230cb437..HEAD
     (cd infra/softhier/gvsoc-patches && ls 0*.patch > series)
+    sed -i 's/^From: .*/From: Haoze <90812991+HaozeG@users.noreply.github.com>/' infra/softhier/gvsoc-patches/0*.patch
     ```
+
+    The `sed` keeps a private e-mail address out of the published patches (the `From:` header otherwise carries
+    your git `user.email`). The tree is unaffected, so `TREE` stays the same.
 
     Then set `TREE` in `expected` to `git -C third_party/gvsoc rev-parse 'HEAD^{tree}'` and `SERIES_SHA256` to
     `python3 infra/softhier/stamp.py series-hash`, update the table above, and commit patches, `series`, `expected`.

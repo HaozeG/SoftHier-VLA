@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Haoze <haozegao0602@gmail.com>
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
 Date: Wed, 11 Nov 2026 13:22:25 +0100
 Subject: [PATCH 05/10] [shvla] iDMA backend: can_accept_transfer() also
  requires an empty regulation queue (fixes lost transfer / hbm_fill hang)
