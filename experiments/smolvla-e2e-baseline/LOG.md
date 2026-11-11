@@ -1156,3 +1156,23 @@ written /home/haoze/.cache/softhier-vla/runs/libero/g4a_estimate.json
 - Files changed:见 infra commit;experiment:`RESULTS.md`(permalink 改成 repo 内 patch 链接 + upstream base)、`SETUP.md`、`LOG.md`。
 - Simulators:全部已停止。
 - What to inspect:`infra/softhier/gvsoc-patches/README.md` 的表和 dev workflow;`apply_gvsoc_patches.sh` 的三种状态;`stamp.py check` 的 tree 检查;RESULTS.md 的 provenance。
+
+### PROF.2 — Compiler overview(COMPILER.md):softhier-mlir 怎么把 SmolVLA 映射到 SoftHier,以及为什么 profile 这么差
+
+- Time:2026-11-11。Step id PROF.2(PROF.1 的后续,owner 要求:"performance 和 compiler 实现高度相关,加 overview + architectural overview,给直观的原因")。**只读代码和已有 profile,没有跑 simulator,没有改 softhier-mlir、patches、arch。** 唯一的 host 侧检查:对已有 build 的 `~/.cache/softhier-vla/runs/published/prof-prefix-L1/build_prefix_a/softhier.dump`(反汇编)做静态指令计数,以及读 `fixi-rung6/*.mlir` 的 tile 属性。
+- Deliverables:`COMPILER.md`(overview、pipeline 图、每个 stage 的文件/决策/不做什么、硬件上的执行模型 + timeline、每类 op 的 lowering 带 file:line、原因表 C1–C11、"只修三件事"排序、pointers)、`profile/compiler_causes.csv`(11 行,每个 cell ≤ 120 字符,用 python `csv` 写并 assert)、PROFILE.md 新 section "Compiler view (why)"。
+- 关键发现(都在 COMPILER.md 带 file:line):
+  - **SmolVLA 路径不跑任何 pass**(`tests/gvsoc/run.py:600` 传 `None`);三个 pass(`linalg-to-softhier`、`pipeline-gemm`、`distribute-summa`)是 30–67 行的 attribute setter,真正的决策在 frontend 和 `dse/tiling.py`。prefix/expert 的 tile 是硬编码表(`smolvla.py:764`、`smolvla_expert.py:388`),只有 vision 用 cost model。
+  - **每个 barrier 在 library 调用里面**(`sh_end_op` `sh_rowops.inc.c:22-25`、`sh_gemm.inc.c:115`),不是 `emit_c` 在每个 op 后插的;`emit_c.py:592` 的 `sh_barrier_global` 只对应 `group_barrier` op。
+  - **不是 scalar**:row-op 已经是 fp16 SIMD(4 lane,`sh_simd.inc.c`),但静态反汇编 `sh_k_silu_mul` 的主循环 134 条指令 / 16 元素 = **8.4 指令/元素**,其中只有 64 条是 SIMD 算术(其余是 FP↔int 经 TCDM 的 lw/sw/fld/fsd、地址计算、fence);无 FREP/SSR/Spatz(grep 为 0;gvsoc 里 `xfrep = True` 和 SSR 端口存在,`cluster_unit.py:226-240`,FREP 能否使用 = hypothesis)。派生:expert silu_mul 约 9.5 ns/元素/cluster,vision GELU 约 9.9。"指令取指受限"来自 SIMULATOR_NOTES #7(作者的 micro-benchmark),本次没有重测;PROFILE 的"stall 原因未诊断"仍然成立,所以 C1 的状态是 confirmed(指令数)+ hypothesis(stall 机制)。
+  - **expert GEMM 的 `tile_k = K`**(qkv/q/o:720/960)⇒ KT = 1,`pipeline` 什么也不 overlap(`sh_gemm.inc.c:82-89, 99-100, 112`);qkv 25 个 tile 在 16 个 cluster 上(2:1 不均衡)。这比"权重流"更具体地解释 iDMA-bound / RedMulE 10–15 %。
+  - **tile policy 是有意的**:`docs/DSE.md` §8 测过 tile 越多越慢(单 HBM node 聚合 85–125 B/cycle),所以 cause (b) 的真因是没有跨 cluster 复用机制(无 split-K — `README.md:30` 写有 split-K 但是 stale,`SMOLVLA_E2E.md:108` 和 `sh_gemm.inc.c:78-80` 说没有;`sh_gemm_mesh` 要求 M=N=P·T;所有 buffer 在一个 HBM edge),不是"选小 tile"。
+  - **库里已有但没被选**:`gemm="xmcast"`(`smolvla_expert.py:670` 默认 `"tiles"`)、fused attention(vision 用 per-head)、KV-stationary(dev docs 显示时间 +0.6 %,不是时间杠杆)、`accumulate`(residual 可并入 GEMM,frontend 没用)。
+  - **expert 权重重读部分是容量下限**(189.5 MiB vs 16 MB TCDM,每步 ≈ 193 MB,按 85–125 B/cycle ≈ 1.5–2.3 ms/步,derived);能改的是 X 的重复读(xmcast)和"下一个 GEMM 的权重预取与前面 core-bound row-op 重叠"(两者无数据依赖;expert core-bound ≈ 45 ms vs 权重流 ≈ 21 ms,derived)。
+  - barrier 本身 ≈ 0.25 µs(DSE.md §3),2890 × 0.25 = 0.7 ms = 0.6 %;22 % 的 wait 主要是负载不均(50 行 → `rpb = 4` → 13/16 cluster 有活,idle ≈ 19 %,与 expert norm/elementwise 的 22–23 % 吻合)。
+- 排序(estimate,sequential Amdahl,不是相加):① 降低 core 数学的指令成本 ≈ 20 %(10–30);② next-GEMM 权重预取与 row-op 重叠 ≈ 10 %(+ 修不均衡 ≈ 3 %);③ 打开已有选项(xmcast ≈ 4 %、vision fused attention ≈ 3 %)≈ 7 %。合计约 35 %(20–45 %)。借来的比例(XPANEL_MCAST、DSE 8.3)来自别的配置(241 token prefix、旧 ISS,per-step 9.96 ms vs 这里 7.76 ms),只迁移了比例,标 estimate。
+- 没做的:没有验证 FREP/SSR 是否可用;没有重测指令取指瓶颈;cluster 0 采样的 issue rate(三核合计 0.39/ns)和静态 8.4 指令/元素 × 9.5 ns 的推算(≈ 0.9/ns)没有对上(采样窗口含 DMA/barrier),COMPILER.md §5 caveat 里写明未调和。
+- Commit:见 `git log`(hash 在紧接着的补充 commit 里)。
+- Files changed:`experiments/smolvla-e2e-baseline/COMPILER.md`(new)、`profile/compiler_causes.csv`(new)、`PROFILE.md`(新 section + structure 行)、`LOG.md`。
+- Simulators:没有启动。
+- What to inspect:`COMPILER.md` §5 的原因表和 §4.1 的 GEMM tile 表(与 profile `active clusters` 对得上)、§4.2 的反汇编计数、"If you fixed only three things" 的 caveat。

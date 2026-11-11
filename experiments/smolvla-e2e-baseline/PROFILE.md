@@ -11,7 +11,7 @@ Step PROF.1 (LOG.md). Per-section, per-op profile of the validated SmolVLA runs,
 3. [Phase to layer to op](#phase-to-layer-to-op): every phase's ops with repetition counts, the top ops overall, the expert step anatomy (measured).
 4. [Op classes](#op-classes): GEMM / attention / norm / elementwise / data movement / sync, with %; compute vs data-movement vs core bound (measured counts, heuristic labels).
 5. [Hardware activity](#hardware-activity): RedMulE, iDMA, barrier wait, HBM/NoC bytes per class; one representative layer per phase; RedMulE utilisation of the GEMMs; what the cores do (cluster 0, sampled).
-6. [What dominates and why](#what-dominates-and-why).
+6. [What dominates and why](#what-dominates-and-why), then [Compiler view (why)](#compiler-view-why): the compiler/runtime causes (COMPILER.md).
 7. [LIBERO configuration (estimate)](#libero-configuration-estimate).
 8. [Files, parser, how to redo](#files-parser-how-to-redo).
 9. [Caveats](#caveats).
@@ -370,6 +370,15 @@ Reading: during GEMMs `pe0`/`pe1` issue less than 0.015 instructions per ns (>= 
 5. **Vision and prefix GEMMs leave most clusters idle.** The tile policy (`vision.mlir`: `tile_m = 256, tile_n = 384` for the 256 x 768 x 768 GEMMs) gives only 768 / 384 = 2 output tiles, so 2 of 16 clusters work (9.0 TFLOP/s = 6.9 % of peak; `barrier wait` is 78 % of the vision GEMM class); the MLP up / gate GEMMs use 8 to 10 clusters (10 to 16 TFLOP/s, 7.5 to 12 % of peak) and the down-projections (K = 3072 / 2560) only 2 to 5. Per-head attention GEMMs (256 x 256 x 64) use 1 cluster. Those clusters are RedMulE-compute-bound while running (RedMulE busy 65 to 75 % on the critical cluster, `uti` 0.85 to 0.92), so the lever is parallelism over clusters, not the array.
 6. **Per-op fixed cost.** Every op ends in a global barrier and costs at least 2 to 5 us; there are 2 890 timed ops in the run (664 vision, 3 connector, 256 prefix, 1 967 expert). Ops with a mean under 20 us (residual adds 5.5 us, RoPE-K 6.6 us, RoPE-Q 16 us, the small biases, KV projection GEMMs, Euler update) are 7 % of the expert phase; the fixed cost matters less than the per-element cost. The mark printf (about 2 us) is inside the window of the op after each mark and is included.
 7. **Barrier wait is 21.9 % of the cluster-time** (idle clusters waiting for the slowest one), mostly in GEMMs (vision 78 %, prefix 66 %, expert 25 %) and in the expert's small elementwise / norm ops (22 to 27 %, 50 rows spread over 16 clusters).
+
+## Compiler view (why)
+
+The causes behind the numbers above are in [COMPILER.md](COMPILER.md) (architecture of softhier-mlir, how each op class is lowered, with file:line evidence; machine-readable table in `profile/compiler_causes.csv`). In short:
+- The compiler is a thin dispatcher: one library call per op, each call stages its inputs from HBM, computes, stores to HBM and ends in a global barrier. Tiling, buffering and overlap exist only inside one call; no passes run on the SmolVLA path, and nothing is fused across ops.
+- Everything that is not a GEMM runs as fp16 SIMD on the 3 cores per cluster, at about 8.4 instructions per element (static, one loop) and about 9.5 ns per element per cluster (derived); no FREP/SSR/Spatz is used. This is the 64.5 % core-executed share (confirmed; the exact stall mechanism is a hypothesis).
+- GEMMs only parallelise over output tiles (no split-K, no multicast): 1 to 10 clusters in vision/prefix; the M = 50 expert GEMMs re-read X per column tile and have one K step (`tile_k = K`), so nothing overlaps (confirmed).
+- Options already in the library but not selected: `xmcast` GEMM, fused attention, KV-stationary attention (hence c2c = 0). The weight stream of the expert is partly a capacity floor.
+- Estimated (not measured) top three: cheaper core math about 20 %, overlap of the next GEMM's weight stream with row-ops about 10 %, switching on xmcast and fused attention about 7 %; about 35 % combined (Amdahl, range 20 to 45 %).
 
 ## LIBERO configuration (estimate)
 
