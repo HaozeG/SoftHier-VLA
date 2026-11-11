@@ -523,3 +523,10 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
   4. Switching the experiment to the deeploy branch is not needed and also needs the SDK fix (`flex_start.s` stack shift), `flex_alloc_api.h` and arch-template changes: about 1 day.
 - Safety: no incident; no swap use, 4 GB cap per run (a cap kill takes about 8 s, exit 137), one simulator at a time. Note for later agents: `cap.py` / `run.py gemm` rewrite `tests/gvsoc/gemm/preload.elf` for the shape of the last run (12 MB after the 7-shape run, which made a trace run hit the 120 s limit); regenerate it before a captured-command run.
 - Files: this LOG entry only. Scratch (not in git): `$HOME/.cache/softhier-vla/gvsoc-deeploy` and `gvsoc-deeploy-orig-idma/` (deeploy's original `idma_be.*` and `idma_be.cpp.release_plus_fsmkick`; the scratch tree's `idma_be.cpp` now holds the release file plus the one line).
+
+### G3.1-fix — iDMA backend one-line fix applied (GVSoC 0e4d719, parent 46dffe6); PAUSED before rebuild for WSL restart
+
+- 做了什么:按 owner 决定,在 `IDmaBe::update()` 里保留 `transfer_regulation_event.enqueue();` 并加 `this->fsm_event.enqueue();`(带注释)。两处同步:(1) `third_party/gvsoc/soft_hier/gvsoc_pulp.patch` 里 `pulp/idma/be/idma_be.cpp` 的 hunk(`@@ -142,7 +191,10 @@`,后面三个 hunk 的新起始行各 +2);(2) 已打补丁的工作树 `third_party/gvsoc/pulp/pulp/idma/be/idma_be.cpp`。验证:把该文件的 hunk 单独抽出,用 `patch -p1` 打在嵌套 pulp HEAD 的原始 `idma_be.cpp` 上,无 offset/fuzz,结果与改后的工作树文件 `cmp` 相同。GVSoC 分支 `shvla/soft_hier_release` 提交 0e4d719(症状、根因、证据=G3.1-diag3、"candidate for upstream report"),父仓库指针 46dffe6。
+- 状态:**尚未重编、尚未跑任何仿真**(owner 要重启 WSL,按指示暂停)。此时 `stamp.py check` 会 MISMATCH(pulp diff 已变),这是预期的。
+- 下一步(新 agent 接手):(1) `free -g` 确认 >=14 GB;(2) `infra/softhier/build_arch.sh experiments/smolvla-e2e-baseline/arch/softhier_mlir_arch.py`(增量,`-j8`),`stamp.py check` 通过,确认没有 `SOFTHIER_MODEL_DIR` 指向 deeploy `.so`;(3) `run.sh published sim fix-check -- tests/gvsoc/run.py gemm --shapes 128x128x256:128,128,256`(预期 PASS,ROI 约 6174 ns),再 `256x256x256`(约 13136 ns);(4) rung 1-5 按设计表顺序。
+- What to inspect: 重编后 ROI 是否与 diag3 的 `.so` 交换结果(6174 / 13136 ns)一致;peak memory 应几百 MB。
