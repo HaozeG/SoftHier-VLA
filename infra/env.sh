@@ -11,7 +11,8 @@
 # HF_HOME is deliberately not given a default: when unset, Hugging Face uses
 # its own default (~/.cache/huggingface).
 # SHVLA_SMOLVLA_DIR is set by the experiment configs, not here.
-# SOFTHIER_IDEAL_HBM is not exported: softhier-mlir's run_sim sets it itself.
+# SOFTHIER_IDEAL_HBM is not exported: softhier-mlir's run_sim sets it to 1, and the local GVSoC branch
+# (flex_cluster.py) reads it at run time when gapy generates the config (not at make hw; no stamp entry).
 
 _shvla_env_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
