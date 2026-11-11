@@ -1,0 +1,146 @@
+Subject: [PATCH 6/6] Opt-in diagnostic dumps for siglip-mlir (SHVLA_SIGLIP_H_DUMPS, _REGEMM, _FULL)
+
+what:     frontend/siglip.py emit() and testing/siglip_ref.py layer_reference(). All off unless SHVLA_SIGLIP_H_DUMPS=<n>
+          (the emitted module is identical to the unpatched one for layers 1, 2 and the fused variant when it is unset or 0).
+          With H_DUMPS=<n> (layer 0 only), n samples of each, all inline with a `softhier.group_barrier` after every dump
+          (cluster 0 prints while the others would already run the next op in place):
+            OIN = %o after the attention group barrier (what the o-proj gemm reads), WOI / BOI = wo0 / bo0 just before use,
+            AOR = %ao after the o-proj gemm (raw), AOB = %ao after add_bias, HCH = %h after the residual add,
+          all with seed 203 (= H's), so the same (row, col) points; at the end OEND (= %o again, seed 203), per head OH<h>
+          (o column slice) and PH<h> (softmax rows of head h), min(n, 128) samples each; the end-of-program dumps
+          X..OUT use max(64, 16 n) samples.
+          SHVLA_SIGLIP_H_REGEMM=1 as well: the o-proj gemm runs a second time into %ao (OIN2 = %o, AOR2 = %ao after it).
+          SHVLA_SIGLIP_H_FULL=<m> as well: m samples (large m ~ the whole tensor) of q / k / v / o at the end (QF KF VF OF)
+          and of q / k / v after their gemm (QG KG VG, raw) and after add_bias (QB KB VB), same points for G / B / F.
+          siglip_ref.layer_reference() returns the matching reference keys (OIN OEND OIN2 WOI BOI AOR AOR2 AOB HCH OH<h> PH<h>
+          QF KF VF OF QG KG VG QB KB VB); tests/gvsoc/run.py already compares every reference key whose tag the device
+          printed (and skips the others), so no checker change.
+why:      siglip-mlir rung c fails at H (59/64 samples) and the end-of-program dumps (64 samples, 0.03 % of a tensor) cannot
+          say which of gemm / add_bias / add, or which earlier tensor, is the first bad one (add_bias is in place, so %ao is
+          only visible mid-program). Dumps and barriers cost ROI time and printf: diagnosis only.
+evidence: LOG G3.2-diag7.
+upstream: yes (default output unchanged when the variables are unset).
+applies-to: softhier-mlir b11cd5fa4f3e717374d1e9ba14442ff302d1f970
+
+---
+diff --git a/softhier_mlir/frontend/siglip.py b/softhier_mlir/frontend/siglip.py
+index dfa61ff..7401e64 100644
+--- a/softhier_mlir/frontend/siglip.py
++++ b/softhier_mlir/frontend/siglip.py
+@@ -11,6 +11,7 @@ Weights are [in, out] (X . W convention), biases/gamma/beta are 1 x cols rows.
+ from __future__ import annotations
+ 
+ import argparse
++import os
+ import sys
+ 
+ 
+@@ -82,6 +83,16 @@ def emit(seq: int, d: int, ff: int, heads: int, layers: int = 1, cluster: int =
+     tests/gvsoc/run.py turns them into per-segment ms). `hbm_split` puts the parameters in HBM node 1 (offset 64 MB)
+     and the activations in node 0, so a GEMM streams X and W through two edge ports."""
+     dh = d // heads
++    # Opt-in (SHVLA_SIGLIP_H_DUMPS=<nsamples>, layer 0 only; SHVLA_SIGLIP_H_REGEMM=1 also runs the o-proj gemm twice: OIN2 / AOR2): the o-proj chain dumped step by step INSIDE the layer,
++    # each followed by a global barrier (cluster 0 prints while the others would already run the next op in place).
++    # Tags OIN (%o as the o-proj GEMM reads it, after the group barrier), AOR (raw GEMM output), AOB (after add_bias),
++    # HCH (after the residual add) and WOI / BOI (the wo / bo parameter rows as they are just before use) share seed 203 = H's, so all sample the same (row, col) points.
++    h_dumps = int(os.environ.get("SHVLA_SIGLIP_H_DUMPS", "0") or 0) if test else 0
++    # SHVLA_SIGLIP_H_FULL=<n> (with H_DUMPS): n samples (large n ~ the whole tensor) of q / k / v / o at the end (QF KF VF OF) and of
++    # q / k / v after their gemm (QG, raw) and after add_bias (QB), same points per tensor (seed 440 + 2 + ord(letter))
++    h_full = int(os.environ.get("SHVLA_SIGLIP_H_FULL", "0") or 0) if h_dumps else 0
++    if h_dumps:
++        nsamples = max(nsamples, 16 * h_dumps)   # the end-of-program dumps (X..OUT) with many more points too
+     e = _Emitter(param_base=_Emitter.HBM_NODE if hbm_split else None)
+     T: dict[str, str] = {}
+     cl = f"cluster = {cluster} : i32"
+@@ -135,7 +146,14 @@ def emit(seq: int, d: int, ff: int, heads: int, layers: int = 1, cluster: int =
+         e.op(f"softhier.layernorm %{xin}, %{W('g1')}, %{W('be1')} -> %ln1 {{eps = 1.0e-6 : f32, {cl}}} : {T[xin]}, {T[W('g1')]}, {T[W('be1')]} -> {T['ln1']}")
+         for dst, w, bias in (("q", "wq", "bq"), ("k", "wk", "bk"), ("v", "wv", "bv")):
+             e.op(f"softhier.gemm %ln1, %{W(w)} into %{dst} {{fmt = \"fp16\", {proj}, {cl}}} : {T['ln1']}, {T[W(w)]}, {T[dst]}")
++            if h_full and L == 0:
++                sd, U = 442 + ord(dst.upper()), dst.upper()
++                e.op(f'softhier.dump_samples %{dst} {{seed = {sd} : i32, n = {h_full} : i32, tag = "{U}G"}} : {T[dst]}')
++                e.op("softhier.group_barrier {grid_x = 4 : i32, grid_y = 4 : i32}")
+             e.op(f"softhier.add_bias %{dst}, %{W(bias)} -> %{dst} {{{cl}}} : {T[dst]}, {T[W(bias)]} -> {T[dst]}")
++            if h_full and L == 0:
++                e.op(f'softhier.dump_samples %{dst} {{seed = {sd} : i32, n = {h_full} : i32, tag = "{U}B"}} : {T[dst]}')
++                e.op("softhier.group_barrier {grid_x = 4 : i32, grid_y = 4 : i32}")
+         mark(f"qkv{L}")
+         if fused_attention:
+             e.op(f"softhier.attention %q, %k, %v -> %o {{scale = {1 / dh ** 0.5!r} : f32, heads = {heads} : i32, "
+@@ -154,9 +172,25 @@ def emit(seq: int, d: int, ff: int, heads: int, layers: int = 1, cluster: int =
+                 e.op(f"softhier.gemm %s{L}_{hd}, %v{L}_{hd} into %o{L}_{hd} {{fmt = \"fp16\", {pv}, {hc}}} : {sh}, {vh}, {oh}")
+         e.op("softhier.group_barrier {grid_x = 4 : i32, grid_y = 4 : i32}")
+         mark(f"attn{L}")
++
++        def hdump(tag, nm):   # opt-in inline dump + barrier (layer 0)
++            if h_dumps and L == 0:
++                nm = W(nm[:-1]) if nm in ("wo_", "bo_") else nm   # "wo_" / "bo_": this layer's parameter
++                e.op(f'softhier.dump_samples %{nm} {{seed = 203 : i32, n = {h_dumps} : i32, tag = "{tag}"}} : {T[nm]}')
++                e.op("softhier.group_barrier {grid_x = 4 : i32, grid_y = 4 : i32}")
++        hdump("OIN", "o")
++        hdump("WOI", "wo_")
++        hdump("BOI", "bo_")
+         e.op(f"softhier.gemm %o, %{W('wo')} into %ao {{fmt = \"fp16\", {proj}, {cl}}} : {T['o']}, {T[W('wo')]}, {T['ao']}")
++        hdump("AOR", "ao")
++        if h_dumps and L == 0 and os.environ.get("SHVLA_SIGLIP_H_REGEMM"):   # run the o-proj gemm a second time into %ao
++            e.op(f"softhier.gemm %o, %{W('wo')} into %ao {{fmt = \"fp16\", {proj}, {cl}}} : {T['o']}, {T[W('wo')]}, {T['ao']}")
++            hdump("OIN2", "o")   # %o as the second gemm read it (it was complete by then if OIN2 passes and OIN did not)
++            hdump("AOR2", "ao")
+         e.op(f"softhier.add_bias %ao, %{W('bo')} -> %ao {{{cl}}} : {T['ao']}, {T[W('bo')]} -> {T['ao']}")
++        hdump("AOB", "ao")
+         e.op(f"softhier.add %{xin}, %ao -> %h {{{cl}}} : {T[xin]}, {T['ao']} -> {T['h']}")
++        hdump("HCH", "h")
+         e.op(f"softhier.layernorm %h, %{W('g2')}, %{W('be2')} -> %ln2 {{eps = 1.0e-6 : f32, {cl}}} : {T['h']}, {T[W('g2')]}, {T[W('be2')]} -> {T['ln2']}")
+         e.op(f"softhier.gemm %ln2, %{W('w1')} into %f1 {{fmt = \"fp16\", {fc1}, {cl}}} : {T['ln2']}, {T[W('w1')]}, {T['f1']}")
+         e.op(f"softhier.add_bias %f1, %{W('b1')} -> %f1 {{{cl}}} : {T['f1']}, {T[W('b1')]} -> {T['f1']}")
+@@ -176,6 +210,16 @@ def emit(seq: int, d: int, ff: int, heads: int, layers: int = 1, cluster: int =
+             else:
+                 nm = tagmap[tag]
+                 e.op(f'softhier.dump_samples %{nm} {{seed = {seeds[tag]} : i32, n = {nsamples} : i32, tag = "{tag}"}} : {T[nm]}')
++        if h_dumps:   # %o again at the end with H's sample points (the O dump above uses seed 202)
++            e.op(f'softhier.dump_samples %o {{seed = 203 : i32, n = {h_dumps} : i32, tag = "OEND"}} : {T["o"]}')
++        for tag, nm in (("QF", "q"), ("KF", "k"), ("VF", "v"), ("OF", "o")) if h_dumps and h_full else ():
++            e.op(f'softhier.dump_samples %{nm} {{seed = {440 + len(tag) + ord(tag[0])} : i32, n = {h_full} : i32, tag = "{tag}"}} : {T[nm]}')
++        if h_dumps and not fused_attention:   # per head: the o column slice (OH<h>) and the softmax output rows (PH<h>)
++            for hd in range(heads):
++                ov = e.view(f"ohd{hd}", "o", T["o"], seq, dh, d, hd * dh)
++                pv_ = e.view(f"phd{hd}", "sc", T["sc"], seq, seq, seq, hd * seq * seq)
++                e.op(f'softhier.dump_samples %ohd{hd} {{seed = {400 + hd} : i32, n = {min(h_dumps, 128)} : i32, tag = "OH{hd}"}} : {ov}')
++                e.op(f'softhier.dump_samples %phd{hd} {{seed = {420 + hd} : i32, n = {min(h_dumps, 128)} : i32, tag = "PH{hd}"}} : {pv_}')
+     body = "\n".join(e.lines)
+     return f"builtin.module {{\n  func.func @siglip_encoder() {{\n{body}\n    func.return\n  }}\n}}\n"
+ 
+diff --git a/softhier_mlir/testing/siglip_ref.py b/softhier_mlir/testing/siglip_ref.py
+index f0247b8..11bd96b 100644
+--- a/softhier_mlir/testing/siglip_ref.py
++++ b/softhier_mlir/testing/siglip_ref.py
+@@ -25,9 +25,11 @@ def layer_reference(S: int, D: int, F: int, H: int) -> dict[str, np.ndarray]:
+         return a.astype(np.float16).astype(np.float32)
+ 
+     ln1 = r16(ln(x, g1, be1))
+-    q = r16(r16(ln1 @ wq) + bq); k = r16(r16(ln1 @ wk) + bk); v = r16(r16(ln1 @ wv) + bv)
++    qg, kg, vg = r16(ln1 @ wq), r16(ln1 @ wk), r16(ln1 @ wv)   # raw gemm outputs (QG / KG / VG)
++    q = r16(qg + bq); k = r16(kg + bk); v = r16(vg + bv)
+     o = np.zeros((S, D), np.float32)
+     p0 = None
++    per_head = {}
+     for hd in range(H):
+         sl = slice(hd * dh, (hd + 1) * dh)
+         s = r16(q[:, sl] @ k[:, sl].T) * 0.125
+@@ -35,11 +37,14 @@ def layer_reference(S: int, D: int, F: int, H: int) -> dict[str, np.ndarray]:
+         if hd == 0:
+             p0 = p
+         o[:, sl] = r16(p @ v[:, sl])
+-    ao = r16(r16(o @ wo) + bo)
++        per_head[f"PH{hd}"] = p
++    ao_raw = r16(o @ wo)
++    ao = r16(ao_raw + bo)
+     h = r16(x + ao)
+     ln2 = r16(ln(h, g2, be2))
+     f1 = r16(r16(ln2 @ w1) + b1)
+     g = r16(0.5 * f1 * (1 + np.tanh(0.7978845608 * (f1 + 0.044715 * f1 ** 3))))
+     f2 = r16(r16(g @ w2) + b2)
+     out = r16(h + f2)
+-    return {"X": x, "LN1": ln1, "Q": q, "K": k, "KT": k.T, "P0": p0, "V": v, "O0": o[:, :dh], "O6": o[:, 6 * dh:7 * dh], "O": o, "H": h, "G": g, "OUT": out}
++    per_head.update({f"OH{hd}": o[:, hd * dh:(hd + 1) * dh] for hd in range(H)})
++    return {**per_head, "X": x, "LN1": ln1, "Q": q, "K": k, "KT": k.T, "P0": p0, "V": v, "O0": o[:, :dh], "O6": o[:, 6 * dh:7 * dh], "O": o, "OIN": o, "QG": qg, "KG": kg, "VG": vg, "QB": q, "KB": k, "VB": v, "QF": q, "KF": k, "VF": v, "OF": o, "OEND": o, "OIN2": o, "AOR2": ao_raw, "WOI": wo, "BOI": bo, "AOR": ao_raw, "AOB": ao, "HCH": h, "H": h, "G": g, "OUT": out}
