@@ -1171,8 +1171,8 @@ written /home/haoze/.cache/softhier-vla/runs/libero/g4a_estimate.json
   - **expert 权重重读部分是容量下限**(189.5 MiB vs 16 MB TCDM,每步 ≈ 193 MB,按 85–125 B/cycle ≈ 1.5–2.3 ms/步,derived);能改的是 X 的重复读(xmcast)和"下一个 GEMM 的权重预取与前面 core-bound row-op 重叠"(两者无数据依赖;expert core-bound ≈ 45 ms vs 权重流 ≈ 21 ms,derived)。
   - barrier 本身 ≈ 0.25 µs(DSE.md §3),2890 × 0.25 = 0.7 ms = 0.6 %;22 % 的 wait 主要是负载不均(50 行 → `rpb = 4` → 13/16 cluster 有活,idle ≈ 19 %,与 expert norm/elementwise 的 22–23 % 吻合)。
 - 排序(estimate,sequential Amdahl,不是相加):① 降低 core 数学的指令成本 ≈ 20 %(10–30);② next-GEMM 权重预取与 row-op 重叠 ≈ 10 %(+ 修不均衡 ≈ 3 %);③ 打开已有选项(xmcast ≈ 4 %、vision fused attention ≈ 3 %)≈ 7 %。合计约 35 %(20–45 %)。借来的比例(XPANEL_MCAST、DSE 8.3)来自别的配置(241 token prefix、旧 ISS,per-step 9.96 ms vs 这里 7.76 ms),只迁移了比例,标 estimate。
-- 没做的:没有验证 FREP/SSR 是否可用;没有重测指令取指瓶颈;cluster 0 采样的 issue rate(三核合计 0.39/ns)和静态 8.4 指令/元素 × 9.5 ns 的推算(≈ 0.9/ns)没有对上(采样窗口含 DMA/barrier),COMPILER.md §5 caveat 里写明未调和。
-- Commit:见 `git log`(hash 在紧接着的补充 commit 里)。
+- 没做的:没有验证 FREP/SSR 是否可用;没有重测指令取指瓶颈;(已调和,advisor 后)PROFILE 的"核只发 6–14 % 周期"只数了 integer 核的 trace(`pe*` 无 FP 指令),prefix layer 1 `silu_mul` 窗口 198.7 µs:integer 63.4 k + FP sub-system 114 k = 177 k 条 = 0.89/ns = 8.6 指令/元素,与静态 8.4 一致;即 cluster 总 issue ≈ 0.9/cycle,符合 ~1 指令/周期上限。这个上限是不是取指限制仍是 hypothesis(SIMULATOR_NOTES #7 的 micro-benchmark,本次没重测)。
+- Commit:`ade69ba`(COMPILER.md、CSV、PROFILE section、本 entry);advisor 后的修正(CSV status 只用 confirmed/hypothesis、指令内存措辞、issue rate 调和、行号)在紧接着的 experiment commit。
 - Files changed:`experiments/smolvla-e2e-baseline/COMPILER.md`(new)、`profile/compiler_causes.csv`(new)、`PROFILE.md`(新 section + structure 行)、`LOG.md`。
 - Simulators:没有启动。
 - What to inspect:`COMPILER.md` §5 的原因表和 §4.1 的 GEMM tile 表(与 profile `active clusters` 对得上)、§4.2 的反汇编计数、"If you fixed only three things" 的 caveat。
