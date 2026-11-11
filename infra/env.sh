@@ -34,6 +34,13 @@ export SOFTHIER_CHROOT
 : "${SHVLA_SIM_TIMEOUT:=7200}"
 export SHVLA_SIM_TIMEOUT
 
+# Power-capture interval compiled into the GVSoC build (picoseconds of simulated time; build variable
+# pwr_interval_ps, used by infra/softhier/build_arch.sh). GVSoC's default, 100 us, makes every simulation
+# longer than 100 us run `make ice_power` and grow past 13 GB (experiments/smolvla-e2e-baseline/LOG.md,
+# G3.1). 9e15 ps = 9000 s of simulated time, longer than any run. stamp.py check fails if the build differs.
+: "${SHVLA_PWR_INTERVAL_PS:=9000000000000000}"
+export SHVLA_PWR_INTERVAL_PS
+
 # shellcheck source=/dev/null
 [ -f "$_shvla_env_dir/env.local.sh" ] && . "$_shvla_env_dir/env.local.sh"
 unset _shvla_env_dir
@@ -47,6 +54,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
         echo "SOFTHIER_HOME=$SOFTHIER_HOME"
         echo "SOFTHIER_CHROOT='${SOFTHIER_CHROOT}'"
         echo "SHVLA_SIM_TIMEOUT=$SHVLA_SIM_TIMEOUT"
+        echo "SHVLA_PWR_INTERVAL_PS=$SHVLA_PWR_INTERVAL_PS"
         echo "SOFTHIER_MODEL_DIR=${SOFTHIER_MODEL_DIR:-<unset>}"
         echo "SOFTHIER_STOCK_MODELS=${SOFTHIER_STOCK_MODELS:-<unset>}"
     else
