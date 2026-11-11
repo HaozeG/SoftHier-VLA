@@ -28,8 +28,8 @@ Status values: planned, in progress, done, failed, skipped, blocked (waiting for
 | G2.5 | 13 | `infra/lerobot/README.md` | — | done | infra 84ad868; the log commit |
 | G6b.1 | — | `libero_spatial` 10 × 10; settle OQ2–OQ4 | success rate with interval in LOG.md | done | the log commit |
 | G3.0 | 25 | arch file; `build_arch.sh` with it | `stamp.py check` passes | done | experiment 0c8e7a2 |
-| G3.1–G3.6 | — | ladder rungs 1–6; fork commits (33) when a fix is needed, owner first | each rung's pass column | G3.1 flex_alloc fix done (infra 22d549c); iDMA fix applied (GVSoC 0e4d719) and verified; rung 1 PASS (7/7, timing +46 % vs published on the 16-cluster shapes); ideal-HBM switch added (GVSoC cdb56a2, infra 1d195b0): rung 1 now matches published (1024x3072x768 520114 ns vs 520.5 us); rung 2: 9/9 complete after the second iDMA fix (GVSoC 2910e62, G3.1-diag4; `siglip_encoder_layer` has no self-check, so that only means it terminates); **G3.2-diag: rung c (siglip-mlir seq 256) FAIL, rung 3 FAIL, rung 4 FAIL, rung 5 FAIL; all four fail after the first scalar-FP row op and run 24-41 % too fast; diagnosis = the private Snitch/RedMulE patches (side-note #3, #10, ...) are absent; rung 6 and `gate.py` not run (STOP, owner decision)** **G3.2-fix-redmule: GVSoC RedMulE fp16 subnormal fix (A cd200ad) + RNE (B 7c9cd2f); rung c (QG/KG/VG 0 bad, H/G/OUT PASS), rungs 1/2/rowops/siglip_encoder_layer ROIs unchanged, rungs 3/4/5/6 all PASS (exit 0); rung 6: total 91.139 ms (-23.5 %), actions max-abs 0.0068; timing faster than published on every rung (rung c marks unchanged by the fix) = recorded, continue** | experiment (run.sh + LOG), infra 18ad903, infra 2088d59 (GVSoC d42c382); G3.2-fix10: #10 (`nseq`) applied (GVSoC 070936b, infra efec4c4), rung 1/2 ROIs unchanged (siglip_encoder_layer +0.95 %), rung c STILL FAIL (H/G/OUT bit-identical), `rowops` all-cluster PASS, STOPPED; next = so_D iDMA A/B and `run.py mesh` (see LOG G3.2-fix10) ; commits: experiment, infra efec4c4 (GVSoC 070936b) ; infra 83cd69d (GVSoC A), infra f56095c (GVSoC B) |
-| G3.7 | 34 | `gate.py g3` on the rung-6 run | gate outcome recorded (PASS or MISS with values) | blocked (rungs c/3-5 fail accuracy; #10 applied (GVSoC 070936b, infra efec4c4) and did not fix it, see G3.2-fix10: H of rung c is wrong deterministically, next step = stage dumps of AO0/AO1, candidates #8 / #1) **G3.3-fix1: side-note #1 applied (GVSoC fd1124a, infra 8fdce36), rung c marks and every rung 1/2/rowops/siglip_encoder_layer ROI bit-identical, gap unchanged (-24..-40 % non-GEMM segments), STOPPED before rungs 3-6/gate (see G3.3-fix1)** **done: `gate.py g3` on fixrm-rung6: total 91.139 ms vs 119.1 +-5 % = MISS (-23.5 %), action max-abs 0.0068 <= 0.10 = PASS; gate MISS on time only (see G3.2-fix-redmule)** | |
+| G3.1–G3.6 | — | ladder rungs 1–6; fork commits (33) when a fix is needed, owner first | each rung's pass column | G3.1 flex_alloc fix done (infra 22d549c); iDMA fix applied (GVSoC 0e4d719) and verified; rung 1 PASS (7/7, timing +46 % vs published on the 16-cluster shapes); ideal-HBM switch added (GVSoC cdb56a2, infra 1d195b0): rung 1 now matches published (1024x3072x768 520114 ns vs 520.5 us); rung 2: 9/9 complete after the second iDMA fix (GVSoC 2910e62, G3.1-diag4; `siglip_encoder_layer` has no self-check, so that only means it terminates); **G3.2-diag: rung c (siglip-mlir seq 256) FAIL, rung 3 FAIL, rung 4 FAIL, rung 5 FAIL; all four fail after the first scalar-FP row op and run 24-41 % too fast; diagnosis = the private Snitch/RedMulE patches (side-note #3, #10, ...) are absent; rung 6 and `gate.py` not run (STOP, owner decision)** **G3.2-fix-redmule: GVSoC RedMulE fp16 subnormal fix (A cd200ad) + RNE (B 7c9cd2f); rung c (QG/KG/VG 0 bad, H/G/OUT PASS), rungs 1/2/rowops/siglip_encoder_layer ROIs unchanged, rungs 3/4/5/6 all PASS (exit 0); rung 6: total 91.139 ms (-23.5 %), actions max-abs 0.0068; timing faster than published on every rung (rung c marks unchanged by the fix) = recorded, continue** **G3.3-fix-instr: `instr_mem` width_log2 default (GVSoC f99d5a2, infra 7d14f70) applied; rung 1 (7/7), rung 2 (8 self-checks + siglip ran), rung c (exit 0, marks 0.324/0.840/1.040, layer 2.204 ms) pass, new baselines; rung 6 PASS exit 0: total 120.716 ms vs 119.1 (+1.4 %), actions max-abs 0.0068; rungs 3-5 not re-run (owner choice)** | experiment (run.sh + LOG), infra 18ad903, infra 2088d59 (GVSoC d42c382); G3.2-fix10: #10 (`nseq`) applied (GVSoC 070936b, infra efec4c4), rung 1/2 ROIs unchanged (siglip_encoder_layer +0.95 %), rung c STILL FAIL (H/G/OUT bit-identical), `rowops` all-cluster PASS, STOPPED; next = so_D iDMA A/B and `run.py mesh` (see LOG G3.2-fix10) ; commits: experiment, infra efec4c4 (GVSoC 070936b) ; infra 83cd69d (GVSoC A), infra f56095c (GVSoC B) |
+| G3.7 | 34 | `gate.py g3` on the rung-6 run | gate outcome recorded (PASS or MISS with values) | **done (G3 gate PASS, G3.7-gate: `gate.py g3` on fixi-rung6: total 120.716 ms vs 119.1 +1.4 %, action max-abs 0.0068; see G3.7-gate)** earlier history: blocked (rungs c/3-5 fail accuracy; #10 applied (GVSoC 070936b, infra efec4c4) and did not fix it, see G3.2-fix10: H of rung c is wrong deterministically, next step = stage dumps of AO0/AO1, candidates #8 / #1) **G3.3-fix1: side-note #1 applied (GVSoC fd1124a, infra 8fdce36), rung c marks and every rung 1/2/rowops/siglip_encoder_layer ROI bit-identical, gap unchanged (-24..-40 % non-GEMM segments), STOPPED before rungs 3-6/gate (see G3.3-fix1)** **done: `gate.py g3` on fixrm-rung6: total 91.139 ms vs 119.1 +-5 % = MISS (-23.5 %), action max-abs 0.0068 <= 0.10 = PASS; gate MISS on time only (see G3.2-fix-redmule)** | |
 | G4a.1–G4a.4 | 31 | `run.sh libero prepare`; G4 table steps; `gate.py g4a`; INPUT_CONFIG.md | projection per phase recorded; R1 decision if any phase > 2 h | planned | |
 | G4b | — | full LIBERO chain | every phase finished or the R1 stop recorded | planned | |
 | G5.1 | 6, 30, 32 | RESULTS.md, SETUP.md, design update | Verification Plan passes | planned | |
@@ -918,3 +918,50 @@ Commit 规则:experiment step 是一个 commit(代码和 LOG.md entry 一起);in
 - **Proposal(未应用,需要 owner 批准;按"已知 side-note 之外的 GVSoC 改动先 proposal"规则):** 在**两处**(`third_party/gvsoc/soft_hier/flex_cluster/cluster_unit.py:209` 和 `third_party/gvsoc/pulp/pulp/chips/flex_cluster/cluster_unit.py:209`,GVSoC 与 pulp 子模块各一个提交,同 G3.1-fix 的 two-place 规则;已 grep:`soft_hier/gvsoc_pulp.patch` 里没有 `width_log2` / `instr_mem`,那个补丁文件不用改)去掉 `width_log2=-1`(回到默认 2)。`instr_router` 的 `8*arch.nb_core` 可以不动(run C 表明不重要);要完全对齐 deeploy 也可以改回 8(run B ≈ C)。改了之后:重新 `build_arch.sh`(`stamp.py write`),重跑 rung c(预期 0.324 / 0.867 / 1.044)、rung 1/2、rowops、然后 rung 3-6 + `gate.py g3`(预期总时间落进 119.1 ms ±5 %)。**这会让 G3 gate 的时间项从 MISS 变成(预期)PASS**,也会改变 G4 的所有周期数,所以应该先改再进 G4。
 - **T(iDMA 转置)偏差:** 与取指无关,2.3× 慢;未解决,不影响 marks;记为待办(见上)。
 - 状态:**unresolved 部分只有** attention +4.3 % 与 T。Simulators:全部已停止(`pgrep gvsoc_launcher` / `gapy` 为空);shim 已删除,`stamp.py check` OK。Logs:`$SHVLA_DATA/runs/published/gap-{rowops-all-r8,rowops-all-r8m2,rowops-all-m2,rungc-r8m2,rung3-m2}/run.log`。
+
+### G3.3-fix-instr — 应用 owner 批准的 `instr_mem` 修复(去掉 `width_log2=-1`,回到默认 2);rung 1/2/c 回归通过,基线重设
+- **改动.** 只有一行:`third_party/gvsoc/soft_hier/flex_cluster/cluster_unit.py:209`,`instr_mem = Memory(..., atomics=True, tech_node=...)`(去掉 `width_log2=-1`)。GVSoC 提交 **f99d5a2**(分支 `shvla/soft_hier_release`),infra 提交 **7d14f70**(GVSoC 指针 + 设计文档 side-note 表新增一行,无编号,因为 #6 已被占用;措辞修正见 infra 后续提交)。
+  - **patch vs tree:** `soft_hier/flex_cluster/cluster_unit.py` 是 GVSoC 仓库里**直接受跟踪**的文件,所以只有一个 GVSoC 提交。`pulp/pulp/chips/flex_cluster/cluster_unit.py` 在 pulp 子模块里是**未跟踪**的(`?? pulp/chips/flex_cluster/`),由 GVSoC Makefile 的 `cp -rf soft_hier/flex_cluster pulp/pulp/chips/flex_cluster` 从 `soft_hier` 复制得来,所以**没有 pulp 提交**;我把受跟踪文件 cp 过去,三份(`soft_hier`、`pulp/pulp/chips`、`install/generators/pulp/chips`)`cmp` 完全相同。`gvsoc_pulp.patch` / `gvsoc_core.patch` 不含 `instr_mem` / `width_log2`(G3.3-gap 已 grep),所以不需要改。
+  - `build_arch.sh`(`MAKEFLAGS=-j8`,6 s,增量)+ `stamp.py check` OK;installed generator 的 :209 已无 `width_log2`。
+- **回归**(`SHVLA_SIM_MEMMAX=8G`,一次一个;"旧"= G3.3-gap run F 的值 / g33 / fixrm 的基线,GVSoC fd1124a;"新"= GVSoC f99d5a2,run 名 `fixi-rung1/rung2/rungc`):
+
+| rung | 旧 ROI (ns) | 新 ROI (ns) | Δ |
+| --- | --- | --- | --- |
+| rung 1: 256^3 | 13102 | 14720 | +12.3 % |
+| 256x768x192 | 31854 | 35301 | +10.8 % |
+| 512x768x768 | 131713 | 138693 | +5.3 % |
+| 256^3,0 | 13074 | 14647 | +12.0 % |
+| 256x256x512,1,1 | 19536 | 21065 | +7.8 % |
+| 1024x768x768 all | 119415 | 119870 | +0.38 % |
+| 1024x3072x768 all | 520114 | 520479 | +0.07 % |
+| rung 2: add_test | 910396 | 1306472 | +43.5 % |
+| gemm1024_summa | 97682 | 99353 | +1.7 % |
+| gemm256 | 76984 | 77471 | +0.6 % |
+| gemm512 / gemm512_linalg | 85800 | 90998 | +6.1 % |
+| gemm_nonconst | 85804 | 90998 | +6.1 % |
+| mlp / mlp_linalg | 1064054 | 1460038 | +37.2 % |
+| siglip_encoder_layer(无 self-check) | 10967081 | 18002379 | +64.1 %(published 17851422:**+0.85 %**,旧 -38.6 %) |
+
+  - rung 1:7/7 PASS(bad=0,maxdiff 0),exit 0,peak 400 MB;与 run F(shim)逐 ns 相同 ⇒ shim 与真正改源码等价。单 cluster 形状 +5…12 %,16-cluster 形状 +0.07 / +0.38 %,符合预期。
+  - rung 2:**8 个有 self-check 的 example 全 PASS + siglip_encoder_layer 跑完**(无 self-check,只验证终止),exit 0,peak 842 MB。add_test(+43 %)/ mlp(+37 %)的大幅变慢是 scalar 循环取指受限的典型表现,不是失败。
+  - **rung c**(`siglip-mlir --seq 256 --cluster all`):exit 0,11 个 tag 全 PASS(X/LN1/Q/K/KT/P0/V/O/H/G/OUT,误差与之前相同,OUT 0.0039),ROI 2209245 ns,wall 71.9 s,peak 864 MB。**marks:qkv 0.324 / attention 0.840 / rest 1.040 ms,layer 2.204 ms**(DSE §8.3:0.324 / 0.831 / 1.040 / 2.195 ⇒ 0 / +1.1 / 0 / +0.4 %;gap run D(router 8 + mem 2)0.324 / 0.867 / 1.044 / 2.235)。只改 mem(router 仍为 40)比 run D 更接近 published,attention 的残余偏差从 +4.3 % 降到 +1.1 %;rung c 的 mark 与 router 宽度的关系这次才第一次直接测到。
+  - 老基线 → 新基线:以上"新"列为新的回归基线(`fixi-*` run 名)。rungs 3-5 按 owner 选择(Apply, rung 6 only)没有重跑。
+- Simulators:全部已停止。
+
+### G3.7-gate — rung 6 (`fixi-rung6`) 与 `gate.py g3`:**PASS**
+- 命令:`SHVLA_SIM_MEMMAX=8G SHVLA_SIM_TIMEOUT=14400 run.sh published sim fixi-rung6 -- tests/gvsoc/run.py smolvla-e2e --npz $D/e2e_c1_t256.npz --e2e-trace`(新 run 名,没有复用 fixrm-rung6 的 phase)。exit 0,4 个 phase 都 PASS,stamp OK。
+- 结果(ms,1 GHz,ideal HBM):
+
+| phase | published | 之前(fixrm,mem -1) | 现在(fixi) | vs published |
+| --- | --- | --- | --- | --- |
+| vision | 27.32 | 19.877 | 27.640 | +1.2 % |
+| connector | 0.28 | 0.277 | 0.280 | 0 |
+| prefix(16 层) | 14.80 | 11.188 | 15.039 | +1.6 % |
+| expert(KV 0.137 + 10 步 × 7.762) | 76.70 | 59.914 | 77.756 | +1.4 % |
+| **total** | **119.1** | 91.139 | **120.716** | **+1.4 %** |
+
+- 准确度:**actions max abs 0.0068 vs lerobot**(mean 0.00067,|a| max 1.576;published 0.032;expert fp16 floor 0.0015,floor vs lerobot 0.0070),x_t 每步 0.0018 → 0.0068,与修前逐位一样(时间模型改动不影响数值)。prefix K/V 每层 K max abs ≤ 0.081 / V ≤ 0.056。
+- wall:4914 s(= 82 min:vision 1290 + prefix_a 567 + prefix_b 582 + expert 2475),peak 2614 MB(cgroup,含 page cache;max child RSS 1486 MB),oom 0。比 fixrm 的 4999 s 还略快(同一 host 上的波动)。
+- **Gate**:`gate.py g3 $SHVLA_DATA/runs/published/fixi-rung6`:`total simulated time : 120.716 ms (window 113.14..125.05, +1.4 %) PASS`;`action max-abs 0.0068 (limit 0.1) PASS`;**`G3 gate: PASS`**。G3 完成。
+- 说明:时间差距的根因是 `instr_mem` 的 `width_log2=-1`(G3.3-gap verdict a);修复后 5 个层级(rowops、rung c、rung 3、rung 1、rung 6)都落在 published 的 ±5 % 内。残余(未追):iDMA 转置 T 仍比 published 慢 2.3×(G3.3-gap),attention 段 +1.1 %。G4 的所有周期数从此基于新的取指带宽模型。
+- Simulators:全部已停止。Logs:`$SHVLA_DATA/runs/published/fixi-{rung1,rung2,rungc,rung6}/run.log`。
