@@ -9,7 +9,7 @@ The two infra READMEs hold the details; this file gives the order and the experi
 
 ## 0. Before you start
 
-1.  **GVSoC fork.** The fixes F13-F18 (RESULTS.md) are commits on a local branch `shvla/soft_hier_release` of `third_party/gvsoc` and are not pushed. `.gitmodules` names the upstream URL `https://github.com/gvsoc/gvsoc.git`, which does not contain them, so a fresh clone cannot check out the pinned commit `f99d5a2`. Until the fork exists (README "Switching the submodule to the fork (D2)" in `infra/softhier/README.md`), reproduce on the machine that has the branch, or apply the fixes by hand from the commit list in RESULTS.md.
+1.  **GVSoC fork.** All ten GVSoC commits from `4558184` to `f99d5a2` (F17, F18, F13, F5, F14, F8, F15, F3, F1, F16 in RESULTS.md) are commits on a local branch `shvla/soft_hier_release` of `third_party/gvsoc` and are not pushed. `.gitmodules` names the upstream URL `https://github.com/gvsoc/gvsoc.git`, which does not contain them, so a fresh clone cannot check out the pinned commit `f99d5a2`. Until the fork exists (README "Switching the submodule to the fork (D2)" in `infra/softhier/README.md`), reproduce on the machine that has the branch, or apply all ten by hand from the commit list in RESULTS.md (leaving out F5, the ideal-HBM switch, makes the GEMMs about 46 % slow).
 2.  **apt packages** (the owner installs them, `setup.sh` prints the exact command if one is missing):
     `build-essential git doxygen python3-pip libsdl2-dev curl cmake gtkwave libsndfile1-dev rsync autoconf automake texinfo libtool pkg-config libsdl2-ttf-dev wget bzip2 xz-utils`, plus `libosmesa6` and `libglfw3` for the LIBERO camera rendering, and gcc and g++ at least 11.2, cmake at least 3.18.1, `uv`.
 3.  **Submodules.** `git submodule update --init third_party/gvsoc experiments/smolvla-e2e-baseline/softhier-mlir` (softhier-mlir is pinned at `b11cd5f`; `run.sh` applies the patches to its working tree, never commits there).
@@ -73,16 +73,16 @@ Exit codes: 0 pass, 1 fail, 2 refused (usage, stamp or patch), 3 stopped by the 
 
 **Memory and WSL.** Run one simulator job at a time. Peak cgroup memory (includes page cache) was 0.4-1.8 GB for the rungs and 2.6-2.8 GB for the full published chain; a runaway simulation (F13/F14 before they were fixed) grows about 300 MB/s, which is why the cap exists. Check `free -g` for at least 9-11 GB available before a run. On WSL with about 16 GB, do not run LeRobot (3 GB per process, several processes) next to simulators: a batch-5 evaluation was killed this way (LOG G6b.1). `libero_eval.py` has its own 12 GB cap (`--no-cap` removes it).
 
+**Safe mode.** There is no switch of that name in the repo. In LOG.md "safe mode" is the working rule used for the risky diagnostic runs: no `perf`, `gdb` or `strace`, no tracing, one simulator at a time, `SHVLA_SIM_MEMMAX=8G`, and `free -g` showing at least 10 GB available before each run. Use it for any run whose memory behaviour is unknown.
+
 ## 5. Published configuration (G2, G3)
 
 ```
 D=$SHVLA_DATA/smolvla_base
 experiments/smolvla-e2e-baseline/run.sh apply
 experiments/smolvla-e2e-baseline/run.sh published fetch
-source infra/lerobot/env.sh
-python infra/lerobot/golden_ref.py --checkpoint lerobot/smolvla_base --revision 5e8d12a6e2975b0e5e5fce7c8caf47c371d257b6 \
-    --obs synthetic:1:256:0 --out $SHVLA_DATA/golden/published.npz
-deactivate   # leave the LeRobot environment; run.sh activates the experiment one
+(source infra/lerobot/env.sh && python infra/lerobot/golden_ref.py --checkpoint lerobot/smolvla_base --revision 5e8d12a6e2975b0e5e5fce7c8caf47c371d257b6 \
+    --obs synthetic:1:256:0 --out $SHVLA_DATA/golden/published.npz)   # subshell: LD_PRELOAD and MUJOCO_GL must not leak into the simulator runs
 experiments/smolvla-e2e-baseline/run.sh published prepare        # needs the golden reference
 ```
 
@@ -106,10 +106,8 @@ Gate: `python3 experiments/smolvla-e2e-baseline/gate.py g3 $SHVLA_DATA/runs/publ
 
 ```
 experiments/smolvla-e2e-baseline/run.sh libero fetch
-source infra/lerobot/env.sh
-python infra/lerobot/golden_ref.py --checkpoint lerobot/smolvla_libero --revision a24f1f380461b665158d52acd140152c79e8b36d \
-    --obs libero:libero_spatial:0:0 --out $SHVLA_DATA/golden/libero.npz
-deactivate
+(source infra/lerobot/env.sh && python infra/lerobot/golden_ref.py --checkpoint lerobot/smolvla_libero --revision a24f1f380461b665158d52acd140152c79e8b36d \
+    --obs libero:libero_spatial:0:0 --out $SHVLA_DATA/golden/libero.npz)
 experiments/smolvla-e2e-baseline/run.sh libero prepare
 export SHVLA_SIM_MEMMAX=8G
 experiments/smolvla-e2e-baseline/run.sh libero sim G4a.1 -- tests/gvsoc/run.py smolvla-e2e --vision-only 1024 --layers 1 --e2e-trace
@@ -131,8 +129,7 @@ The vision phase is projected at 3.72 h (estimate), so the 7200 s default stops 
 ## 7. Success rate (G6b)
 
 ```
-source infra/lerobot/env.sh
-python infra/lerobot/libero_eval.py --run-name <new name> --n-episodes 10 --batch-size 2
+(source infra/lerobot/env.sh && python infra/lerobot/libero_eval.py --run-name <new name> --n-episodes 10 --batch-size 2)
 ```
 
 10 tasks of `libero_spatial` x 10 episodes, about 63 min under contention, `summary.json` with Wilson 95 % intervals in `$SHVLA_DATA/eval/<run name>/`. Batch 5 ran out of memory on this machine. Run it with nothing else heavy running.
