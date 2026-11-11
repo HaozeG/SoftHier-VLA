@@ -369,6 +369,7 @@ From softhier-mlir `docs/SIMULATOR_NOTES.md`. The current `soft_hier_release` ma
 | 2 | `flh`/`fsh` return garbage | Zfh half loads decoded as integer loads; the library avoids scalar fp16 |
 | 3 | long fp16 dot products about 10 % low | `light_redmule.cpp` truncates instead of rounding to nearest even |
 | 4 | segfault with two outstanding collective broadcasts | NoC collective model; the library waits after each broadcast |
+| 5 | DRAMSys used instead of ideal HBM: HBM-bound runs slower (+46-48 % on 16-cluster GEMMs), simulator memory grows with simulated time, `gemm1024_summa` / `siglip_encoder_layer` hit the memory cap | softhier-mlir's `SOFTHIER_IDEAL_HBM` was a private patch (no GVSoC code reads the variable); added on the local branch `shvla/soft_hier_release` (`flex_cluster.py`, ideal `Memory` per HBM channel), see LOG G3.1 |
 | 6 | `fcvt.w.s` then `fcvt.s.w` returns a stale integer | FP-to-int result forwarded before it lands; the library avoids the pattern |
 | 7 | three cores no faster than one; loop speed depends on address | one shared instruction router, no instruction cache |
 | 10 | softmax, LayerNorm, GELU depend on binary layout | scalar FP-to-int instructions lack the `nseq` tag |
@@ -489,7 +490,7 @@ Each step ends with its LOG.md entry; the checkpoint is what must hold before th
 | `SHVLA_SIM_TIMEOUT` | `7200` (seconds, per simulator process) | `run.sh sim` → `run.py --timeout` (patch 0004) |
 | `SOFTHIER_MODEL_DIR`, `SOFTHIER_STOCK_MODELS` | unset | softhier-mlir `run_sim` (extra model folders; stock models only); recorded in the stamp |
 
-`SOFTHIER_IDEAL_HBM` is not exported: `run_sim` sets it itself (`ideal_hbm=True`, the default). `infra/env.sh` sets these defaults and then sources `infra/env.local.sh` if present (gitignored; overrides for one machine or user).
+`SOFTHIER_IDEAL_HBM`: `run_sim` sets it to `1` for every run (`ideal_hbm=True`, the default), and that is sufficient only because the local GVSoC branch reads it (side-note item 5; the stock simulator ignores it and always instantiates DRAMSys). It is read when `gapy` generates the platform config, i.e. at run time, not at `make hw`, so it is not in the build stamp; `infra/env.sh` does not export it. The installed `flex_cluster.py` must match the source, which a rebuild (`build_arch.sh`) ensures and the stamp's GVSoC commit covers. `infra/env.sh` sets these defaults and then sources `infra/env.local.sh` if present (gitignored; overrides for one machine or user).
 
 ### Target Files to Create/Modify
 
