@@ -376,6 +376,7 @@ From softhier-mlir `docs/SIMULATOR_NOTES.md`. The current `soft_hier_release` ma
 | 11 | illegal instruction at a data address late in a long program | 1 KB stack spacing in `flex_start.s`; the library uses private stacks |
 | 12 | out-of-bound TCDM request after a RedMulE trigger | register clobber in `flex_redmule_trigger`; the library uses its own trigger |
 | 13, 14 | in-network REDADD adds stale data; fp16 REDADD truncates | iDMA burst buffers not cleared; `floonoc.cpp` truncates fp16 |
+| (local) | rowops LN/SM/GELU 30-50 % faster than published, rung c layer 1.52 ms vs 2.195 ms, single-cluster GEMMs 5-12 % faster | `cluster_unit.py:209` built `instr_mem` with `width_log2=-1`, so `size >> -1` is undefined and instruction fetch is unlimited; the author's deeploy branch uses the default 2 (32 B line, 8 cycles). Fixed on the local branch by dropping the argument (GVSoC `f99d5a2`; the pulp copy is copied from the same file by `make`), see LOG G3.3-gap, G3.3-fix-instr. Listed as row 6 of the deviations found beyond the original table |
 | models_fast | wall time above about 24 s per simulated ms | host-speed rebuild of the Snitch models, not public |
 
 **Reference for fixes (owner's local notes, read when a run hits the 2 h limit or a side-note symptom).** `/home/haoze/SmolVLA/SmolVLA/` holds the notes of the earlier work behind softhier-mlir, in Chinese. They are not part of this repo and may be missing on other machines. What they give:
