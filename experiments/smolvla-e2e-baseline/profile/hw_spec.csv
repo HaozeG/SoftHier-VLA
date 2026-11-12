@@ -1,0 +1,37 @@
+group,item,value,unit,kind,source
+chip,Clusters,16 (4 x 4 mesh),,config,arch num_cluster_x/y = 4
+chip,Clock,1,GHz,config,flex_cluster.py:353 Clock_domain 1 GHz
+chip,RedMulE peak (fp16),131.07,TFLOP/s,derived,16 x 128 x 32 MAC/cycle x 2 FLOP x 1 GHz
+chip,Snitch cores,48 (3 per cluster),,config,arch num_core_per_cluster = 3
+chip,On-chip SRAM (TCDM),16,MiB,derived,16 x 1 MiB
+chip,HBM capacity,512,MiB,derived,8 channels x 64 MiB (hbm_node_addr_space); 4 on the west edge + 4 on the south edge
+chip,HBM read bandwidth ceiling (ideal HBM),512,GB/s,derived,8 edge ports x 64 B/cycle NoC link (per direction); reached only if traffic spreads over all 8 ports
+chip,Ridge point (RedMulE peak / HBM ceiling),256,FLOP/B,derived,131.07 TFLOP/s / 512 GB/s
+cluster,RedMulE array,128 x 32 CEs (4096 MAC/cycle),,config,arch redmule_ce_height/width
+cluster,RedMulE peak per cluster,8.19,TFLOP/s,derived,4096 MAC/cycle x 2 x 1 GHz
+cluster,TCDM,1 MiB in 64 banks x 64 bit,,config,arch cluster_tcdm_size/bank_nb/bank_width
+cluster,TCDM bandwidth,512,GB/s,derived,64 banks x 8 B/cycle
+cluster,Cores,3 Snitch rv32imfdva + FP subsystem each (no icache modelled),,config,cluster_unit.py:209-240
+cluster,Instruction memory,64 KiB at 4 B/cycle,,config,cluster_unit.py:209 Memory width_log2=2 (default; patch 0010)
+cluster,Instruction issue ceiling (model),1,instr/cycle per cluster,derived,4 B/cycle shared by 3 cores; offloaded FP instructions are fetched by the integer cores; 32-bit instructions (no C extension)
+cluster,Core fp16 SIMD bound,128,GFLOP/s chip,derived,issue-bound: 1 instr/cycle x 16 clusters x 8 FLOP (4-lane fp16 FMA); the per-core FPU peak (8 FLOP/cycle x 48 = 384 GFLOP/s) is not reachable without FREP
+cluster,iDMA,16 outstanding transactions,,config,arch idma_outstand_txn
+cluster,NoC port (cluster to mesh),64,GB/s per direction,derived,noc_link_width 512 bit x 1 GHz
+noc,Topology,6 x 6 mesh: 4 x 4 clusters + edge ring of ports,,config,flex_cluster.py:224 FlexMeshNoC dim = clusters + 2
+noc,Link width,512 bit (64 B/cycle per direction),,config,arch noc_link_width
+noc,HBM ports,west edge x 4 (one per row) + south edge x 4 (one per column); north and east edge routers have no channel,,config,arch hbm_chan_placement = [4 W 0 N 0 E 4 S]
+noc,Barrier network,separate 4 B sync bus,,config,flex_cluster.py sync_bus width=4
+memory map,Address model,physical only: no MMU; each cluster sees its own TCDM at 0x0 and every TCDM at 0x30000000 + id x 1 MiB,,config,arch cluster_tcdm_base/remote
+memory map,Code and small data (.text .rodata .sdata .bss),per-cluster instruction memory at 0x80000000 (64 KiB; each cluster gets its own copy),,config,flex_memory.ld L3 region; cluster_unit.py:306 loader -> instr_router
+memory map,Program size (text + rodata + sdata),50-55 KiB of 64 KiB (78-86 % full),,measured,riscv32-unknown-elf-size of the 4 softhier.elf (vision 53.9 / prefix 49.8 / expert 55.2 KiB)
+memory map,Scalar data in instruction memory,loads of .rodata/.sdata/.bss share the same 4 B/cycle port as instruction fetch,,config,cluster_unit.py:336 narrow_axi -> instr_mem
+memory map,Stack,per-cluster stack memory at 0x10000000 (128 KiB),,config,arch cluster_stack_base/size
+memory map,Weights and activations,HBM at 0xC0000000 + offset; flat offsets from the frontends; separate preload ELF (150-200 MB per program),,config,softhier_mlir/sim/preload.py; flex_memory.ld .hbm/.data
+memory map,HBM node map,64 MiB per edge node: 0xC0-0xCF west W0-W3; 0xD0 north; 0xE0 east (no channel); 0xF0-0xFF south S0-S3,,config,flex_cluster.py:277-343 (hbm_node_aliase 1: no interleaving across nodes)
+measured,HBM ports actually used by the big GEMMs,W0 W1 W2 (W3 < 5 %; south ports 0 %),,measured,hbm_ports.py on the kept logs
+measured,Hottest port read bandwidth in big GEMMs,44-64 (W0),GB/s,measured,hbm_ports.py; 69-100 % of the 64 GB/s link; W0 carries 46-67 % of the bytes
+measured,Best GEMM throughput,15.9 (vision mlp_up),TFLOP/s,measured,ops.csv; 12.1 % of RedMulE peak
+measured,Whole-run RedMulE throughput,1.2 % of peak,,measured,PROFILE.md summary
+measured,Best HBM bandwidth (all ports),171 in one op instance; 127 mean over prefix mlp_gate,GB/s,measured,ops.csv / hbm_ports.py; 33 % / 25 % of the 512 GB/s chip ceiling
+measured,Cluster issue rate in core-bound ops,~0.9,instr/cycle,measured,insn_ops.csv (prefix silu_mul: 63 k int + 114 k FP in 198.7 k cycles); near the 1 instr/cycle model ceiling
+reference,DRAMSys HBM (not used in these runs),HBM2E-4000: 64 bit x 2 pseudo-channels x 4000 MT/s = 64 GB/s per channel,,config,core/models/memory/dramsys_configs (hbm2-example.json -> JEDEC_16Gb_HBM2E-4000.json)

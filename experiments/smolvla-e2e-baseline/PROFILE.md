@@ -6,6 +6,7 @@ Step PROF.1 (LOG.md). Per-section, per-op profile of the validated SmolVLA runs,
 
 ## Structure
 
+0. [Hardware at a glance](#hardware-at-a-glance): floorplan, specs, memory map (where code and data live), the two rooflines (added in PROF.3).
 1. [Where the data comes from](#where-the-data-comes-from): which runs, what instrumentation exists, how ops are delimited.
 2. [Phase table](#phase-table): vision / connector / prefix / expert, and the cross-check against the gate (measured).
 3. [Phase to layer to op](#phase-to-layer-to-op): every phase's ops with repetition counts, the top ops overall, the expert step anatomy (measured).
@@ -15,6 +16,61 @@ Step PROF.1 (LOG.md). Per-section, per-op profile of the validated SmolVLA runs,
 7. [LIBERO configuration (estimate)](#libero-configuration-estimate).
 8. [Files, parser, how to redo](#files-parser-how-to-redo).
 9. [Caveats](#caveats).
+
+## Hardware at a glance
+
+The simulated chip (`arch/softhier_mlir_arch.py`, GVSoC `soft_hier_release` + patch series, ideal HBM). Each value is labelled config (read from the arch file or the model source), derived (computed from config values) or measured (from the traces). The full table with sources is `profile/hw_spec.csv`.
+
+**Floorplan.** A 6 x 6 mesh NoC: 4 x 4 clusters in the middle, a ring of edge routers around them. Cluster `id = 4 y + x` sits at mesh node (x+1, y+1); south is mesh row 0. HBM channels hang off the west edge (one per row) and the south edge (one per column); the north and east edge routers exist but have no channel (`hbm_chan_placement = [4, 0, 0, 4]`, order W, N, E, S).
+
+```
+            north edge routers (no HBM)
+          +------+------+------+------+
+       W3 |  12  |  13  |  14  |  15  |   east edge
+          +------+------+------+------+   routers
+       W2 |   8  |   9  |  10  |  11  |   (no HBM)
+          +------+------+------+------+
+       W1 |   4  |   5  |   6  |   7  |
+          +------+------+------+------+
+       W0 |   0  |   1  |   2  |   3  |
+          +------+------+------+------+
+             S0     S1     S2     S3
+   W0..W3, S0..S3: one HBM channel each, 64 MiB, behind a 64 B/cycle mesh link
+```
+
+**One cluster.** 3 Snitch cores (rv32imfdva), each with an FP subsystem that runs fp16 SIMD (4 lanes in a 64-bit FPU); one RedMulE 128 x 32 matrix engine; one iDMA engine (16 outstanding transactions); 1 MiB TCDM in 64 banks of 64 bit; a 64 KiB instruction memory; a 128 KiB stack memory; one 512-bit port into the mesh.
+
+| | value | kind |
+| --- | --- | --- |
+| clock | 1 GHz | config |
+| RedMulE peak, fp16 | 4096 MAC/cycle per cluster = 8.19 TFLOP/s; **131.07 TFLOP/s** chip | derived |
+| TCDM | 1 MiB per cluster (16 MiB chip), 64 x 8 B/cycle = 512 GB/s per cluster | config / derived |
+| NoC link | 512 bit = 64 GB/s per direction (cluster port, mesh links, HBM edge ports) | config / derived |
+| HBM | 8 x 64 MiB = 512 MiB; ideal model: no latency, no channel limit, so a port is limited by its 64 GB/s link; **512 GB/s** read ceiling if traffic spreads over all 8 ports | derived |
+| ridge point | 131.07 TFLOP/s / 512 GB/s = **256 FLOP/B** | derived |
+| instruction memory | 64 KiB, `width_log2 = 2` = 4 B/cycle shared by the 3 cores, no icache modelled; one 32-bit instruction per cycle per cluster at most | config / derived |
+| core fp16 bound | 16 clusters x 1 instr/cycle x 8 FLOP (4-lane FMA) = **128 GFLOP/s** (issue-bound; the 384 GFLOP/s FPU peak needs FREP, which the runtime does not use) | derived |
+| DRAMSys HBM (reference, **not used** here) | HBM2E-4000, 64 GB/s per channel (`dramsys_configs/hbm2-example.json`) | config |
+
+**Memory map: where code and data live.** There is no MMU and no virtual memory: every address is physical. The only per-cluster aliasing is that each cluster sees its own TCDM at `0x0` (and every TCDM at `0x30000000 + id x 1 MiB`) and its own instruction memory and stack at the same addresses as every other cluster.
+
+| region | address | what the SDK linker script (`flex_memory.ld`) and softhier-mlir put there |
+| --- | --- | --- |
+| TCDM (L1) | `0x0000_0000`, 1 MiB per cluster | tiles staged by iDMA inside one library call; nothing survives across calls (COMPILER.md) |
+| stack | `0x1000_0000`, 128 KiB per cluster | core stacks (`sh_call_on_core_stack`) |
+| cluster / RedMulE registers | `0x2000_0000`, `0x2002_0000` | control |
+| instruction memory ("L3" in the linker script) | `0x8000_0000`, 64 KiB per cluster, each cluster loaded with its own copy | `.text`, `.rodata`, `.sdata`, `.sbss`, `.bss`, `.cdata`, `.tdata`; programs use 50 to 55 KiB of it (78 to 86 %: vision 53.9, prefix 49.8, expert 55.2 KiB of text + rodata + sdata) |
+| HBM | `0xC000_0000` + offset | `.data`, `.hbm` and all weights and activations, preloaded from a separate ELF (150 to 200 MB per program) at flat offsets chosen by the frontends (`softhier_mlir/sim/preload.py`) |
+
+Two consequences for the profile:
+
+- **Instruction fetch.** Code and the scalar constants and globals share the instruction memory's single 4 B/cycle port (`instr_router` for fetch, `narrow_axi` for data loads, `cluster_unit.py:306-336`). Offloaded FP instructions are fetched by the integer cores (the FP subsystems have no fetch port). So the model caps a cluster at about one instruction per cycle. Measured in core-bound ops: about 0.9 (prefix `silu_mul`: 63 k integer + 114 k FP-subsystem instructions in 198.7 k cycles; the two traces do not overlap, the FP count is larger than the integer count). This is the mechanism behind the 64.5 % core-executed share: consistent with the config and with F16 (removing the fetch limit made the whole chain 23.5 % faster), not yet isolated per op. It is how this GVSoC configuration models the cluster, not necessarily the silicon.
+- **HBM placement.** The HBM nodes are not interleaved (`hbm_node_aliase = 1`): each 64 MiB node is one port. The frontends place data at flat offsets from `0xC000_0000`, so every program's 150 to 200 MB fills W0, W1, W2 first. Measured over the big GEMMs (`profile/hbm_ports.py`): **all HBM bytes go through W0, W1, W2 (W3 under 5 %, the south ports 0 %), and W0 alone carries 46 to 67 %**. W0's read link runs at 44 to 64 GB/s averaged over the op windows, 69 to 100 % of its 64 GB/s (expert `mlp_down` 64.3, `gemm_qkv` 63.1 GB/s).
+
+**Rooflines.**
+
+- **GEMMs (RedMulE).** Every GEMM in the run has an arithmetic intensity of 14 to 146 FLOP per HBM byte (as implemented: padded RedMulE shapes, activations re-fetched every call), below the 256 FLOP/B ridge, so all of them are bandwidth-bound by the chip roofline. Against the 512 GB/s chip ceiling they reach only 15 to 25 % of the bandwidth roof (70 to 127 GB/s), but that ceiling is not the one that binds: with the current placement the practical roof is W0's 64 GB/s read link, which the big GEMMs already load at 69 to 100 %. Since W0 carries 58 % of the GEMM bytes over the run (46 to 67 % per op), that link caps the total HBM traffic at about 64 / 0.58 = 110 GB/s (95 to 140 GB/s per op), and the big GEMMs sit on that line (expert `mlp_gateup` 111 GB/s, prefix `mlp_gate` 127 GB/s at a 54 % W0 share). Spreading weights over all 8 ports is the largest GEMM-side lever (up to the 512 GB/s ceiling; a compiler/runtime layout change, see COMPILER.md C12). Best GEMM: vision `mlp_up`, 15.9 TFLOP/s (12.1 % of peak); expert GEMMs 1.9 to 4.4 TFLOP/s.
+- **Everything else (cores).** Softmax, GELU, norms, SiLU, RoPE and elementwise ops have no RedMulE FLOPs and do not belong on the RedMulE roofline. Their roof is instruction issue: at about 8.4 instructions per element and at most one instruction per cycle per cluster, a cluster needs at least 8.4 ns per element (measured: about 9.5 ns per element, see "What the cores do"). Raising that roof needs fewer instructions per element or FREP/SSR (no fetch per element), or more fetch bandwidth in the model (C1/C2).
 
 ## Where the data comes from
 
@@ -375,7 +431,7 @@ Reading: during GEMMs `pe0`/`pe1` issue less than 0.015 instructions per ns (>= 
 
 The causes behind the numbers above are in [COMPILER.md](COMPILER.md) (architecture of softhier-mlir, how each op class is lowered, with file:line evidence; machine-readable table in `profile/compiler_causes.csv`). In short:
 - The compiler is a thin dispatcher: one library call per op, each call stages its inputs from HBM, computes, stores to HBM and ends in a global barrier. Tiling, buffering and overlap exist only inside one call; no passes run on the SmolVLA path, and nothing is fused across ops.
-- Everything that is not a GEMM runs as fp16 SIMD on the 3 cores per cluster, at about 8.4 to 8.6 instructions per element (static and dynamic agree) and about 9.5 ns per element per cluster (derived); no FREP/SSR/Spatz is used. The "cores issue 6 to 14 % of cycles" figure above counts only the integer-core trace; with the offloaded FP instructions the cluster issues about 0.9 instructions per cycle in elementwise windows (prefix `silu_mul`: 63 k integer + 114 k FP-subsystem instructions in 198.7 us, `insn_ops.csv`), consistent with a ~1 instruction/cycle cluster ceiling. This is the 64.5 % core-executed share (confirmed; whether the ceiling is instruction fetch is a hypothesis).
+- Everything that is not a GEMM runs as fp16 SIMD on the 3 cores per cluster, at about 8.4 to 8.6 instructions per element (static and dynamic agree) and about 9.5 ns per element per cluster (derived); no FREP/SSR/Spatz is used. The "cores issue 6 to 14 % of cycles" figure above counts only the integer-core trace; with the offloaded FP instructions the cluster issues about 0.9 instructions per cycle in elementwise windows (prefix `silu_mul`: 63 k integer + 114 k FP-subsystem instructions in 198.7 us, `insn_ops.csv`), consistent with a ~1 instruction/cycle cluster ceiling. This is the 64.5 % core-executed share (confirmed; that the ceiling is instruction fetch is consistent with the model config, 4 B/cycle instruction memory shared by the cluster, see [Hardware at a glance](#hardware-at-a-glance), but not isolated per op).
 - GEMMs only parallelise over output tiles (no split-K, no multicast): 1 to 10 clusters in vision/prefix; the M = 50 expert GEMMs re-read X per column tile and have one K step (`tile_k = K`), so nothing overlaps (confirmed).
 - Options already in the library but not selected: `xmcast` GEMM, fused attention, KV-stationary attention (hence c2c = 0). The weight stream of the expert is partly a capacity floor.
 - Estimated (not measured) top three: cheaper core math about 20 %, overlap of the next GEMM's weight stream with row-ops about 10 %, switching on xmcast and fused attention about 7 %; about 35 % combined (Amdahl, range 20 to 45 %).
