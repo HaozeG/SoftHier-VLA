@@ -363,12 +363,17 @@ Lookup results (web and ingested papers, 2026-11-12):
   Only VLA-Perf models two levels on one Thor (roofline, not measured), so chip-sharing
   has little prior measurement.
 
+Decided by the owner after the lookups:
+
+- Thor figure: 258 TFLOP/s dense FP16 (derived) as the alignment target, ~155 TFLOP/s
+  measured as the second reference.
+- Naming: SmolVLA is "the VLA" with parts "VLM trunk" and "action expert"; "S0" is the
+  fast controller, defined once with rate and model type; "S2+S1 in one model" when a
+  level label is needed. Recorded as one project glossary entry in the wiki session.
+- Co-location of S0 with the VLA on one chip: roadmap only, not a stage-1 RQ.
+
 Still open:
 
-1. Owner approval of the 258 / 155 Thor figures and of the proposed naming, then one
-   project glossary entry (in the wiki session).
-2. Is co-location of S0 with the policy an RQ in stage 1 (with a stand-in S0 model,
-   rate and deadline), or roadmap only?
-3. The measured PR1 baseline ran on the 131 TFLOP/s arch, not the chosen 16.4 TFLOP/s
+1. The measured PR1 baseline ran on the 131 TFLOP/s arch, not the chosen 16.4 TFLOP/s
    arch. Measured baselines on the chosen arch need new runs (next measurement PR);
    until then, RQ baselines on the chosen arch are estimates.
