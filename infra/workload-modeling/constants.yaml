@@ -5,6 +5,8 @@
 # Entry fields: value, unit, label, source; optional workload, arch, note.
 # Labels: measured | estimate | inference (the wiki's set, softhier_vla_wiki/tools/wiki.py:88).
 # A figure computed from a source's number is `inference`, with the computation in `note`.
+# Inputs read as given (arch-file parameters, checkpoint configs, vendor spec figures) are `measured`
+# with the file or spec as source (docs/analysis/conventions.md, "Inputs read as given").
 # Figures computed from arch parameters (peak per cluster, totals) are not stored:
 # workload_modeling/constants.py computes them.
 #
@@ -111,7 +113,7 @@ pr1:
   e2e_ms:
     {value: 120.7, unit: ms, label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#phase-table (120.705 ms)", note: "ideal HBM"}
   core_op_share:
-    {value: 64.5, unit: "%", label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#what-dominates-and-why finding 2", note: "elementwise 26.3 + attention 25.0 + norm 12.9; attention includes per-head QK/PV staging, softmax, RoPE and bias adds"}
+    {value: 64.5, unit: "%", label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#what-dominates-and-why finding 2", note: "elementwise 26.3 + attention 25.0 + norm 12.9; attention includes per-head QK/PV staging and softmax; elementwise includes RoPE, bias and residual adds"}
   libero_softmax_share:
     {value: 43.8, unit: "%", label: estimate, workload: libero-2cam, arch: pr1, source: "PROFILE.md@68cd4eb#libero-configuration-estimate", note: "per-head softmax, 288 calls; scaled from G4a partial runs"}
   libero_rowop_share:

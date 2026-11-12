@@ -203,7 +203,8 @@ The source is `experiments/smolvla-e2e-baseline/PROFILE.md` on the experiment br
 
 *   **RQ1:**
     *   `pr1.core_op_share`: 64.5 %. This is PROFILE's elementwise + attention + norm
-        share, which also includes per-head staging, RoPE and bias adds. `pr1-1cam`,
+        share; attention includes per-head staging and softmax, elementwise includes RoPE
+        and bias adds. `pr1-1cam`,
         PR1 arch, measured.
     *   `pr1.libero_softmax_share`: per-head softmax is 43.8 % of the run. `libero-2cam`,
         PR1 arch, estimate (scaled from partial runs).
@@ -494,7 +495,8 @@ cross-check:
 *   the cross-attention K/V projection of the prefix done once per call (the reference
     code repeats it every step);
 *   the time-MLP input projection split: the time half is one row, the same for all chunk
-    tokens, and is folded into the bias on the host.
+    tokens, and is folded into a per-step bias table on the host
+    (`frontend/smolvla_expert.py:27-28`).
 
 ### 4. Cross-check against PR1's compiled programs (Part 1)
 

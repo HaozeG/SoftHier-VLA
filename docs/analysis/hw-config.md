@@ -30,7 +30,7 @@ PR1's numbers (all `arch: pr1` keys) were measured on PR1's arch with ideal HBM
 | clock | 1 GHz | 1 GHz | `arch.stage1.clock_hz` (simulator config `flex_cluster.py:338`, not in `arch.py`) | measured |
 | RedMulE peak FP16 | 16.384 TFLOP/s | 262.144 TFLOP/s | clusters x `redmule_h` x `redmule_w` MAC x 2 x clock | inference |
 | Thor peak FP16 (reference) | | 258 (dense, `thor.fp16_dense`); 153 (`thor.fp16_measured`) | VLA-HWBench Table 3; Chalmers | inference; measured |
-| Spatz throughput (not in peak) | not determined | not determined | 4 cores with Spatz (`spatz_cores`) x 4 function units (`spatz_function_units`) per cluster; lanes per unit and FLOP per lane-cycle are set in the simulator's core model, not read yet | |
+| Spatz throughput FP16 (not in peak) | 2.048 TFLOP/s | 32.768 TFLOP/s | clusters x 4 Spatz cores (`spatz_cores`) x 4 FPUs (`spatz_function_units`) x 64/16 fp16 elements per FPU per cycle (`~/softhier@52859c3` `core/models/cpu/iss/include/isa_lib/vint.h:102`, `NUM_FPU = SPATZ_FPU x (64 / SEW)`) x 2 FLOP (one FMA per element, assumed) x clock | inference |
 | TCDM per cluster, total | 384 KiB, 6 MiB | 384 KiB, 96 MiB | `arch.stage1.tcdm_bytes` x clusters | measured / inference |
 | instruction memory per cluster | 64 KiB | 64 KiB | `arch.stage1.instruction_mem_bytes`; PR1's programs filled 78-86 % of it | measured |
 | HBM capacity | not determined from `arch.py` alone | 1 GiB | next power of two >= SmolVLA's fp16 weights (about 0.9 GB for 450M parameters) plus activations | estimate |

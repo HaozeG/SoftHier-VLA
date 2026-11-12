@@ -28,6 +28,9 @@ on chip set its time, and the two differ in cost.
 * `pr1.expert_weight_bytes_per_step`: about 193 MB, `pr1-1cam`, estimate (from op shapes).
 * Standalone model: expert 11.05 GFLOP and 199.7 MB of weights per step, 55 FLOP per weight byte,
   `libero-2cam`, inference, cross-checked ([stage-totals.md](../../analysis/stage-totals.md)).
+  The 199.7 MB are the 16 expert layers (196.4 MB = 2 B x 98.2M parameters, tested) plus the action
+  and time input/output linears (3.2 MB). PROFILE's 193 MB equals the layers without the
+  cross-attention K/V projection (3.3 MB), which PR1 runs once per call.
 
 ## Method
 

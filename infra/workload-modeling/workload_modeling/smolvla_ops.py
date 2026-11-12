@@ -89,7 +89,8 @@ class Lowering:
         (softhier-mlir@b11cd5f runtime/sh_expert.inc.c:83, `(Lp + So + 31u) & ~31u`);
       - cross-attention K/V projection of the prefix done once per call, not in every step;
       - time MLP input projection split: concat(action, time) @ W = action @ W_a + time @ W_t, and the
-        time half (one row, the same for all chunk tokens) is folded into the bias on the host.
+        time half (one row, the same for all chunk tokens) is folded into a per-step bias table on the
+        host (softhier-mlir@b11cd5f frontend/smolvla_expert.py:27-28, :115).
     """
 
     prefix_rows: int | None = None   # pad prefix token rows to this (None: true count)

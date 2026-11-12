@@ -25,7 +25,8 @@ cluster needs a different row-operation path.
 ## Starting points
 
 * `pr1.core_op_share`: 64.5 %, `pr1-1cam`, PR1 arch, measured (elementwise 26.3 + attention 25.0 +
-  norm 12.9; "attention" includes per-head QK/PV staging, softmax, RoPE and bias adds).
+  norm 12.9; "attention" includes per-head QK/PV staging and softmax, "elementwise" includes RoPE,
+  bias and residual adds).
 * `pr1.libero_softmax_share`: 43.8 % (per-head softmax), `libero-2cam`, PR1 arch, estimate.
 * `pr1.libero_rowop_share`: about 60 % (softmax + GELU + LayerNorm), `libero-2cam`, PR1 arch, estimate.
 

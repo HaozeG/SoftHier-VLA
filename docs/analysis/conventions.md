@@ -31,6 +31,12 @@ into wiki status entries unchanged. Measured: a reported run. Estimate: computed
 partial runs. Inference: a conclusion drawn from other numbers, including model output. A community
 figure that was not independently checked keeps its label and says "self-reported" in `note`.
 
+**Inputs read as given** (an arch-file parameter, a checkpoint config value, a vendor spec-sheet
+figure such as Thor's 273 GB/s) are labelled `measured`, with the file and line or the spec as source.
+They are read, not computed, and the wiki has no separate label for them. This extends the glossary's
+"a reported run", which covers results, to inputs; it is a stage-1 convention for the owner to confirm.
+A spec figure a paper derives (Thor's dense FP16 258) is `inference`.
+
 ## Operator rows and byte columns
 
 The standalone model (`infra/workload-modeling/workload_modeling/smolvla_ops.py`) writes one row per

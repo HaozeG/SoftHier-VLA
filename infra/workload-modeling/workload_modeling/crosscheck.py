@@ -196,7 +196,10 @@ def render_md(res: dict) -> str:
         "* The `libero-2cam` reference is an estimate: G4a partial runs (vision 1 layer at 1024 tokens, prefix 8 layers, "
         "expert 2 steps) scaled with PR1's recipe (PROFILE.md, LIBERO configuration). The model is not scaled.",
         "* Remaining differences: the model counts the host-side one-row time half of the time MLP "
-        "(`time_mlp_in_time`), which PR1 does not run on RedMulE.",
+        "(`time_mlp_in_time`), which PR1 folds into a per-step bias table on the host "
+        "(softhier-mlir `b11cd5f` `frontend/smolvla_expert.py:27-28`) and does not run on RedMulE.",
+        "* The expert attention key padding is inside the runtime (`runtime/sh_expert.inc.c:83`, "
+        "`(Lp + So + 31u) & ~31u`), so the programs show 65 / 177 key rows while RedMulE works on 96 / 192.",
         "",
     ]
     return "\n".join(lines)

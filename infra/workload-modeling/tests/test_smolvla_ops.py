@@ -82,3 +82,32 @@ def test_padded_matches_crosscheck_json(c):
             assert v["pass"], (wid, s)
             assert tot[s].matmul_flop / 1e9 == pytest.approx(v["model_padded_gflop"], rel=1e-4), (wid, s)
             assert tot[s].matmul_flop / 1e9 == pytest.approx(v["pr1_redmule_gflop"], rel=1e-2), (wid, s)
+
+
+IO_OPS = {"state_proj", "bias_state", "action_in_proj", "bias_action_in", "time_mlp_in", "bias_time_in",
+          "time_mlp_out", "bias_time_out", "action_out_proj", "bias_action_out"}
+
+
+def test_weight_bytes_equal_header_parameters(c):
+    """One pass (one flow step for the expert) reads every called tensor once: 2 B x parameters per part.
+
+    Uses libero-2cam (1024 vision positions = the full position table). The token embedding is read
+    only for the 48 looked-up rows; lm_head is never called.
+    """
+    wl = c.workloads["libero-2cam"]
+    header = fixtures.load(wl.repo, wl.revision)[1]
+    params = m.param_counts(header)
+    steps = m.load_dims(wl).steps
+    rows = m.build(c, "libero-2cam")
+
+    def wb(stage, ops=None, exclude=()):
+        return sum(r.bytes_weight for r in rows
+                   if r.stage == stage and (ops is None or r.op in ops) and r.op not in exclude)
+
+    assert wb("vision") == 2 * params["vision"]
+    assert wb("connector") == 2 * params["connector"]
+    assert wb("prefix", exclude=IO_OPS | {"lang_embed_scale"}) == 2 * params["llm"]
+    assert wb("expert", exclude=IO_OPS) / steps == 2 * params["expert"]
+    io = wb("prefix", ops=IO_OPS) + wb("expert", ops=IO_OPS) / steps
+    assert io == 2 * params["io"]
+    assert wb("prefix", ops={"lang_embed_scale"}) == 2 * wl.language_tokens * 960
