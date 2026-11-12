@@ -1,0 +1,130 @@
+# Stage-1 constants for SoftHier-VLA.
+#
+# Every number that appears in more than one stage-1 document lives here.
+# Key path: group.name (for example pr1.expert_step_ms, thor.fp16_dense, arch.stage1.redmule_h).
+# Entry fields: value, unit, label, source; optional workload, arch, note.
+# Labels: measured | estimate | inference (the wiki's set, softhier_vla_wiki/tools/wiki.py:88).
+# A figure computed from a source's number is `inference`, with the computation in `note`.
+# Figures computed from arch parameters (peak per cluster, totals) are not stored:
+# workload_modeling/constants.py computes them.
+#
+# PR1 sources: experiments/smolvla-e2e-baseline/ on branch worktree-smolvla-e2e-baseline,
+# commit 68cd4eb (PROFILE.md, profile/hw_spec.csv). PR1 merged to main as e832bfb.
+#
+# Thor footnote: 500 TFLOP/s (Google/Purdue, arXiv 2603.02271) is DRIVE Thor, not Jetson Thor;
+# 400 (VLA-Perf) has no stated method. Neither is used.
+
+workloads:
+  pr1-1cam:
+    checkpoint: lerobot/smolvla_base@5e8d12a6e2975b0e5e5fce7c8caf47c371d257b6
+    cameras: 1
+    image_size: 256            # per camera, square; PR1's published configuration
+    language_tokens: 48
+    state_tokens: 1
+    label: measured
+    source: "docs/designs/smolvla-softhier-baseline.md@e832bfb; kept programs published-fixi-rung6"
+  libero-2cam:
+    checkpoint: lerobot/smolvla_libero@a24f1f380461b665158d52acd140152c79e8b36d
+    cameras: 2
+    image_size: 512
+    language_tokens: 48
+    state_tokens: 1
+    primary: true
+    label: measured
+    source: "PROFILE.md@68cd4eb#libero-configuration-estimate; kept programs libero-G4a"
+  release-3cam:
+    checkpoint: lerobot/smolvla_base@5e8d12a6e2975b0e5e5fce7c8caf47c371d257b6
+    cameras: 3
+    image_size: 512
+    language_tokens: 48
+    state_tokens: 1
+    label: inference
+    source: "wiki://resources/models/smolvla.md (released config: three cameras at 512x512)"
+    note: "No RQ uses this workload; kept for the several-models step."
+
+arch:
+  stage1:
+    repo: "~/softhier@52859c3 (branch softhier_deeploy)"
+    file: implementation/config/arch/arch.py
+    clusters_x: {value: 4, unit: "", label: measured, source: "arch.py:24"}
+    clusters_y: {value: 4, unit: "", label: measured, source: "arch.py:25"}
+    cores_per_cluster: {value: 5, unit: "", label: measured, source: "arch.py:26"}
+    spatz_cores: {value: 4, unit: "", label: measured, source: "arch.py:45 spatz_attaced_core_list = [0, 1, 2, 3]"}
+    spatz_function_units: {value: 4, unit: "", label: measured, source: "arch.py:47"}
+    redmule_h: {value: 32, unit: CE, label: measured, source: "arch.py:50"}
+    redmule_w: {value: 16, unit: CE, label: measured, source: "arch.py:51"}
+    tcdm_bytes: {value: 393216, unit: B, label: measured, source: "arch.py:32 (0x60000)"}
+    noc_link_bits: {value: 1024, unit: bit, label: measured, source: "arch.py:72"}
+    instruction_mem_bytes: {value: 65536, unit: B, label: measured, source: "arch.py:76 (0x10000)"}
+    clock_hz: {value: 1.0e9, unit: Hz, label: measured, source: "~/softhier@52859c3 pulp/pulp/chips/flex_cluster/flex_cluster.py:338"}
+  pr1:
+    repo: "third_party GVSoC soft_hier_release, PR1 arch file"
+    file: "experiments/smolvla-e2e-baseline/profile/hw_spec.csv@68cd4eb"
+    clusters_x: {value: 4, unit: "", label: measured, source: "hw_spec.csv: arch num_cluster_x/y = 4"}
+    clusters_y: {value: 4, unit: "", label: measured, source: "hw_spec.csv: arch num_cluster_x/y = 4"}
+    cores_per_cluster: {value: 3, unit: "", label: measured, source: "hw_spec.csv: num_core_per_cluster = 3"}
+    spatz_cores: {value: 0, unit: "", label: measured, source: "PR1 arch file: spatz_attaced_core_list = []"}
+    redmule_h: {value: 128, unit: CE, label: measured, source: "hw_spec.csv: redmule_ce_height/width"}
+    redmule_w: {value: 32, unit: CE, label: measured, source: "hw_spec.csv: redmule_ce_height/width"}
+    tcdm_bytes: {value: 1048576, unit: B, label: measured, source: "hw_spec.csv: TCDM 1 MiB"}
+    noc_link_bits: {value: 512, unit: bit, label: measured, source: "hw_spec.csv: noc_link_width"}
+    instruction_mem_bytes: {value: 65536, unit: B, label: measured, source: "hw_spec.csv: instruction memory 64 KiB"}
+    clock_hz: {value: 1.0e9, unit: Hz, label: measured, source: "hw_spec.csv: flex_cluster.py:353 Clock_domain 1 GHz"}
+
+thor:
+  fp16_dense:
+    value: 258
+    unit: TFLOP/s
+    label: inference
+    source: "wiki://resources/serving/vla-hwbench-edge-latency.md (VLA-HWBench Table 3: FP16 258, FP8 517, FP4 1035)"
+    note: "Spec-derived by the paper; NVIDIA publishes no dense FP16 figure. Equals FP8 517 / 2. Alignment value for iso-peak FP16."
+  fp16_measured:
+    value: 153
+    unit: TFLOP/s
+    label: measured
+    source: "wiki://knowledge/mfu-from-measurements.md (Chalmers)"
+  fp16_forum:
+    value: 155.5
+    unit: TFLOP/s
+    label: measured
+    source: "NVIDIA developer forum, topic 344399"
+    note: "self-reported (community, not independently checked), 120 W"
+  fp8_dense:
+    value: 517
+    unit: TFLOP/s
+    label: inference
+    source: "wiki://resources/serving/vla-hwbench-edge-latency.md (Table 3)"
+    note: "Peak used for the per-stage MFU rows in wiki://knowledge/mfu-from-measurements.md"
+  dram_bw:
+    value: 273
+    unit: GB/s
+    label: measured
+    source: "wiki://resources/serving/vla-hwbench-edge-latency.md (Table 3)"
+    note: "Spec value; also used as the provisional SoftHier HBM bandwidth for RQ2 (inference)"
+  dram_bytes:
+    value: 128
+    unit: GB
+    label: measured
+    source: "wiki://resources/serving/vla-xpu-characterization-sjtu.md"
+
+pr1:
+  e2e_ms:
+    {value: 120.7, unit: ms, label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#phase-table (120.705 ms)", note: "ideal HBM"}
+  core_op_share:
+    {value: 64.5, unit: "%", label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#what-dominates-and-why finding 2", note: "elementwise 26.3 + attention 25.0 + norm 12.9; attention includes per-head QK/PV staging, softmax, RoPE and bias adds"}
+  libero_softmax_share:
+    {value: 43.8, unit: "%", label: estimate, workload: libero-2cam, arch: pr1, source: "PROFILE.md@68cd4eb#libero-configuration-estimate", note: "per-head softmax, 288 calls; scaled from G4a partial runs"}
+  libero_rowop_share:
+    {value: 60, unit: "%", label: estimate, workload: libero-2cam, arch: pr1, source: "PROFILE.md@68cd4eb#libero-configuration-estimate", note: "softmax + GELU + LayerNorm, about 60 %"}
+  expert_step_ms:
+    {value: 7.761, unit: ms, label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#expert-step-anatomy-step-5-measured", note: "flow step 5; ideal HBM"}
+  expert_hbm_read_per_step:
+    {value: 335, unit: MB, label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#what-dominates-and-why finding 1", note: "ideal HBM"}
+  expert_weight_bytes_per_step:
+    {value: 193, unit: MB, label: estimate, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#what-dominates-and-why finding 1", note: "computed from op shapes"}
+  gemm_cluster_use:
+    {value: "1-10 of 16", unit: clusters, label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#compiler-view-why", note: "vision and prefix GEMMs parallelise over output tiles only"}
+  libero_e2e_ms:
+    {value: 479.1, unit: ms, label: estimate, workload: libero-2cam, arch: pr1, source: "PROFILE.md@68cd4eb#libero-configuration-estimate", note: "scaled from G4a partial runs; ideal HBM"}
+  mfu:
+    {value: 1.2, unit: "%", label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#hardware-activity", note: "189.2 GFLOP in 120.705 ms over 131.07 TFLOP/s"}

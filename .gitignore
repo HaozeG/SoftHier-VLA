@@ -5,3 +5,4 @@ CLAUDE.md
 __pycache__/
 infra/env.local.sh
 egm-review/
+infra/workload-modeling/build/
