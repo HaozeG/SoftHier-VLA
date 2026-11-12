@@ -47,6 +47,8 @@ are ignored.
 | --- | --- |
 | `shape` | one instance: (M, N, K) for matrix products; (heads, Sq, Skv, head dim) for attention; (rows, cols) otherwise |
 | `count` | instances per call: layers x flow steps x cameras that apply |
+| `unit_today` | unit that runs the operator in PR1's compiled path ([compiler-walkthrough.md](compiler-walkthrough.md)) |
+| `hand_kernel` | kernel-repo hand-written kernel that covers it, or none |
 | `flop` | all instances |
 | `bytes_weight` | weight bytes of one instance x `count` |
 | `bytes_unique` | (inputs + outputs + weights) of one instance x `count` |

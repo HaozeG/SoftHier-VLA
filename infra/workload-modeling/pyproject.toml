@@ -6,6 +6,8 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "pyyaml",
     "huggingface_hub",  # fixtures refresh only; the build reads committed fixtures
+    "jinja2",
+    "markdown",
 ]
 
 [dependency-groups]

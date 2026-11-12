@@ -17,7 +17,7 @@ Byte columns and the count rule (docs/analysis/conventions.md):
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from . import fixtures
 from .constants import Constants, Workload
@@ -396,6 +396,45 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
     add(_ew("expert", "out", "bias_action_out", "elementwise", "bias", Q, d.action_dim, S, weight_elems=d.action_dim))
     add(_ew("expert", "out", "euler_update", "elementwise", "axpy", Q, d.action_dim, S, n_in=2))
     return rows
+
+
+# ---------------------------------------------------------------------------------------------- units and kernels
+# Where each operator runs in PR1's compiled path (softhier-mlir b11cd5f) and which hand-written kernel of the
+# kernel repo (~/softhier@52859c3, implementation/sw/) covers it. Code references:
+# docs/analysis/compiler-walkthrough.md.
+CORES = "Snitch cores"
+HOST = "host (PR1 prepare step)"
+HOST_OPS = {"lang_embed_scale", "state_proj", "bias_state", "time_mlp_in_time"}
+KERNEL_BY_OP = {
+    "softmax": "FlatAttention (softmax on Spatz, inside the kernel)",
+    "self_softmax": "FlatAttention (softmax on Spatz, inside the kernel)",
+    "cross_softmax": "FlatAttention (softmax on Spatz, inside the kernel)",
+    "rmsnorm_attn": "RMSNorm", "rmsnorm_mlp": "RMSNorm", "rmsnorm_final": "RMSNorm",
+    "silu_mul": "Activation (SiLU + gate)",
+    "time_silu": "Activation (SiLU)",
+}
+
+
+def unit_and_kernel(row: OpRow) -> tuple[str, str]:
+    if row.op in HOST_OPS:
+        return HOST, "none"
+    if row.cls == "gemm":
+        return "RedMulE (operands moved by iDMA)", "SummaGEMM"
+    if row.cls == "attn":
+        mask = "" if row.stage == "vision" else "; masking not supported"
+        return "RedMulE", f"FlatAttention{mask}"
+    if row.cls == "data":
+        return "Snitch cores and iDMA", "none"
+    return CORES, KERNEL_BY_OP.get(row.op, "none")
+
+
+def annotate(rows: list[OpRow]) -> list[OpRow]:
+    """Fill unit_today and hand_kernel."""
+    out = []
+    for r in rows:
+        unit, kernel = unit_and_kernel(r)
+        out.append(replace(r, unit_today=unit, hand_kernel=kernel))
+    return out
 
 
 def stage_totals(rows: list[OpRow]) -> dict[str, StageTotals]:

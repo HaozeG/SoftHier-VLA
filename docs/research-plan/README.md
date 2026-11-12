@@ -61,7 +61,9 @@ Status values: draft | active | answered | dropped.
 1. [Conventions](../analysis/conventions.md): workloads, labels, byte columns, Thor alignment.
 2. [Hardware parameters](../analysis/hw-config.md).
 3. [Stage totals](../analysis/stage-totals.md) and [cross-check](../analysis/crosscheck.md).
-4. Operator graph and compiler walk-through (Part 2 of the stage-1 design).
+4. [Operator graph](../analysis/smolvla-op-graph.md) (HTML for meetings: `uv run python -m workload_modeling.build` in
+   `infra/workload-modeling/`, then open `infra/workload-modeling/build/smolvla-op-graph.html`) and
+   [compiler walk-through](../analysis/compiler-walkthrough.md).
 5. Wiki status log: `softhier_vla_wiki/memories/status/`.
 
 Design: [`docs/designs/stage1-problem-definition.md`](../designs/stage1-problem-definition.md).
