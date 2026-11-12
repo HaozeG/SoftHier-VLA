@@ -616,21 +616,54 @@ during drafting.
 ## Detailed Implementation Plan
 
 Branches are named by content (owner's rule): Part 1 on `problem-definition`, Part 2 on
-`model-and-compiler-explainer` (branched from Part 1). Each branch opens one pull request
+`model-and-compiler-explainer` (branched from Part 1). `problem-definition` branches
+from `worktree-stage1-brainstorm`, so this design doc
+(`docs/designs/stage1-problem-definition.md`) and `concepts_brief.md` reach `main` with
+the Part 1 pull request and the predecessor link stays valid. `design_draft.md` is
+deleted in that branch's first commit, because the `docs/designs/` copy is canonical. Each branch opens one pull request
 to `main`. Commits use the repo's `[step] area: message` style.
 
 ### Candidate research questions (owner approves with this section)
 
-All four are on `libero-2cam`. Baselines on the PR1 arch are measured; baselines on the
-stage-1 arch are estimates until the measurement work runs. RQ3 is the one aimed at the
-core research topic (spatial mapping).
+All four RQs target `libero-2cam` on the stage-1 arch. No baseline exists yet for that
+pair. The starting points below come from PR1, and each one states its own workload,
+arch and label. Most are `pr1-1cam` measurements on the PR1 arch. Measured baselines
+for `libero-2cam` on the stage-1 arch come from the measurement work. RQ3 is the one
+aimed at the core research topic (spatial mapping).
 
-| ID  | Question                                                                                                                                                                                     | Metric                                  | Baseline (constants key, label)                                                                                                      |
-|-----|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| RQ1 | How much of the VLA's latency is row operations (softmax, norm, activation), and how much is recovered by running them on each cluster's Spatz unit (which the compiler does not use yet)? | row-operation share of latency; latency | `pr1.rowop_share` 64.5 % (measured, PR1 arch, `pr1-1cam`); `pr1.libero_softmax_share` ~44 % (estimate, PR1 arch)                     |
-| RQ2 | For the bandwidth-bound action expert, how does time per flow step depend on HBM bandwidth and on keeping the KV cache and per-layer weight tiles on chip?                                   | ms per flow step; achieved GB/s         | `pr1.expert_step_ms` (measured, PR1 arch; value taken from the PR1 profile); FLOP per weight byte from the model (inference)         |
-| RQ3 | Given that vision, prefix and expert differ in FLOP per weight byte, does dividing the cluster mesh into regions per stage (pipelined across calls) beat running each stage on the whole mesh? | end-to-end latency; cluster utilization | `pr1.gemm_cluster_use` vision/prefix products use 1-10 of 16 clusters (measured, PR1 arch); `pr1.e2e_ms` 120.7 ms                    |
-| RQ4 | At iso-peak FP16 with Thor, what fraction of peak does SoftHier reach per stage, against Thor's per-stage figures?                                                                           | per-stage MFU on SoftHier vs Thor       | `pr1.mfu` 1.2 % of 131 TFLOP/s (measured, PR1 arch); Thor per-stage MFU from `wiki://knowledge/mfu-from-measurements.md` (inference) |
+| ID  | Question                                                                                                                                                                                     | Metric                                  |
+|-----|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------|
+| RQ1 | How much of the VLA's latency is row operations (softmax, norm, activation), and how much is recovered by running them on each cluster's Spatz unit (which the compiler does not use yet)? | row-operation share of latency; latency |
+| RQ2 | For the bandwidth-bound action expert, how does time per flow step depend on HBM bandwidth and on keeping the KV cache and per-layer weight tiles on chip?                                   | ms per flow step; achieved GB/s         |
+| RQ3 | Given that vision, prefix and expert differ in FLOP per weight byte, does dividing the cluster mesh into regions per stage (pipelined across calls) beat running each stage on the whole mesh? | end-to-end latency; cluster utilization |
+| RQ4 | At iso-peak FP16 with Thor, what fraction of peak does SoftHier reach per stage, against Thor's per-stage figures?                                                                           | per-stage MFU on SoftHier vs Thor       |
+
+Starting points (constants key: value, workload, arch, label; source
+`experiments/smolvla-e2e-baseline/PROFILE.md` on branch `worktree-smolvla-e2e-baseline`
+unless stated):
+
+*   **RQ1:**
+    *   `pr1.rowop_share`: 64.5 % of time in core-executed elementwise, attention and
+        norm ops; `pr1-1cam`, PR1 arch, measured.
+    *   `pr1.libero_softmax_share`: per-head softmax 43.8 % of the run; `libero-2cam`,
+        PR1 arch, estimate (scaled from partial runs).
+    *   `pr1.libero_rowop_share`: softmax + GELU + LayerNorm ~60 %; `libero-2cam`, PR1
+        arch, estimate.
+*   **RQ2:**
+    *   `pr1.expert_step_ms`: 7.761 ms per flow step (step 5); `pr1-1cam`, PR1 arch,
+        measured.
+    *   `pr1.expert_hbm_read_per_step`: 335 MB of HBM reads per step; `pr1-1cam`, PR1
+        arch, measured, ideal HBM.
+    *   FLOP per weight byte of the expert from the model; `libero-2cam`, inference.
+*   **RQ3:**
+    *   `pr1.gemm_cluster_use`: vision and prefix matrix products use 1-10 of 16
+        clusters; `pr1-1cam`, PR1 arch, measured.
+    *   `pr1.e2e_ms`: 120.7 ms; `pr1-1cam`, PR1 arch, measured.
+    *   `pr1.libero_e2e_ms`: 479.1 ms; `libero-2cam`, PR1 arch, estimate.
+*   **RQ4:**
+    *   `pr1.mfu`: 1.2 % of 131 TFLOP/s; `pr1-1cam`, PR1 arch, measured.
+    *   Thor per-stage MFU from `wiki://knowledge/mfu-from-measurements.md` (other
+        models on Thor, inference).
 
 ### Target Files to Create/Modify
 
@@ -661,7 +694,9 @@ core research topic (spatial mapping).
 *   **Proposed Changes**: the groups `workloads`, `arch.stage1`, `arch.pr1`, `thor`,
     `pr1` as described in Technical Plan §1. Schema per entry:
     `{value, unit, label, source, note?}`. The PR1 profile values (`rowop_share`,
-    `libero_softmax_share`, `expert_step_ms`, `gemm_cluster_use`, `mfu`, `e2e_ms`) are
+    `libero_softmax_share`, `libero_rowop_share`, `expert_step_ms`,
+    `expert_hbm_read_per_step`, `gemm_cluster_use`, `mfu`, `e2e_ms`, `libero_e2e_ms`),
+    each with its workload ID, are
     copied from `experiments/smolvla-e2e-baseline/PROFILE.md` on branch
     `worktree-smolvla-e2e-baseline` with that commit as source.
 *   **Arch entries:**
