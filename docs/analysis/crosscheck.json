@@ -1,0 +1,141 @@
+{
+  "tolerance_pct": 1.0,
+  "experiment_commit": "68cd4eb",
+  "parse_profile": "parse_profile.py",
+  "workloads": {
+    "pr1-1cam": {
+      "label": "measured",
+      "programs": {
+        "vision": "vision.mlir",
+        "prefix": "prefix_a.mlir",
+        "expert": "expert.mlir"
+      },
+      "ops_csv": {
+        "path": "ops.csv",
+        "sha256_16": "96a4a06b96a4e6af"
+      },
+      "program_shapes": {
+        "vision_rows": 256,
+        "prefix_rows": 128,
+        "prefix_tokens": 65
+      },
+      "shape_checks": {
+        "vision tokens per camera": {
+          "pass": true,
+          "program": 256,
+          "model": 256
+        },
+        "prefix tokens": {
+          "pass": true,
+          "program": 65,
+          "model": 65
+        }
+      },
+      "stages": {
+        "vision": {
+          "model_padded_gflop": 46.2045,
+          "model_unpadded_gflop": 46.2045,
+          "model_reference_gflop": 46.2045,
+          "pr1_redmule_gflop": 46.2045,
+          "diff_pct": 0.0,
+          "padding_overhead_pct": 0.0,
+          "pass": true
+        },
+        "connector": {
+          "model_padded_gflop": 0.3775,
+          "model_unpadded_gflop": 0.3775,
+          "model_reference_gflop": 0.3775,
+          "pr1_redmule_gflop": 0.3775,
+          "diff_pct": 0.0,
+          "padding_overhead_pct": 0.0,
+          "pass": true
+        },
+        "prefix": {
+          "model_padded_gflop": 41.272,
+          "model_unpadded_gflop": 20.7069,
+          "model_reference_gflop": 20.7069,
+          "pr1_redmule_gflop": 41.272,
+          "diff_pct": 0.0001,
+          "padding_overhead_pct": 99.32,
+          "pass": true
+        },
+        "expert": {
+          "model_padded_gflop": 101.3306,
+          "model_unpadded_gflop": 100.6547,
+          "model_reference_gflop": 103.0797,
+          "pr1_redmule_gflop": 101.3202,
+          "diff_pct": 0.0102,
+          "padding_overhead_pct": 0.67,
+          "pass": true
+        }
+      }
+    },
+    "libero-2cam": {
+      "label": "estimate",
+      "programs": {
+        "vision": "G4a.1/vision.mlir",
+        "prefix": "G4a.2/prefix_a.mlir",
+        "expert": "G4a.3/expert.mlir"
+      },
+      "ops_csv": {
+        "path": "libero_ops_scaled.csv",
+        "sha256_16": "15eeebeacb4437e8"
+      },
+      "program_shapes": {
+        "vision_rows": 1024,
+        "prefix_rows": 256,
+        "prefix_tokens": 177
+      },
+      "shape_checks": {
+        "vision tokens per camera": {
+          "pass": true,
+          "program": 1024,
+          "model": 1024
+        },
+        "prefix tokens": {
+          "pass": true,
+          "program": 177,
+          "model": 177
+        }
+      },
+      "stages": {
+        "vision": {
+          "model_padded_gflop": 427.6177,
+          "model_unpadded_gflop": 427.6177,
+          "model_reference_gflop": 427.6177,
+          "pr1_redmule_gflop": 427.6177,
+          "diff_pct": 0.0,
+          "padding_overhead_pct": 0.0,
+          "pass": true
+        },
+        "connector": {
+          "model_padded_gflop": 3.0199,
+          "model_unpadded_gflop": 3.0199,
+          "model_reference_gflop": 3.0199,
+          "pr1_redmule_gflop": 3.0199,
+          "diff_pct": 0.0,
+          "padding_overhead_pct": 0.0,
+          "pass": true
+        },
+        "prefix": {
+          "model_padded_gflop": 84.5572,
+          "model_unpadded_gflop": 57.6043,
+          "model_reference_gflop": 57.6043,
+          "pr1_redmule_gflop": 84.5572,
+          "diff_pct": 0.0001,
+          "padding_overhead_pct": 46.79,
+          "pass": true
+        },
+        "expert": {
+          "model_padded_gflop": 105.1382,
+          "model_unpadded_gflop": 104.4624,
+          "model_reference_gflop": 110.1903,
+          "pr1_redmule_gflop": 105.1278,
+          "diff_pct": 0.0099,
+          "padding_overhead_pct": 0.65,
+          "pass": true
+        }
+      }
+    }
+  }
+}
