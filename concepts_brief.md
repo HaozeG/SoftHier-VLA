@@ -337,14 +337,38 @@ Proposed staging (from the review; labels below are working names, see naming ab
 - **PR3, measurement:** hand kernels on SmolVLA shapes on the chosen arch, then the
   bounded fusion estimates calibrated against them.
 
+Lookup results (web and ingested papers, 2026-11-12):
+
+- **Thor 16-bit peak.** NVIDIA publishes no dense FP16 or BF16 figure. Its developer
+  blog lists, for AGX Thor T5000, "517 TFLOPs (Dense FP8 | Sparse FP16)" and 273 GB/s
+  LPDDR5X (128 GB). Proposed project figure: **258 TFLOP/s dense FP16, derived** (517
+  sparse FP16 ÷ 2; the value VLA-HWBench uses). Second reference: **~155 TFLOP/s
+  measured** fp16/bf16 GEMM (Chalmers 2611.06710: 153; an NVIDIA forum benchmark: 155.5
+  mean at 120 W). The 400 (VLA-Perf) and 500 (Google/Purdue, which cites DRIVE Thor, not
+  Jetson) figures are not used. Matching 258 TFLOP/s at ~1.025 TFLOP/s per cluster needs
+  ~252 clusters; a 16x16 mesh (256 clusters) gives ~262 TFLOP/s (arithmetic, not a
+  validated build). Unconfirmed: whether 258 assumes the MAXN clock.
+- **Level naming in recent papers.** Three uses of the same words coexist:
+  - (A) inside one model, VLM trunk = System 2 and action head = System 1: GR00T N1,
+    Ψ0, VLA-Perf;
+  - (B) the whole VLA = System 1 under a separate reasoner: Hi Robot, KinetIQ;
+  - (C) the motor controller = System 1: LeVERB.
+  "System 0" for a fast whole-body controller is used by Helix 02 (10M-parameter
+  network at 1 kHz), Ψ0 (RL tracker, 60 Hz), KinetIQ (IK + RL, 50 Hz) and TANGO. The
+  owner's S0 matches. "S1 = whole SmolVLA" matches use B but conflicts with use A,
+  which the systems papers this project compares against use. Proposed project naming:
+  - call SmolVLA "the VLA", with parts "VLM trunk" and "action expert";
+  - keep "S0" for the fast controller, defined once with a rate and model type;
+  - where a level label is needed, write "S2+S1 in one model".
+  Only VLA-Perf models two levels on one Thor (roofline, not measured), so chip-sharing
+  has little prior measurement.
+
 Still open:
 
-1. The Thor dense fp16 figure and its source (lookup running; wiki has 258, 400 and
-   153 measured).
-2. The level naming convention from recent papers (lookup running), then one project
-   glossary entry.
-3. Is co-location of S0 with the policy an RQ in stage 1 (with a stand-in S0 model,
+1. Owner approval of the 258 / 155 Thor figures and of the proposed naming, then one
+   project glossary entry (in the wiki session).
+2. Is co-location of S0 with the policy an RQ in stage 1 (with a stand-in S0 model,
    rate and deadline), or roadmap only?
-4. The measured PR1 baseline ran on the 131 TFLOP/s arch, not the chosen 16.4 TFLOP/s
+3. The measured PR1 baseline ran on the 131 TFLOP/s arch, not the chosen 16.4 TFLOP/s
    arch. Measured baselines on the chosen arch need new runs (next measurement PR);
    until then, RQ baselines on the chosen arch are estimates.
