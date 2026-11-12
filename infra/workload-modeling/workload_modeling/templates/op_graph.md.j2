@@ -68,6 +68,11 @@ P.V in one call and transposes K on chip.
 | LayerNorm, Activation, Eltwise | norms, activations, elementwise, pixel shuffle | yes, bit-exact against a replay golden | one row per cluster at a time |
 | RMSNorm | RMSNorm | no (upstream kernel, placeholder data) | upstream settings |
 
+SummaGEMM and FlatAttention outputs are not checked. As a check that a picked setting did its whole problem, its
+DRAMSys traffic was compared with the minimum the padded problem must move (operands read once, output written
+once): every pick moves 1.0 to 3.2 times that minimum. A smaller GEMM shape is never slower than a larger one
+that contains it.
+
 The composed time is the sum over operators of count x time per call. Label: estimate. It assumes kernels
 run back to back with nothing between them: no overlap, no layout change between kernels (the projections write
 token-major rows, FlatAttention reads head-major Q, K, V), and every kernel starting and ending in HBM.

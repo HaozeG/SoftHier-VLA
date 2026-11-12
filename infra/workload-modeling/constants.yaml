@@ -176,7 +176,7 @@ hand_kernels:
     gemm_177x2560x960:
       {value: 100691, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=256 n=2560 k=1024 tile=64/128/256 scale=4x4", note: "fastest of 33 tile settings (100,691 to 1,421,772 ns); padded to 256x2560x1024 (1.54x nominal work); timing only, output not checked; ops: prefix mlp_gate, mlp_up"}
     gemm_177x320x960:
-      {value: 64995, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=256 n=384 k=960 tile=64/32/64 scale=4x4", note: "fastest of 4 tile settings (64,995 to 198,055 ns); padded to 256x384x960 (1.74x nominal work); timing only, output not checked; ops: prefix k_proj, v_proj"}
+      {value: 20938, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=256 n=512 k=1024 tile=64/128/128 scale=4x4", note: "fastest of 59 tile settings (20,938 to 427,252 ns); padded to 256x512x1024 (2.47x nominal work); timing only, output not checked; ops: prefix k_proj, v_proj"}
     gemm_177x960x2560:
       {value: 92231, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=256 n=1024 k=2560 tile=64/128/256 scale=4x4", note: "fastest of 36 tile settings (92,231 to 1,366,802 ns); padded to 256x1024x2560 (1.54x nominal work); timing only, output not checked; ops: prefix mlp_down"}
     gemm_177x960x960:
@@ -197,7 +197,7 @@ hand_kernels:
     silu_50x720:
       {value: 1460, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 acti algo=silu m=50 n=720", note: "bit-exact against the replay on all 16 clusters"}
     gemm_177x320x320:
-      {value: 20438, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=256 n=384 k=320 tile=64/32/64 scale=4x4", note: "fastest of 4 tile settings (20,438 to 62,035 ns); padded to 256x384x320 (1.74x nominal work); timing only, output not checked; ops: expert cross_k/v_proj"}
+      {value: 9763, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=256 n=512 k=320 tile=64/128/64 scale=4x4", note: "fastest of 40 tile settings (9,763 to 131,399 ns); padded to 256x512x320 (2.31x nominal work); timing only, output not checked; ops: expert cross_k/v_proj"}
     gemm_50x1600x720:
       {value: 34140, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=2048 k=768 tile=16/256/256 scale=4x4", note: "fastest of 18 tile settings (34,140 to 274,634 ns); padded to 64x2048x768 (1.75x nominal work); timing only, output not checked; ops: expert qkv_proj"}
     gemm_50x32x720:
@@ -209,7 +209,7 @@ hand_kernels:
     gemm_50x720x2048:
       {value: 38787, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=1024 k=2048 tile=16/256/256 scale=4x4", note: "fastest of 19 tile settings (38,787 to 381,702 ns); padded to 64x1024x2048 (1.82x nominal work); timing only, output not checked; ops: expert mlp_down"}
     gemm_50x720x32:
-      {value: 2630, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=1024 k=32 tile=16/256/32 scale=4x4", note: "fastest of 4 tile settings (2,630 to 6,356 ns); padded to 64x1024x32 (1.82x nominal work); timing only, output not checked; ops: expert action_in_proj"}
+      {value: 2630, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=1024 k=32 tile=16/256/32 scale=4x4", note: "fastest of 5 tile settings (2,630 to 12,365 ns); padded to 64x1024x32 (1.82x nominal work); timing only, output not checked; ops: expert action_in_proj"}
     gemm_50x720x720:
       {value: 16869, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=1024 k=768 tile=16/256/128 scale=4x4", note: "fastest of 18 tile settings (16,869 to 124,239 ns); padded to 64x1024x768 (1.94x nominal work); timing only, output not checked; ops: expert time_mlp_out"}
     gemm_50x720x960:

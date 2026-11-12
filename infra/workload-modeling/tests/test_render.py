@@ -104,3 +104,16 @@ def test_eltwise_and_attention_mapping(c):
     assert rows[("vision", "transpose_k")].hand_kernel.startswith("FlatAttention")
     assert m.hand_kernel_key(rows[("expert", "self_qk")]) == "hand_kernels.expert.flatattention_15x50x227x64"
     assert m.hand_kernel_key(rows[("expert", "self_pv")]) is None          # inside the self_qk call
+
+
+def test_gemm_times_monotonic_in_shape(c):
+    """A GEMM contained in a larger one (every dimension <=) is not slower: catches a starved tile sweep."""
+    t = {}
+    for key, e in c.entries.items():
+        if key.startswith("hand_kernels.") and ".gemm_" in key:
+            t[tuple(int(x) for x in key.rsplit("_", 1)[1].split("x"))] = float(e.value)
+    assert len(t) == 18
+    for a, ta in t.items():
+        for b, tb in t.items():
+            if a != b and all(x <= y for x, y in zip(a, b)):
+                assert ta <= tb, (a, ta, b, tb)

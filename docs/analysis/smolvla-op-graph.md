@@ -104,8 +104,8 @@ Image, language and state tokens through the kept VLM layers, once per call; the
 | `bias_state` | embed | elementwise | 1 x 960 | 1 | 0.000 | 0.01 | 0.00 | 0 | host (PR1 prepare step) | none |  |
 | `rmsnorm_attn` | 0-15 | norm | 177 x 960 | 16 | 0.011 | 10.91 | 0.03 | 354 | Snitch cores | RMSNorm | 8.52 |
 | `q_proj` | 0-15 | gemm | M 177, N 960, K 960 | 16 | 5.220 | 40.37 | 29.49 | 177 | RedMulE (operands moved by iDMA) | SummaGEMM | 39.48 |
-| `k_proj` | 0-15 | gemm | M 177, N 320, K 960 | 16 | 1.740 | 17.08 | 9.83 | 177 | RedMulE (operands moved by iDMA) | SummaGEMM | 65.00 |
-| `v_proj` | 0-15 | gemm | M 177, N 320, K 960 | 16 | 1.740 | 17.08 | 9.83 | 177 | RedMulE (operands moved by iDMA) | SummaGEMM | 65.00 |
+| `k_proj` | 0-15 | gemm | M 177, N 320, K 960 | 16 | 1.740 | 17.08 | 9.83 | 177 | RedMulE (operands moved by iDMA) | SummaGEMM | 20.94 |
+| `v_proj` | 0-15 | gemm | M 177, N 320, K 960 | 16 | 1.740 | 17.08 | 9.83 | 177 | RedMulE (operands moved by iDMA) | SummaGEMM | 20.94 |
 | `rope_q` | 0-15 | elementwise | 177 x 960 | 16 | 0.008 | 10.87 | 0.00 |  | Snitch cores | Eltwise (rope) | 3.57 |
 | `rope_k` | 0-15 | elementwise | 177 x 320 | 16 | 0.003 | 3.62 | 0.00 |  | Snitch cores | Eltwise (rope) | 2.58 |
 | `qk` | 0-15 | attn | h 15, Sq 177, Skv 177, d 64 | 16 | 0.962 | 7.25 | 0.00 |  | RedMulE | FlatAttention; masking not supported | 55.75 |
@@ -128,8 +128,8 @@ Flow-matching transformer run once per flow step. Even layers: self-attention ov
 
 | op | layers | class | shape | count | GFLOP | unique MB | weight MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |
-| `cross_k_proj` | cross (1,3..15) | gemm | M 177, N 320, K 320 | 80 | 2.900 | 34.51 | 16.38 | 177 | RedMulE (operands moved by iDMA) | SummaGEMM | 20.44 |
-| `cross_v_proj` | cross (1,3..15) | gemm | M 177, N 320, K 320 | 80 | 2.900 | 34.51 | 16.38 | 177 | RedMulE (operands moved by iDMA) | SummaGEMM | 20.44 |
+| `cross_k_proj` | cross (1,3..15) | gemm | M 177, N 320, K 320 | 80 | 2.900 | 34.51 | 16.38 | 177 | RedMulE (operands moved by iDMA) | SummaGEMM | 9.76 |
+| `cross_v_proj` | cross (1,3..15) | gemm | M 177, N 320, K 320 | 80 | 2.900 | 34.51 | 16.38 | 177 | RedMulE (operands moved by iDMA) | SummaGEMM | 9.76 |
 | `action_in_proj` | embed | gemm | M 50, N 720, K 32 | 10 | 0.023 | 1.21 | 0.46 | 50 | RedMulE (operands moved by iDMA) | SummaGEMM | 2.63 |
 | `bias_action_in` | embed | elementwise | 50 x 720 | 10 | 0.000 | 1.45 | 0.01 | 25 | Snitch cores | Eltwise (bias) | 1.50 |
 | `time_mlp_in` | embed | gemm | M 50, N 720, K 1440 | 10 | 1.037 | 22.90 | 20.74 | 50 | RedMulE (operands moved by iDMA) | SummaGEMM | 30.15 |
@@ -176,6 +176,11 @@ P.V in one call and transposes K on chip.
 | LayerNorm, Activation, Eltwise | norms, activations, elementwise, pixel shuffle | yes, bit-exact against a replay golden | one row per cluster at a time |
 | RMSNorm | RMSNorm | no (upstream kernel, placeholder data) | upstream settings |
 
+SummaGEMM and FlatAttention outputs are not checked. As a check that a picked setting did its whole problem, its
+DRAMSys traffic was compared with the minimum the padded problem must move (operands read once, output written
+once): every pick moves 1.0 to 3.2 times that minimum. A smaller GEMM shape is never slower than a larger one
+that contains it.
+
 The composed time is the sum over operators of count x time per call. Label: estimate. It assumes kernels
 run back to back with nothing between them: no overlap, no layout change between kernels (the projections write
 token-major rows, FlatAttention reads head-major Q, K, V), and every kernel starting and ending in HBM.
@@ -187,12 +192,12 @@ identified).
 | --- | ---: | ---: | ---: | ---: | --- | --- |
 | vision | 24,477.6 | 6,348.3 | 7,770.7 | 38,596.6 | `transpose_k` (in `qk`), `softmax` (in `qk`), `pv` (in `qk`) | none |
 | connector | 219.6 | 0.0 | 23.5 | 243.1 | none | none |
-| prefix | 8,040.9 | 892.0 | 822.6 | 9,755.5 | `softmax` (in `qk`), `pv` (in `qk`) | `lang_embed_scale` (host), `state_proj` (host), `bias_state` (host) |
-| expert | 28,283.9 | 3,112.9 | 2,329.3 | 33,726.1 | `self_pv` (in `self_qk`), `self_softmax` (in `self_qk`), `cross_pv` (in `cross_qk`), `cross_softmax` (in `cross_qk`) | none |
-| **all** | 61,022.1 | 10,353.2 | 10,946.0 | **82,321.3** | | |
+| prefix | 6,631.1 | 892.0 | 822.6 | 8,345.7 | `softmax` (in `qk`), `pv` (in `qk`) | `lang_embed_scale` (host), `state_proj` (host), `bias_state` (host) |
+| expert | 26,575.9 | 3,112.9 | 2,329.3 | 32,018.1 | `self_pv` (in `self_qk`), `self_softmax` (in `self_qk`), `cross_pv` (in `cross_qk`), `cross_softmax` (in `cross_qk`) | none |
+| **all** | 57,904.2 | 10,353.2 | 10,946.0 | **79,203.4** | | |
 
-Total: 82.32 ms per inference call (estimate); shares: GEMM 74 %, attention
-13 %, row operators 13 %.
+Total: 79.20 ms per inference call (estimate); shares: GEMM 73 %, attention
+13 %, row operators 14 %.
 
 ## Limitations
 
