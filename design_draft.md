@@ -139,10 +139,11 @@ to softhier-mlir's existing design document.
 *   **No full-model weight residency option.** SmolVLA's weights (hundreds of MB) do
     not fit on chip; only the KV cache and per-layer tiles are candidates for staying
     on chip.
-*   **No wiki changes in this work.** The new wiki areas (`memories/status/`,
-    `memories/patches/`), the wiki-design decision, glossary rows and the recovered
-    first-baseline decision come from a separate wiki-development session. This work
-    only links to them.
+*   **No wiki structure changes in this work.** The new wiki areas
+    (`memories/status/`, `memories/patches/`), the wiki-design decision, glossary rows
+    and the recovered first-baseline decision come from a separate wiki-development
+    session. This work adds one status entry through the normal wiki workflow (owner's
+    choice; see Technical Plan §9) and otherwise only links to the wiki.
 *   **No collaborator sync tooling** beyond GitHub pull requests and HTML built from
     Markdown.
 
@@ -409,13 +410,22 @@ A last section lists what is not built, each item with a code reference:
 *   the linalg path (three passes, not on the SmolVLA path);
 *   operators with no hand kernel (softmax, LayerNorm, GELU, RoPE, residual add).
 
-### 9. Wiki status entry (hand-off)
+### 9. Wiki status entry
 
-After this work merges, the wiki-development workflow adds the status entry "Analyzing
-the needs of one model: SmolVLA", which summarizes the operator table, the hardware
-table and the RQs with commit-pinned links. It `follows:` "Basic integration of
-components". This design only lists it as a hand-off. It is written in a wiki session,
-consistent with the Non-Goal on wiki changes.
+The problem-definition work writes the status entry "Analyzing the needs of one model:
+SmolVLA" itself (owner's choice). It follows the wiki's own workflow:
+
+*   a wiki branch;
+*   the `status` note type with `evidence:` front-matter and `Label`/`Source` columns;
+*   `wiki.py check` passing;
+*   then a submodule bump in the parent pull request.
+
+The entry `follows:` "Basic integration of components" and summarizes the reference
+inputs, the stage totals, the hardware table and the RQs. Links are pinned to commits
+on the `problem-definition` branch. The pull request must therefore be merged with a
+merge commit, not squashed, so the pinned commits stay reachable. The explainer work
+later adds rows for the operator table, the cross-check and the compiler walk-through
+to the same entry, the same way.
 
 ### Order of work
 
@@ -815,7 +825,23 @@ core research topic (spatial mapping).
 
 *   **Type / Scope**: submodule bump.
 *   **Proposed Changes**: a separate `[wiki] bump submodule` commit on
-    `problem-definition`, so the status-log and naming links resolve.
+    `problem-definition`, so the status-log and naming links resolve. It points at the
+    wiki commit that also contains file 23a.
+
+##### 23a. `softhier_vla_wiki/memories/status/analyzing-the-needs-of-one-model-smolvla.md` and `memories/status/_overview.md` (Create / Modify, in the wiki submodule)
+
+*   **Type / Scope**: wiki status entry, written on a wiki branch based on the merged
+    `wiki-status-patches`.
+*   **Proposed Changes**: the entry from Technical Plan §9, created from
+    `tools/templates/status.md`:
+    *   front-matter `type: status`, `evidence:` list, and `follows:
+        basic-integration-of-components`;
+    *   a table with `Label` and `Source` columns, each row linked to a commit-pinned
+        file on `problem-definition`.
+
+    `_overview.md` adds the entry to the catalog after "Basic integration of components"
+    and updates the current-state paragraph. Committed with the wiki's commit
+    conventions after `tools/wiki.py check` passes. The owner merges the wiki branch.
 
 ##### 24. `CLAUDE.md` (Modify, only with the owner's explicit approval)
 
@@ -883,6 +909,14 @@ core research topic (spatial mapping).
     *   the HTML contains every table of the Markdown;
     *   its only external URL is the pinned mermaid.js script.
 
+##### 32. `softhier_vla_wiki/memories/status/analyzing-the-needs-of-one-model-smolvla.md` (Modify, in the wiki submodule) and `softhier_vla_wiki` (submodule bump)
+
+*   **Type / Scope**: wiki status entry update.
+*   **Proposed Changes**: add rows for the operator table, the cross-check result and
+    the compiler walk-through, linked to commits on `model-and-compiler-explainer`,
+    with evidence labels. Same wiki workflow as file 23a, then a submodule bump in the
+    explainer pull request (merged with a merge commit).
+
 ### Verification Plan
 
 *   **Build**: `cd workload-modeling && uv sync && uv run python -m workload_modeling.build`
@@ -897,6 +931,8 @@ core research topic (spatial mapping).
         the reading order;
     *   the HTML page is opened in a browser in light and dark modes;
     *   one RQ is added from the template (CUJ 2) to confirm the index regenerates.
+*   **Wiki check**: `python3 softhier_vla_wiki/tools/wiki.py check` passes on the wiki
+    branch that holds the status entry (files 23a and 32).
 *   **Wiki**: after the submodule bump, the `wiki://` links in the README resolve to
     existing files.
 
