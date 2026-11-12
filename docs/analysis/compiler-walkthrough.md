@@ -105,7 +105,11 @@ output product, residual, LayerNorm, MLP up, GELU, MLP down, residual. A fused `
 ## 5. Operator to unit and hand-written kernel
 
 The kernel repo's hand-written kernels (`~/softhier@52859c3`, `implementation/sw/`) target the stage-1 arch with
-Spatz enabled.
+Spatz enabled. GELU and LayerNorm were added by this project on branch `gelu-layernorm-kernels`
+(`HaozeG/gvsoc@580ac85`), with outputs checked on the device against a replay golden; the changes and the
+simulator defects found on the way are logged in `wiki://memories/patches/softhier-kernel-repo.md`. Per-call times
+of the row-operator kernels at libero-2cam shapes are in [smolvla-op-graph.md](smolvla-op-graph.md), section
+"Row operators on hand-written kernels".
 
 | Operator | Unit in PR1's path | Hand-written kernel | Evidence in the kernel repo |
 | --- | --- | --- | --- |
@@ -114,8 +118,8 @@ Spatz enabled.
 | softmax | Snitch cores | inside `FlatAttention` only | Spatz `vfredmax` and `vfexp`, `FlatAttentionUtil.h:474,494` |
 | attention masks (prefix, expert) | Snitch cores (masked softmax) | none found | no mask or causal handling in `FlatAttention/include/` (grep) |
 | RMSNorm | Snitch cores | `RMSNorm` | Spatz `vfredusum`, `RMSNorm/include/RMSNorm.h:159` |
-| LayerNorm | Snitch cores | none | |
-| GELU | Snitch cores | none | `Activation` covers Sigmoid, ReLU, SiLU (`Activation/include/Activation.h:128-142`) |
+| LayerNorm | Snitch cores | `LayerNorm` (added, `580ac85`) | Spatz, fp32 accumulation, `LayerNorm/include/LayerNorm.h` on branch `gelu-layernorm-kernels` |
+| GELU | Snitch cores | `Activation` (GELU, tanh form; added, `580ac85`) | upstream `Activation` covers Sigmoid, ReLU, SiLU (`Activation/include/Activation.h:128-142`); GELU added on branch `gelu-layernorm-kernels` |
 | SiLU x up (MLP gate) | Snitch cores | `Activation` (SiLU + gate) | `ACTI_ALGO_SILU` then `vector_lib_gate` multiply, `Activation.h:138-149, 253-269` |
 | SiLU (time MLP) | Snitch cores | `Activation` (SiLU) | `Activation.h:225-250` |
 | RoPE, bias add, residual add, scale, Euler update | Snitch cores | none | |
@@ -126,10 +130,11 @@ Spatz enabled.
 
 * **Spatz lowering.** `softhier.vexp` is declared (`dialects/softhier.py:157`, "Spatz vector exponential") and the
   softhier-mlir README lists Spatz `vfexp` for softmax (`README.md:81`), but `emit_c.py` emits nothing for it and
-  no runtime call uses Spatz. Every row operator runs on the Snitch cores.
+  no runtime call uses Spatz. Every row operator runs on the Snitch cores. The hand-written kernels are
+  standalone programs; none is called from softhier-mlir's runtime, so PR1's end-to-end run does not use them.
 * **The linalg path.** `transforms/linalg_to_softhier.py` (lowers `linalg.matmul` only), `pipeline_gemm.py` and
   `distribute_summa.py` are the general pipeline of `docs/DESIGN.md` section 4; the SmolVLA frontends bypass them.
-* **Kernels for the remaining operators.** LayerNorm, GELU, RoPE, the elementwise adds, transpose and pixel
-  shuffle have no hand-written kernel; FlatAttention has no masking, which the prefix and the expert need.
+* **Kernels for the remaining operators.** RoPE, the elementwise adds, transpose and pixel shuffle have no
+  hand-written kernel; FlatAttention has no masking, which the prefix and the expert need.
 * **One program.** The chain is four programs because the weights exceed populated HBM; a single program needs
   more HBM in the arch (the 256-cluster proposal assumes 1 GiB, [hw-config.md](hw-config.md)).

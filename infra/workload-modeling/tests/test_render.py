@@ -23,8 +23,8 @@ def test_every_row_has_unit_and_kernel(c):
 
 def test_kernel_mapping_matches_kernel_repo(c):
     rows = {r.op: r for r in m.annotate(m.build(c, "libero-2cam"))}
-    assert rows["gelu"].hand_kernel == "none"            # Activation covers Sigmoid, ReLU, SiLU only
-    assert rows["ln1"].hand_kernel == "none"             # no LayerNorm kernel
+    assert rows["gelu"].hand_kernel.startswith("Activation (GELU")   # branch gelu-layernorm-kernels
+    assert rows["ln1"].hand_kernel == "LayerNorm"
     assert rows["silu_mul"].hand_kernel.startswith("Activation")
     assert rows["mlp_gateup"].hand_kernel == "SummaGEMM"
     assert rows["state_proj"].unit_today.startswith("host")
@@ -69,3 +69,15 @@ def test_only_external_url_is_pinned_mermaid(md):
 def test_csv_has_all_rows(c):
     text = render.render_csv(c, "libero-2cam")
     assert len(text.strip().splitlines()) == len(m.build(c, "libero-2cam")) + 1
+
+
+def test_hand_kernel_times_and_stage_sums(c):
+    rows = m.annotate(m.build(c, "libero-2cam"))
+    timed = [r for r in rows if m.hand_kernel_ns(c, "libero-2cam", r) is not None]
+    assert len(timed) == 13
+    assert all(r.cls in render.ROW_CLASSES for r in timed)
+    sums = {k["stage"]: k for k in render.kernel_sums(c, "libero-2cam", rows)}
+    want = sum(r.count * m.hand_kernel_ns(c, "libero-2cam", r) for r in timed if r.stage == "vision") / 1e3
+    assert sums["vision"]["us"] == f"{want:,.1f}"
+    # Times are for libero-2cam shapes only; another workload gets none.
+    assert not any(m.hand_kernel_ns(c, "pr1-1cam", r) for r in m.annotate(m.build(c, "pr1-1cam")))

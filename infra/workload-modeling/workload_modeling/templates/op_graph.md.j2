@@ -47,11 +47,29 @@ FLOP share by class:
 
 {{ notes[name] }}
 
-| op | layers | class | shape | count | GFLOP | unique MB | weight MB | FLOP per weight byte | unit today | hand-written kernel |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| op | layers | class | shape | count | GFLOP | unique MB | weight MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |
 {% for r in rows if r.stage == name -%}
-| `{{ r.op }}` | {{ r.layers }} | {{ r.cls }} | {{ r.shape }} | {{ r.count }} | {{ r.gflop }} | {{ r.umb }} | {{ r.wmb }} | {{ r.ai }} | {{ r.unit_today }} | {{ r.hand_kernel }} |
+| `{{ r.op }}` | {{ r.layers }} | {{ r.cls }} | {{ r.shape }} | {{ r.count }} | {{ r.gflop }} | {{ r.umb }} | {{ r.wmb }} | {{ r.ai }} | {{ r.unit_today }} | {{ r.hand_kernel }} | {{ r.kus }} |
 {% endfor %}
+{% endfor %}
+## Row operators on hand-written kernels
+
+"kernel us per call" is the hand kernel simulated alone at one instance of the operator: kernel repo
+`{{ kernel_repo }}`, stage-1 arch (16 clusters, Spatz on 4 cores each), DRAMSys HBM. Label: measured per call.
+GELU, LayerNorm and Activation outputs are checked on the device against a replay golden; RMSNorm is the
+upstream kernel run with placeholder data (timing only, output not checked). Values and sources:
+`constants.yaml` section `hand_kernels`.
+
+The sum below is count x time per call over the row operators that have a timed kernel. Label: estimate.
+It is not an end-to-end time: it leaves out the GEMM and attention kernels, the row operators without a
+kernel, data movement and layout changes between kernels, and any overlap; and it is on the stage-1 arch with
+DRAMSys HBM, not PR1's arch with ideal HBM, so it does not compare directly with PR1's numbers.
+
+| stage | timed row operators | sum, us | row operators without a kernel | their unique MB |
+| --- | --- | ---: | --- | ---: |
+{% for k in ksum -%}
+| {{ k.stage }} | {{ k.timed }} | {{ k.us }} | {{ k.untimed }} | {{ k.untimed_mb }} |
 {% endfor %}
 ## Limitations
 

@@ -130,3 +130,27 @@ pr1:
     {value: 479.1, unit: ms, label: estimate, workload: libero-2cam, arch: pr1, source: "PROFILE.md@68cd4eb#libero-configuration-estimate", note: "scaled from G4a partial runs; ideal HBM"}
   mfu:
     {value: 1.2, unit: "%", label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#hardware-activity", note: "189.2 GFLOP in 120.705 ms over 131.07 TFLOP/s"}
+
+# Hand-written kernels simulated alone at one operator instance of the workload (ns per call).
+# Repo: HaozeG/gvsoc@580ac85 implementation/ (branch gelu-layernorm-kernels, base softhier_deeploy 52859c3),
+# arch stage1 (implementation/config/arch/arch.py), DRAMSys HBM, built out of tree against ~/softhier's install.
+# Activation and LayerNorm outputs are checked on the device against a replay golden; RMSNorm is the upstream
+# kernel with placeholder data and no check. Map from operators: smolvla_ops.HAND_KERNEL_TIME.
+hand_kernels:
+  vision:
+    layernorm_1024x768:
+      {value: 21250, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 lnorm m=1024 n=768 eps=1e-6", note: "bit-exact against the replay on all 16 clusters; the ISS leaves vfwadd.wv, vfwsub.vf, vmv.x.s, vmv.s.x, vmv.v.i untimed (optimistic)"}
+    gelu_1024x3072:
+      {value: 70519, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 acti algo=gelu m=1024 n=3072", note: "bit-exact against the replay on all 16 clusters"}
+  prefix:
+    rmsnorm_177x960:
+      {value: 8519, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 norm m=177 n=960", note: "upstream RMSNorm (one core per cluster), timing only: placeholder data, output not checked"}
+    silu_gate_177x2560:
+      {value: 17262, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 acti algo=silu gate=1 m=177 n=2560", note: "bit-exact against the replay on all 16 clusters"}
+  expert:
+    rmsnorm_50x720:
+      {value: 2335, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 norm m=50 n=720", note: "upstream RMSNorm (one core per cluster), timing only: placeholder data, output not checked"}
+    silu_gate_50x2048:
+      {value: 4119, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 acti algo=silu gate=1 m=50 n=2048", note: "bit-exact against the replay on all 16 clusters"}
+    silu_50x720:
+      {value: 1460, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 acti algo=silu m=50 n=720", note: "bit-exact against the replay on all 16 clusters"}

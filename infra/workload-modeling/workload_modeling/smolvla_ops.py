@@ -400,8 +400,8 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
 
 # ---------------------------------------------------------------------------------------------- units and kernels
 # Where each operator runs in PR1's compiled path (softhier-mlir b11cd5f) and which hand-written kernel of the
-# kernel repo (~/softhier@52859c3, implementation/sw/) covers it. Code references:
-# docs/analysis/compiler-walkthrough.md.
+# kernel repo covers it: ~/softhier@52859c3 implementation/sw/, plus GELU and LayerNorm added on branch
+# gelu-layernorm-kernels (HaozeG/gvsoc@580ac85). Code references: docs/analysis/compiler-walkthrough.md.
 CORES = "Snitch cores"
 HOST = "host (PR1 prepare step)"
 HOST_OPS = {"lang_embed_scale", "state_proj", "bias_state", "time_mlp_in_time"}
@@ -412,7 +412,38 @@ KERNEL_BY_OP = {
     "rmsnorm_attn": "RMSNorm", "rmsnorm_mlp": "RMSNorm", "rmsnorm_final": "RMSNorm",
     "silu_mul": "Activation (SiLU + gate)",
     "time_silu": "Activation (SiLU)",
+    "gelu": "Activation (GELU, tanh form)",
+    "ln1": "LayerNorm", "ln2": "LayerNorm", "ln_post": "LayerNorm",
 }
+
+# (stage, op) -> constants entry with the kernel simulated alone at one instance (ns per call).
+HAND_KERNEL_TIME = {
+    ("vision", "ln1"): "hand_kernels.vision.layernorm_1024x768",
+    ("vision", "ln2"): "hand_kernels.vision.layernorm_1024x768",
+    ("vision", "ln_post"): "hand_kernels.vision.layernorm_1024x768",
+    ("vision", "gelu"): "hand_kernels.vision.gelu_1024x3072",
+    ("prefix", "rmsnorm_attn"): "hand_kernels.prefix.rmsnorm_177x960",
+    ("prefix", "rmsnorm_mlp"): "hand_kernels.prefix.rmsnorm_177x960",
+    ("prefix", "rmsnorm_final"): "hand_kernels.prefix.rmsnorm_177x960",
+    ("prefix", "silu_mul"): "hand_kernels.prefix.silu_gate_177x2560",
+    ("expert", "rmsnorm_attn"): "hand_kernels.expert.rmsnorm_50x720",
+    ("expert", "rmsnorm_mlp"): "hand_kernels.expert.rmsnorm_50x720",
+    ("expert", "rmsnorm_final"): "hand_kernels.expert.rmsnorm_50x720",
+    ("expert", "silu_mul"): "hand_kernels.expert.silu_gate_50x2048",
+    ("expert", "time_silu"): "hand_kernels.expert.silu_50x720",
+}
+
+
+def hand_kernel_ns(c, workload_id: str, row: OpRow) -> float | None:
+    """Measured ns per call of the row's hand kernel, if one was simulated at this workload and shape."""
+    key = HAND_KERNEL_TIME.get((row.stage, row.op))
+    if key is None:
+        return None
+    e = c.get(key)
+    shape = key.rsplit("_", 1)[1]
+    if e.workload != workload_id or shape != "x".join(map(str, row.shape)):
+        return None
+    return float(e.value)
 
 
 def unit_and_kernel(row: OpRow) -> tuple[str, str]:
