@@ -1,3 +1,5 @@
+> Working material (idea-forming, not a decision). Copied from the owner's untracked `workload-modeling/pattern-table-meeting.md`; RQs do not cite it as a starting point. See [README](README.md).
+
 # VLA Workload Patterns：按计算模式拆解 VLA（meeting 讨论稿）
 
 > 2026-11-06 · 工作稿，未入 wiki · 详细版见 `workload-modeling/pattern-table.md`

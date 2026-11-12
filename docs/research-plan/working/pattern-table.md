@@ -1,3 +1,5 @@
+> Working material (idea-forming, not a decision). Copied from the owner's untracked `workload-modeling/pattern-table.md`; RQs do not cite it as a starting point. See [README](README.md).
+
 # VLA workload patterns: a starting table for workload modeling
 
 Working document, not part of the wiki. It splits every model into a few
