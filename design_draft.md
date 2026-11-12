@@ -425,3 +425,125 @@ Part 2 (explainer):
 
 The RQs may need the stage totals from the model before Part 2 is finished. That is
 why the model's stage totals come in Part 1 and the per-operator detail in Part 2.
+
+## Alternatives Considered
+
+Rejected during the brainstorm (from `concepts_brief.md`, "Alternatives Weighed") and
+during drafting.
+
+### Alternative A: One large pull request with every stage-1 document
+
+*   **Pros**: one review; all documents land together and cannot disagree at merge time.
+*   **Cons**: too large to review well. It also crosses the code repo, the experiment
+    branch and the wiki's governance boundary (wiki changes need their own session).
+*   **Reason for Rejection**: split into the two parts of this design, the separate wiki
+    session that has already run, and the later measurement work.
+
+### Alternative B: Iso-peak FLOPS as the only alignment with Thor, bandwidth matched implicitly
+
+*   **Pros**: the most common rule in architecture papers. A single knob (cluster count).
+*   **Cons**: SmolVLA's action expert is bandwidth-bound at batch 1, and it is the largest
+    latency share. An iso-FLOPS rule that silently inherits SoftHier's HBM bandwidth
+    would favour SoftHier.
+*   **Reason for Rejection (partial)**: the owner kept iso-peak FP16 by cluster count as
+    the alignment rule, because vision and prefill are compute-bound on `libero-2cam`.
+    Bandwidth is listed as an open parameter, never silently matched, and every
+    expert-related RQ states the bandwidth limit.
+
+### Alternative C: Amend wiki decision 0013 inside this project work
+
+*   **Pros**: one place to change the rule; no extra session.
+*   **Cons**: sessions from the parent repo may not edit `wiki-design/`. The wiki lint
+    had no note type for status or patch entries.
+*   **Reason for Rejection**: done instead as a new scoped wiki-design decision in a
+    separate wiki session (branch `wiki-status-patches`), with a "revised by" pointer
+    in 0013 that keeps the reason for the original ban.
+
+### Alternative D: Status log in date order, or one entry per pull request
+
+*   **Pros**: easy to append; mirrors git history.
+*   **Cons**: contradicts the owner's rule of titling by theme. It grows without bound,
+    and titles such as "PR2" carry no meaning for a reader.
+*   **Reason for Rejection**: theme-titled entries. Catalog order and
+    `follows:`/`superseded_by:` links give the sequence, and git gives the dates.
+
+### Alternative E: Wiki patch log that mirrors the gvsoc-patches README
+
+*   **Pros**: one page in the wiki with everything.
+*   **Cons**: the what/why/upstream-worthy columns would exist twice and drift apart.
+    Patch numbers change when the series is re-exported.
+*   **Reason for Rejection**: patch files and their README stay canonical in the code
+    repo. The wiki log holds only upstream status, measured impact and links, and it is
+    keyed by finding ID.
+
+### Alternative F: Research plan inside the wiki, or as its own submodule
+
+*   **Pros (wiki)**: one knowledge base. **Pros (submodule)**: independent versioning.
+*   **Cons**: the wiki is lint-gated and limited to what sources say, so collaborators'
+    edits to RQs would fail its checks. A third repository adds a sync point before a
+    second author exists.
+*   **Reason for Rejection**: `docs/research-plan/` in the code repo, linking to the wiki
+    in one direction.
+
+### Alternative G: Hand-typed FLOP and intensity tables, or RQs inside the PR1 baseline design doc
+
+*   **Pros**: no generator code; RQs next to the numbers they start from.
+*   **Cons**: hand-typed tables cannot be reproduced and drift from the constants. The
+    PR1 design doc is a fixed record of PR1, and the RQs outlive it.
+*   **Reason for Rejection**: generated tables from one constants file; RQs as separate
+    files.
+
+### Alternative H: Drop the hardware configuration from stage 1
+
+*   **Pros**: less work; the scaled arch is not validated anyway.
+*   **Cons**: RQ baselines need a fixed comparison point.
+*   **Reason for Rejection**: a minimal parameter table stays, marked as a proposal.
+
+### Alternative I: Full-model weight residency as a fusion option
+
+*   **Pros**: would remove weight streaming entirely.
+*   **Cons**: SmolVLA's fp16 weights are hundreds of MB (the action expert alone is
+    ~196 MB), against on-chip SRAM of a few hundred MB even on the 256-cluster mesh.
+*   **Reason for Rejection**: only the KV cache and per-layer tiles are candidates for
+    staying on chip.
+
+### Alternative J: Get operator data from softhier-mlir as a pinned submodule
+
+*   **Pros**: numbers match the IR the compiler actually emits and the simulator runs.
+*   **Cons**: adds softhier-mlir and its xDSL environment as a dependency on `main`.
+    The submodule must follow softhier-mlir's changes, and the frontends support only
+    the configurations already built.
+*   **Reason for Rejection**: owner chose a standalone model with a one-time cross-check.
+
+### Alternative K: Put the generator inside softhier-mlir and store only its output here
+
+*   **Pros**: no code dependency in SoftHier-VLA; numbers still come from the compiler.
+*   **Cons**: needs a change in softhier-mlir during a stage whose Non-Goals exclude
+    compiler work. Updating the table requires working in a second repository.
+*   **Reason for Rejection**: owner chose the standalone model.
+
+### Alternative L: Bytes as unique operand bytes only
+
+*   **Pros**: one arch-independent column; simplest.
+*   **Cons**: gives no figure comparable to the published Thor data (which uses weight
+    bytes) and still shows no tiling re-reads.
+*   **Reason for Rejection**: owner chose unique bytes plus weight bytes, with FLOP per
+    weight byte as the intensity figure.
+
+### Alternative M: Bytes as unique bytes plus bytes the library moves under tiling
+
+*   **Pros**: the gap between the two columns is the headroom for fusion and reuse. It
+    would show the re-reads behind PR1's iDMA-bound expert products.
+*   **Cons**: needs a tiling choice, and it reproduces library formulas in the model.
+    It would not describe the hand-written kernels if they tile differently.
+*   **Reason for Rejection**: owner chose weight bytes for comparability with published
+    data. Tiling traffic is left to the measurement work.
+
+### Alternative N: Different scope for this design document
+
+*   **Problem definition only**: shorter, but RQ baselines depend on stage totals the
+    explainer produces.
+*   **Also the measurement work**: the full stage-1 picture, but the measurement details
+    are the most likely to change after the first runs.
+*   **Reason for Rejection**: owner chose problem definition plus explainer, phased, with
+    the measurement work only referenced.
