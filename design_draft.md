@@ -503,7 +503,7 @@ during drafting.
 
 *   **Pros**: would remove weight streaming entirely.
 *   **Cons**: SmolVLA's fp16 weights are hundreds of MB (the action expert alone is
-    ~196 MB), against on-chip SRAM of a few hundred MB even on the 256-cluster mesh.
+    ~196 MB), against ~96 MiB of TCDM in total on the 256-cluster mesh (256 x 384 KiB).
 *   **Reason for Rejection**: only the KV cache and per-layer tiles are candidates for
     staying on chip.
 
@@ -547,3 +547,333 @@ during drafting.
     are the most likely to change after the first runs.
 *   **Reason for Rejection**: owner chose problem definition plus explainer, phased, with
     the measurement work only referenced.
+
+--------------------------------------------------------------------------------
+
+## Non-Functional Requirements
+
+*   **Reproducibility:** regeneration runs offline from committed fixtures (HF config and
+    safetensors header cached under `workload-modeling/tests/fixtures/`). Network access
+    is only needed to refresh the fixtures.
+*   **Collaborator setup:** `uv sync` in `workload-modeling/` and one build command. No
+    simulator, GPU or softhier-mlir environment is needed, except for the one-time
+    cross-check.
+*   **Evidence discipline:** the build fails if a constants entry lacks `label` or
+    `source`, or if an RQ cites a missing constants key.
+*   Security, privacy and rollout: none critical (documentation and offline scripts).
+
+### Additional Resources
+
+*   [`concepts_brief.md`](./concepts_brief.md): brainstorm brief with owner decisions.
+*   [`docs/designs/smolvla-softhier-baseline.md`](./docs/designs/smolvla-softhier-baseline.md):
+    PR1 design, findings F1-F19.
+*   `~/softhier-mlir/docs/DESIGN.md`, `softhier_mlir/dse/workload.py`, `dse/cost.py`.
+*   `~/softhier/implementation/` (README, `config/arch/arch.py`, `sw/`): stage-1 arch and
+    hand-tuned kernels.
+*   Wiki: `wiki://knowledge/mfu-from-measurements.md`, `wiki://knowledge/smolvla.md`,
+    `wiki://resources/serving/vla-hwbench-edge-latency.md`, branch `wiki-status-patches`
+    (status and patch logs, naming).
+
+### Future Improvements
+
+*   **Tiling-traffic column:** add bytes moved under each kernel's real tiling once the
+    measurement work has calibrated the hand-written kernels.
+*   **Other models:** the model builder is written per checkpoint family. π0/π0.5 and
+    GR00T builders would feed the "several models" roadmap step.
+*   **S0 stand-in:** an MLP/transformer controller entry in the constants file and a
+    small builder, when co-location moves from roadmap to an RQ.
+
+--------------------------------------------------------------------------------
+
+## Detailed Implementation Plan
+
+Branches are named by content (owner's rule): Part 1 on `problem-definition`, Part 2 on
+`model-and-compiler-explainer` (branched from Part 1). Each branch opens one pull request
+to `main`. Commits use the repo's `[step] area: message` style.
+
+### Candidate research questions (owner approves with this section)
+
+All four are on `libero-2cam`. Baselines on the PR1 arch are measured; baselines on the
+stage-1 arch are estimates until the measurement work runs. RQ3 is the one aimed at the
+core research topic (spatial mapping).
+
+| ID  | Question                                                                                                                                                                                     | Metric                                  | Baseline (constants key, label)                                                                                                      |
+|-----|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| RQ1 | How much of the VLA's latency is row operations (softmax, norm, activation), and how much does a Spatz unit per cluster recover?                                                             | row-operation share of latency; latency | `pr1.rowop_share` 64.5 % (measured, PR1 arch, `pr1-1cam`); `pr1.libero_softmax_share` ~44 % (estimate, PR1 arch)                     |
+| RQ2 | For the bandwidth-bound action expert, how does time per flow step depend on HBM bandwidth and on keeping the KV cache and per-layer weight tiles on chip?                                   | ms per flow step; achieved GB/s         | `pr1.expert_step_ms` (measured, PR1 arch; value taken from the PR1 profile); FLOP per weight byte from the model (inference)         |
+| RQ3 | Given that vision, prefix and expert differ in FLOP per weight byte, does dividing the cluster mesh into regions per stage (pipelined across calls) beat running each stage on the whole mesh? | end-to-end latency; cluster utilization | `pr1.gemm_cluster_use` vision/prefix products use 1-10 of 16 clusters (measured, PR1 arch); `pr1.e2e_ms` 120.7 ms                    |
+| RQ4 | At iso-peak FP16 with Thor, what fraction of peak does SoftHier reach per stage, against Thor's per-stage figures?                                                                           | per-stage MFU on SoftHier vs Thor       | `pr1.mfu` 1.2 % of 131 TFLOP/s (measured, PR1 arch); Thor per-stage MFU from `wiki://knowledge/mfu-from-measurements.md` (inference) |
+
+### Target Files to Create/Modify
+
+#### Part 1: problem definition (branch `problem-definition`)
+
+##### 1. `workload-modeling/pyproject.toml` (Create)
+
+*   **Type / Scope**: uv project configuration.
+*   **Proposed Changes**: package `workload_modeling`, Python 3.12, dependencies
+    `pyyaml` and `jinja2` (rendering), and `pytest` as a dev dependency. No torch,
+    xDSL or LeRobot. Same uv conventions as `infra/lerobot/pyproject.toml`.
+
+##### 2. `workload-modeling/uv.lock` (Create, generated by `uv lock`)
+
+*   **Type / Scope**: lock file.
+*   **Proposed Changes**: pins dependencies so collaborators get the same environment.
+
+##### 3. `workload-modeling/README.md` (Create)
+
+*   **Type / Scope**: documentation.
+*   **Proposed Changes**: what the project generates, the build command, how to refresh
+    fixtures, how to run the cross-check, and the evidence-label rule.
+
+##### 4. `workload-modeling/constants.yaml` (Create)
+
+*   **Type / Scope**: data, single source of shared numbers.
+*   **Proposed Changes**: the groups `workloads`, `arch.stage1`, `arch.pr1`, `thor`,
+    `pr1` as described in Technical Plan §1. Schema per entry:
+    `{value, unit, label, source, note?}`. The PR1 profile values (`rowop_share`,
+    `libero_softmax_share`, `expert_step_ms`, `gemm_cluster_use`, `mfu`, `e2e_ms`) are
+    copied from `experiments/smolvla-e2e-baseline/PROFILE.md` on branch
+    `worktree-smolvla-e2e-baseline` with that commit as source.
+*   **Arch entries:**
+    *   `arch.stage1` copies the parameters of `~/softhier/implementation/config/arch/arch.py`
+        with its commit.
+    *   `arch.pr1` copies `experiments/smolvla-e2e-baseline/arch/softhier_mlir_arch.py`.
+*   **Workload entries:**
+    *   `pr1-1cam` uses `lerobot/smolvla_base`.
+    *   `libero-2cam` uses `lerobot/smolvla_libero`.
+    *   `release-3cam` uses `lerobot/smolvla_base` with 3 cameras at 512x512.
+
+##### 5. `workload-modeling/workload_modeling/__init__.py` (Create)
+
+*   **Type / Scope**: package marker.
+*   **Proposed Changes**: empty except the version string.
+
+##### 6. `workload-modeling/workload_modeling/constants.py` (Create)
+
+*   **Type / Scope**: Python module.
+*   **Proposed Changes**: `load(path) -> Constants`; `Constants.get(key) -> Entry`;
+    validation that every entry has `value`, `unit`, `label` in
+    {measured, estimate, inference, derived} and a non-empty `source`. Derived arch
+    figures (`peak_per_cluster`, `peak_total(clusters)`) are computed here from arch
+    parameters, never stored.
+
+##### 7. `workload-modeling/workload_modeling/hf_header.py` (Create)
+
+*   **Type / Scope**: Python module.
+*   **Proposed Changes**: `fetch(repo_id, revision) -> (config: dict, tensors: dict[name, shape, dtype])`.
+    It reads `config.json` and the safetensors header (8-byte length prefix plus JSON)
+    through HTTP range requests using the standard library, with no weights downloaded.
+    `--refresh-fixtures` writes them to `tests/fixtures/<repo>@<revision>/`. Normal runs
+    read only the fixtures.
+
+##### 8. `workload-modeling/workload_modeling/smolvla_ops.py` (Create; stage totals in Part 1, per-operator detail completed in Part 2)
+
+*   **Type / Scope**: Python module, the standalone analytical model.
+*   **Proposed Changes**: `build(workload_id, constants, fixtures) -> list[OpRow]`, with
+    the `OpRow` fields from Technical Plan §2.
+    *   Shapes come from the config (hidden sizes, heads, KV heads, FFN size, layer
+        counts, the prefix-layer truncation SmolVLA uses) and are checked against
+        tensor shapes in the header.
+    *   Stages: vision (SigLIP), connector (pixel shuffle + projection), prefix (VLM
+        layers over image, language and state tokens), expert (self- and cross-attention
+        layers over the action chunk, per flow step).
+    *   `stage_totals(rows)` returns FLOP, unique bytes, weight bytes and FLOP per weight
+        byte per stage. Part 1 needs only these totals.
+
+##### 9. `workload-modeling/workload_modeling/hw_table.py` (Create)
+
+*   **Type / Scope**: Python module.
+*   **Proposed Changes**: computes the Thor-matched cluster count and fills the table
+    rows described in Technical Plan §5:
+    *   cluster count: the smallest square mesh with `peak_total >= thor.fp16_dense`;
+    *   HBM capacity: the next power of two at or above weight bytes plus the largest
+        activation footprint for `libero-2cam`;
+    *   total TCDM.
+
+    It writes the block between `<!-- BEGIN GENERATED hw-table -->` and
+    `<!-- END GENERATED hw-table -->` in `docs/analysis/hw-config.md`.
+
+##### 10. `workload-modeling/workload_modeling/rq_index.py` (Create)
+
+*   **Type / Scope**: Python module.
+*   **Proposed Changes**: reads the front-matter of `docs/research-plan/rq/rq*.md`,
+    resolves `baseline` keys in the constants and writes the RQ index table between
+    marker comments in `docs/research-plan/README.md`. It fails on a missing key, a
+    duplicate id, or an unknown `status`.
+
+##### 11. `workload-modeling/workload_modeling/build.py` (Create)
+
+*   **Type / Scope**: command-line entry point.
+*   **Proposed Changes**: `python -m workload_modeling.build [--check]` runs the
+    constants validation, the model, the HW table and the RQ index (and in Part 2 the
+    renderer). `--check` regenerates in memory and fails if any committed generated
+    file differs, which catches hand edits to generated blocks.
+
+##### 12. `workload-modeling/tests/fixtures/` (Create)
+
+*   **Type / Scope**: test data.
+*   **Proposed Changes**: cached `config.json` and safetensors header JSON for
+    `lerobot/smolvla_base` and `lerobot/smolvla_libero`, each at a pinned revision.
+
+##### 13. `workload-modeling/tests/test_constants.py` (Create)
+
+*   **Type / Scope**: unit tests.
+*   **Proposed Changes**:
+    *   rejects an entry without a label or source;
+    *   the stage-1 peak at 16 clusters is ~16.4 TFLOP/s;
+    *   the PR1 peak is ~131 TFLOP/s.
+
+##### 14. `workload-modeling/tests/test_smolvla_ops.py` (Create)
+
+*   **Type / Scope**: unit tests.
+*   **Proposed Changes**:
+    *   the sum of weight shapes used by the model plus the listed unused tensors
+        equals the header's parameter count (450.0M for `smolvla_base`);
+    *   every weight tensor in the header is used or listed as unused;
+    *   attention rows carry `class = attn`;
+    *   expert `count` equals the flow steps;
+    *   `release-3cam` stage totals are within 5 % of the earlier estimate (~834 GFLOP
+        total), as a regression guard rather than a truth claim.
+
+##### 15. `workload-modeling/tests/test_hw_table.py` and `tests/test_rq_index.py` (Create)
+
+*   **Type / Scope**: unit tests.
+*   **Proposed Changes**:
+    *   with Thor at 258 TFLOP/s the cluster count is 256 (16x16);
+    *   the RQ index fails on a missing baseline key;
+    *   the generated block replaces only the text between the markers.
+
+##### 16. `docs/analysis/conventions.md` (Create)
+
+*   **Type / Scope**: documentation.
+*   **Proposed Changes**: the content listed in Technical Plan §7. The FLOP and byte
+    formula per operator class is written out (matrix product, attention parts, norm,
+    activation, softmax, elementwise).
+
+##### 17. `docs/analysis/hw-config.md` (Create)
+
+*   **Type / Scope**: documentation with one generated block.
+*   **Proposed Changes**: prose on the alignment rule, which parameters are fixed or
+    open, Spatz reported separately, and the "proposal, not validated" statement; plus
+    the generated table.
+
+##### 18. `docs/research-plan/README.md` (Create)
+
+*   **Type / Scope**: documentation, entry point.
+*   **Proposed Changes**: the content listed in Technical Plan §6, plus the generated
+    RQ index block. Links to the wiki status log are written as `wiki://` URIs with the
+    note that they resolve after the wiki branch merge.
+
+##### 19. `docs/research-plan/rq/_template.md` and `rq/rq1-row-operations.md`, `rq/rq2-expert-streaming.md`, `rq/rq3-mesh-partitioning.md`, `rq/rq4-mfu-vs-thor.md` (Create)
+
+*   **Type / Scope**: documentation.
+*   **Proposed Changes**: one file per approved RQ, with front-matter as in Technical
+    Plan §6 and the body sections question, why it matters, method, and what result
+    would answer it. RQ texts come from the table above as approved.
+
+##### 20. `docs/research-plan/working/pattern-table.md` and `working/pattern-table-meeting.md` (Create, moved from untracked files in the main checkout)
+
+*   **Type / Scope**: working material.
+*   **Proposed Changes**: copied unchanged from `workload-modeling/pattern-table.md` and
+    `workload-modeling/pattern-table-meeting.md` in the main checkout (owner's untracked
+    files). A header line marks them as idea-forming material, not decisions.
+
+##### 21. `README.md` (Modify)
+
+*   **Type / Scope**: documentation.
+*   **Proposed Changes**: add a "Start here" link to `docs/research-plan/README.md`
+    under the goals. The existing line-34 link to the first-baseline decision stays (it
+    resolves after the wiki merge).
+
+##### 22. `.gitignore` (Modify)
+
+*   **Type / Scope**: configuration.
+*   **Proposed Changes**: ignore `workload-modeling/build/` and
+    `workload-modeling/.venv/`.
+
+##### 23. `softhier_vla_wiki` (Modify submodule pointer, after the owner merges `wiki-status-patches`)
+
+*   **Type / Scope**: submodule bump.
+*   **Proposed Changes**: a separate `[wiki] bump submodule` commit on
+    `problem-definition`, so the status-log and naming links resolve.
+
+##### 24. `CLAUDE.md` (Modify, only with the owner's explicit approval)
+
+*   **Type / Scope**: project instructions.
+*   **Proposed Changes**: update the "Wiki scope limit" line (line 14) to mention the
+    exception for `memories/status/` and `memories/patches/` from wiki-design decision
+    `2026-11-12-status-and-patch-logs`, as suggested by the wiki session.
+
+#### Part 2: model and compiler explainer (branch `model-and-compiler-explainer`)
+
+##### 25. `workload-modeling/workload_modeling/smolvla_ops.py` (Modify)
+
+*   **Type / Scope**: Python module.
+*   **Proposed Changes**: complete per-operator rows (all columns, including
+    `unit_today` and `hand_kernel` with the `~/softhier/implementation` commit).
+    Collapse identical layers into one row with a count.
+
+##### 26. `workload-modeling/workload_modeling/render.py` and `templates/op_graph.md.j2`, `templates/op_graph.html.j2` (Create)
+
+*   **Type / Scope**: Python module and templates.
+*   **Proposed Changes**: writes `docs/analysis/smolvla-op-graph.csv` and `.md` (Mermaid
+    stage diagram, per-stage tables, totals, limitations paragraph), and
+    `workload-modeling/build/smolvla-op-graph.html` (self-contained, inline CSS and SVG,
+    stage diagram with per-operator detail on hover, light and dark themes).
+
+##### 27. `docs/analysis/smolvla-op-graph.md` and `docs/analysis/smolvla-op-graph.csv` (Create, generated)
+
+*   **Type / Scope**: generated documentation and data.
+*   **Proposed Changes**: committed outputs for `libero-2cam`, with a header saying they
+    are generated and by which command.
+
+##### 28. `workload-modeling/workload_modeling/crosscheck_softhier_mlir.py` (Create)
+
+*   **Type / Scope**: Python script, run by hand.
+*   **Proposed Changes**: takes `--softhier-mlir <path>`, runs its frontends for
+    `pr1-1cam` in that checkout's environment (subprocess, so this project does not
+    import xDSL), parses the `dse.workload` output, and compares per-stage
+    multiply-accumulate counts and shapes with `smolvla_ops`. It writes
+    `docs/analysis/crosscheck.md` with the softhier-mlir commit. It exits non-zero if
+    any stage differs by more than 1 %.
+
+##### 29. `docs/analysis/crosscheck.md` (Create, generated once)
+
+*   **Type / Scope**: generated documentation.
+*   **Proposed Changes**: the per-stage comparison and explanations for any difference.
+
+##### 30. `docs/analysis/compiler-walkthrough.md` (Create)
+
+*   **Type / Scope**: documentation.
+*   **Proposed Changes**: the content listed in Technical Plan §8. Every claim about
+    code cites a file and line at a pinned softhier-mlir or `~/softhier` commit.
+
+##### 31. `workload-modeling/tests/test_render.py` (Create)
+
+*   **Type / Scope**: unit tests.
+*   **Proposed Changes**:
+    *   stage totals in the Markdown equal `stage_totals`;
+    *   every row has a workload ID and label in the page header;
+    *   the HTML has no external URLs.
+
+### Verification Plan
+
+*   **Build**: `cd workload-modeling && uv sync && uv run python -m workload_modeling.build`
+    (regenerates all outputs offline from fixtures).
+*   **Drift check**: `uv run python -m workload_modeling.build --check` passes on a
+    clean tree; run before each commit.
+*   **Unit tests**: `uv run pytest` (files 13-15 in Part 1, plus file 31 in Part 2).
+*   **Cross-check (Part 2, once)**: `uv run python -m workload_modeling.crosscheck_softhier_mlir --softhier-mlir ~/softhier-mlir`
+    exits 0, or `crosscheck.md` explains every difference above 1 %.
+*   **Manual review**:
+    *   the owner reads `docs/research-plan/README.md` as a newcomer would and follows
+        the reading order;
+    *   the HTML page is opened in a browser in light and dark modes;
+    *   one RQ is added from the template (CUJ 2) to confirm the index regenerates.
+*   **Wiki**: after the submodule bump, the `wiki://` links in the README resolve to
+    existing files.
+
+--------------------------------------------------------------------------------
+
+*Drafted with EGM*
