@@ -12,11 +12,11 @@ Checkpoint `lerobot/smolvla_libero@a24f1f38`; 2 camera(s) at 512x512, 48 languag
 
 | stage | tokens | GFLOP | of which matrix | FLOP share % | unique MB | weight MB | FLOP per weight byte |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| vision | 2 x 1024 | 430.257 | 427.618 | 71.5 | 3,670.9 | 172.9 | 2,489 |
+| vision | 2 x 1024 | 430.257 | 427.618 | 71.5 | 3,843.8 | 345.7 | 1,244 |
 | connector | 128 | 3.020 | 3.020 | 0.5 | 33.8 | 23.6 | 128 |
 | prefix | 177 | 57.717 | 57.604 | 9.6 | 568.7 | 314.8 | 183 |
 | expert | 50 x 10 steps | 110.482 | 110.190 | 18.4 | 2,644.3 | 1,997.0 | 55 |
-| **total** | | 601.476 | 598.432 | 100.0 | 6,917.7 | 2,508.2 | 240 |
+| **total** | | 601.476 | 598.432 | 100.0 | 7,090.5 | 2,681.1 | 224 |
 
 Expert per flow step: 11.048 GFLOP, 199.7 MB of weights (includes the cross-attention K/V projection, which the reference code repeats every step).
 

@@ -58,12 +58,12 @@ def test_worked_example_expert_gateup(c):
     assert row.flop_per_wbyte == 50
 
 
-def test_weights_not_scaled_by_cameras(c):
-    one = m.stage_totals(m.build(c, "pr1-1cam"))["vision"].bytes_weight
-    vis = [r for r in m.build(c, "libero-2cam") if r.stage == "vision" and r.op != "pos_embed_add"]
-    two = sum(r.bytes_weight for r in vis)
-    one_np = sum(r.bytes_weight for r in m.build(c, "pr1-1cam") if r.stage == "vision" and r.op != "pos_embed_add")
-    assert two == one_np and one > 0
+def test_camera_weight_reads(c):
+    """Reference: vision weights read once per camera; batch_cameras: once per call. FLOP unchanged."""
+    per_cam = m.stage_totals(m.build(c, "libero-2cam"))["vision"]
+    batched = m.stage_totals(m.build(c, "libero-2cam", m.Lowering(batch_cameras=True)))["vision"]
+    assert per_cam.bytes_weight == 2 * batched.bytes_weight
+    assert per_cam.flop == batched.flop
 
 
 def test_lowering_defaults_are_reference(c):
@@ -98,7 +98,7 @@ def test_weight_bytes_equal_header_parameters(c):
     header = fixtures.load(wl.repo, wl.revision)[1]
     params = m.param_counts(header)
     steps = m.load_dims(wl).steps
-    rows = m.build(c, "libero-2cam")
+    rows = m.build(c, "libero-2cam", m.Lowering(batch_cameras=True))  # one encoder pass for the vision part
 
     def wb(stage, ops=None, exclude=()):
         return sum(r.bytes_weight for r in rows

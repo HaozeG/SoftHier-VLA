@@ -34,7 +34,7 @@ figure that was not independently checked keeps its label and says "self-reporte
 **Inputs read as given** (an arch-file parameter, a checkpoint config value, a vendor spec-sheet
 figure such as Thor's 273 GB/s) are labelled `measured`, with the file and line or the spec as source.
 They are read, not computed, and the wiki has no separate label for them. This extends the glossary's
-"a reported run", which covers results, to inputs; it is a stage-1 convention for the owner to confirm.
+"a reported run", which covers results, to inputs (owner decision, stage 1).
 A spec figure a paper derives (Thor's dense FP16 258) is `inference`.
 
 ## Operator rows and byte columns
@@ -46,7 +46,7 @@ are ignored.
 | Column | Meaning |
 | --- | --- |
 | `shape` | one instance: (M, N, K) for matrix products; (heads, Sq, Skv, head dim) for attention; (rows, cols) otherwise |
-| `count` | instances per call: layers x flow steps that apply, x cameras for vision attention only |
+| `count` | instances per call: layers x flow steps x cameras that apply |
 | `flop` | all instances |
 | `bytes_weight` | weight bytes of one instance x `count` |
 | `bytes_unique` | (inputs + outputs + weights) of one instance x `count` |
@@ -55,9 +55,12 @@ are ignored.
 **How bytes scale with `count`:**
 
 * *Layers:* each layer has its own weights, so weight bytes scale with layers.
-* *Heads and batched cameras:* they share one weight matrix and are folded into the shape, so weight
-  bytes do not scale with them. Vision cameras are batched in the token rows of every per-token
-  operator; attention runs per camera.
+* *Heads:* they share one weight matrix and are folded into the shape, so weight bytes do not
+  scale with them.
+* *Cameras:* the reference code runs the vision encoder once per camera (lerobot `embed_prefix`
+  loops over cameras; PR1 does the same), so vision weight bytes scale with cameras. Batching all
+  cameras into one encoder call (`Lowering(batch_cameras=True)`) reads them once and doubles vision's
+  FLOP per weight byte for two cameras; it is an optimization, not the default.
 * *Flow steps:* the expert's weights (about 200 MB per step) do not fit on chip, so they are read again
   in every step and weight bytes scale with steps.
 

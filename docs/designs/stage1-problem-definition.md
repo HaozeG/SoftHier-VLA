@@ -422,7 +422,7 @@ SoftHier library does. The wiki's per-part parameter table
 | `op`             | operator name (`q_proj`, `qk`, `softmax`, `pv`, `o_proj`, `mlp_up`, `gelu`, `layernorm`, `rmsnorm`, `rope`) |
 | `class`          | gemm, attn, norm, acti, softmax, elementwise, data (transpose, pixel shuffle)                               |
 | `shape`          | (M, N, K) for matrix products; (h, Sq, Skv, d) for attention; (rows, cols) otherwise                        |
-| `count`          | instances per call = layers x flow steps that apply (x cameras for vision attention only)                   |
+| `count`          | instances per call = layers x flow steps x cameras that apply                                               |
 | `flop`           | per call, all instances                                                                                     |
 | `bytes_unique`   | weights + inputs + outputs, each counted once per instance as defined below, fp16                          |
 | `bytes_weight`   | weight bytes per call as defined below                                                                      |
@@ -435,9 +435,11 @@ otherwise be off by about 10x:
 
 *   *Layers:* each layer has its own weights, so `bytes_weight` scales with the number
     of layers.
-*   *Heads and batched cameras:* they share one weight matrix and are folded into the
-    shape, so `bytes_weight` does not scale with them. Vision cameras are batched into
-    the token rows of every per-token operator; attention runs per camera.
+*   *Heads:* they share one weight matrix and are folded into the shape, so
+    `bytes_weight` does not scale with them.
+*   *Cameras:* the reference code runs the vision encoder once per camera, so vision
+    `bytes_weight` scales with cameras. `Lowering(batch_cameras=True)` batches them and
+    reads the weights once (owner decision: follow the reference by default).
 *   *Flow steps:* the expert's weights do not fit on chip, so they are read again in
     every step. `bytes_weight` scales with flow steps. The page states this assumption.
 *   `bytes_unique` counts inputs, outputs and weights per instance, times `count`.
@@ -685,7 +687,7 @@ The front-matter carries `follows: [basic-integration-of-components.md]`, `evide
 *   **Cons**: the expert is bandwidth-bound at batch size 1, so inheriting SoftHier's
     bandwidth silently would favour SoftHier.
 *   **Reason for Rejection (partial)**: iso-peak FP16 by cluster count is kept. On Thor,
-    the standalone model gives `libero-2cam` vision 2,489 FLOP per weight byte, above
+    the standalone model gives `libero-2cam` vision 1,244 FLOP per weight byte, above
     Thor's balance of 258 TFLOP/s / 273 GB/s = 945 FLOP/B, while the prefix (183) and the
     expert (55) are below it (inference, cross-checked; the brainstorm's "about 2000 for
     vision and prefix" overstated the prefix). So only vision is compute-bound on Thor;

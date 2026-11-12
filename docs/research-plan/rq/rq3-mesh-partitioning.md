@@ -18,8 +18,8 @@ whole mesh?
 
 ## Why it matters
 
-This is the project's core topic, spatial mapping. The stages differ by about 45x in FLOP per weight
-byte (vision 2,489, prefix 183, expert 55 on `libero-2cam`), and PR1 leaves most clusters idle in
+This is the project's core topic, spatial mapping. The stages differ by about 23x in FLOP per weight
+byte (vision 1,244, prefix 183, expert 55 on `libero-2cam`), and PR1 leaves most clusters idle in
 vision and prefix. A region per stage is also the first step toward placing a controller (S0) next to
 the VLA on one chip.
 

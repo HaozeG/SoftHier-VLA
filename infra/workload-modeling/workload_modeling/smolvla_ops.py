@@ -6,8 +6,8 @@ assume fp16 (2 B per element), as the SoftHier library does.
 
 Byte columns and the count rule (docs/analysis/conventions.md):
   - one row per operator group; `shape` is one instance; `count` = instances per call
-    (layers x flow steps that apply, x cameras for attention only; heads and batched cameras are
-    folded into the shape, because they share one weight matrix);
+    (layers x flow steps x cameras that apply; heads are folded into the shape, because they share
+    one weight matrix; Lowering.batch_cameras folds cameras into the shape too);
   - bytes_weight = weight bytes of one instance x count. Each layer has its own weights; the expert's
     weights do not fit on chip, so they are read again in every flow step;
   - bytes_unique = (inputs + outputs + weights) of one instance x count;
@@ -97,6 +97,7 @@ class Lowering:
     kv_align: int = 1                # pad expert attention key length to a multiple of this
     kv_proj_per_step: bool = True    # False: cross-attention K/V projection once per call
     time_in_split: bool = False      # True: time half of time_mlp_in as a one-row product
+    batch_cameras: bool = False      # True: all cameras in one vision-encoder call (weights read once)
 
 
 def pr1_lowering(prefix_rows: int) -> Lowering:
@@ -276,24 +277,27 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
     rows: list[OpRow] = []
     add = rows.append
 
-    # ---- vision: SigLIP encoder. Cameras are batched into the token rows of every per-token operator
-    # (the weights are shared, as heads share them); attention runs per camera.
+    # ---- vision: SigLIP encoder, one call per camera as in the reference code (lerobot embed_prefix
+    # loops over cameras), so weights are read once per camera. With lowering.batch_cameras the cameras
+    # are batched into the token rows of every per-token operator and weights are read once per call.
+    # Attention runs per camera either way.
     N, Hv, cam = vision_tokens(wl, d), d.v_hidden, wl.cameras
-    M = cam * N
+    k = 1 if lowering.batch_cameras else cam      # encoder calls per policy call
+    M = N * cam // k                              # token rows per call
     L = f"0-{d.v_layers - 1}"
-    n = d.v_layers
-    add(_gemm("vision", "embed", "patch_embed", M, Hv, 3 * d.patch * d.patch, 1))
-    add(_ew("vision", "embed", "bias_patch", "elementwise", "bias", M, Hv, 1, weight_elems=Hv))
-    add(_ew("vision", "embed", "pos_embed_add", "elementwise", "add", M, Hv, 1, weight_elems=N * Hv))
+    n = d.v_layers * k
+    add(_gemm("vision", "embed", "patch_embed", M, Hv, 3 * d.patch * d.patch, k))
+    add(_ew("vision", "embed", "bias_patch", "elementwise", "bias", M, Hv, k, weight_elems=Hv))
+    add(_ew("vision", "embed", "pos_embed_add", "elementwise", "add", M, Hv, k, weight_elems=N * Hv))
     add(_ew("vision", L, "ln1", "norm", "layernorm", M, Hv, n, weight_elems=2 * Hv))
     for p in ("q", "k", "v"):
         add(_gemm("vision", L, f"{p}_proj", M, Hv, Hv, n))
         add(_ew("vision", L, f"bias_{p}", "elementwise", "bias", M, Hv, n, weight_elems=Hv))
     add(_data("vision", L, "transpose_k", M, Hv, n))
     hd_v = Hv // d.v_heads
-    add(_attn("vision", L, "qk", d.v_heads, d.v_heads, N, N, hd_v, n * cam, note="per camera"))
-    add(_ew("vision", L, "softmax", "softmax", "softmax", d.v_heads * N, N, n * cam))
-    add(_attn("vision", L, "pv", d.v_heads, d.v_heads, N, N, hd_v, n * cam, note="per camera"))
+    add(_attn("vision", L, "qk", d.v_heads, d.v_heads, N, N, hd_v, d.v_layers * cam, note="per camera"))
+    add(_ew("vision", L, "softmax", "softmax", "softmax", d.v_heads * N, N, d.v_layers * cam))
+    add(_attn("vision", L, "pv", d.v_heads, d.v_heads, N, N, hd_v, d.v_layers * cam, note="per camera"))
     add(_gemm("vision", L, "o_proj", M, Hv, Hv, n))
     add(_ew("vision", L, "bias_o", "elementwise", "bias", M, Hv, n, weight_elems=Hv))
     add(_ew("vision", L, "residual_attn", "elementwise", "add", M, Hv, n, n_in=2))
@@ -304,7 +308,7 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
     add(_gemm("vision", L, "mlp_down", M, Hv, d.v_mlp, n))
     add(_ew("vision", L, "bias_down", "elementwise", "bias", M, Hv, n, weight_elems=Hv))
     add(_ew("vision", L, "residual_mlp", "elementwise", "add", M, Hv, n, n_in=2))
-    add(_ew("vision", "post", "ln_post", "norm", "layernorm", M, Hv, 1, weight_elems=2 * Hv))
+    add(_ew("vision", "post", "ln_post", "norm", "layernorm", M, Hv, k, weight_elems=2 * Hv))
 
     # ---- connector: pixel shuffle then one projection, all cameras together
     img_tok = cam * N // d.shuffle ** 2
