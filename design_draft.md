@@ -41,8 +41,11 @@ gaps follow from that:
 *   **Numbers do not line up.** The project's figures come from three input
     configurations (1 camera/256 tokens measured, 2 cameras/1024 tokens estimated,
     3 cameras/512x512 estimated) and two SoftHier machines that differ about 8x in
-    peak compute (PR1's 131 TFLOP/s arch without Spatz; the kernel repo's
-    16.4 TFLOP/s arch with Spatz). Without one reference workload, one reference arch
+    peak compute (PR1's 131 TFLOP/s arch; the kernel repo's 16.4 TFLOP/s arch). Spatz
+    is part of the default SoftHier cluster. PR1's arch file disabled it only because
+    softhier-mlir's first implementation does not generate Spatz code, so PR1's
+    measured numbers also exclude Spatz's effect on the cluster (for example its memory
+    ports). Without one reference workload, one reference arch
     and one definition of "bytes", an RQ baseline means nothing.
 *   **Colleagues cannot see the model or the compiler path.** The owner needs to
     discuss SmolVLA's operators and their compute needs, and how the compiler maps them
@@ -390,7 +393,8 @@ commit). It follows one action-expert layer and one SigLIP layer through these s
 
 A table maps each operator class to its unit in two columns:
 
-*   PR1's compiled path (no Spatz);
+*   PR1's compiled path (Spatz unused, because the compiler does not yet target it;
+    PR1's arch file therefore disabled it);
 *   the hand-written kernels on the stage-1 arch (FlatAttention, SUMMA GEMM, RMSNorm and
     activations, with Spatz for row math).
 
@@ -599,7 +603,7 @@ core research topic (spatial mapping).
 
 | ID  | Question                                                                                                                                                                                     | Metric                                  | Baseline (constants key, label)                                                                                                      |
 |-----|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| RQ1 | How much of the VLA's latency is row operations (softmax, norm, activation), and how much does a Spatz unit per cluster recover?                                                             | row-operation share of latency; latency | `pr1.rowop_share` 64.5 % (measured, PR1 arch, `pr1-1cam`); `pr1.libero_softmax_share` ~44 % (estimate, PR1 arch)                     |
+| RQ1 | How much of the VLA's latency is row operations (softmax, norm, activation), and how much is recovered by running them on each cluster's Spatz unit (which the compiler does not use yet)? | row-operation share of latency; latency | `pr1.rowop_share` 64.5 % (measured, PR1 arch, `pr1-1cam`); `pr1.libero_softmax_share` ~44 % (estimate, PR1 arch)                     |
 | RQ2 | For the bandwidth-bound action expert, how does time per flow step depend on HBM bandwidth and on keeping the KV cache and per-layer weight tiles on chip?                                   | ms per flow step; achieved GB/s         | `pr1.expert_step_ms` (measured, PR1 arch; value taken from the PR1 profile); FLOP per weight byte from the model (inference)         |
 | RQ3 | Given that vision, prefix and expert differ in FLOP per weight byte, does dividing the cluster mesh into regions per stage (pipelined across calls) beat running each stage on the whole mesh? | end-to-end latency; cluster utilization | `pr1.gemm_cluster_use` vision/prefix products use 1-10 of 16 clusters (measured, PR1 arch); `pr1.e2e_ms` 120.7 ms                    |
 | RQ4 | At iso-peak FP16 with Thor, what fraction of peak does SoftHier reach per stage, against Thor's per-stage figures?                                                                           | per-stage MFU on SoftHier vs Thor       | `pr1.mfu` 1.2 % of 131 TFLOP/s (measured, PR1 arch); Thor per-stage MFU from `wiki://knowledge/mfu-from-measurements.md` (inference) |
