@@ -256,7 +256,7 @@ The source is `experiments/smolvla-e2e-baseline/PROFILE.md` on the experiment br
 
 | Risk                                                                                                                          | Effect                                                         | Mitigation                                                                                                                                         |
 | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The Thor dense FP16 figure (258, derived from NVIDIA's sparse 517) is wrong, or assumes a power mode a robot would not use | the scaled cluster count and every RQ4 ratio shift             | constants hold 153 measured next to 258; the hardware table shows both; one constants edit changes the cluster count                               |
+| The Thor dense FP16 figure (258, VLA-HWBench's spec-derived value, FP8 517 / 2) is wrong, or assumes a power mode a robot would not use | the scaled cluster count and every RQ4 ratio shift             | constants hold 153 measured next to 258; the hardware table shows both; one constants edit changes the cluster count                               |
 | The 256-cluster arch cannot be built (TCDM banking with Spatz ports, 64 KiB instruction memory, mesh size)                   | RQ2-RQ4 are asked on a configuration the simulator cannot run  | the table is marked "proposal"; the measurement work starts with a build check of the scaled arch, and RQs fall back to the 16-cluster arch if it fails |
 | A starting point's arch differs from its RQ's arch (all starting points are PR1-arch, the RQs are stage-1-arch)               | readers compare numbers from different machines                | every starting point states its arch and label; the RQ index has an arch column                                                                    |
 | The standalone model drifts from what softhier-mlir emits (fusion, padding, new operators)                                   | operator table and RQ totals disagree with simulated runs      | the cross-check against PR1's programs runs in Part 1 and its per-stage numbers are asserted in the tests                                          |
@@ -264,8 +264,8 @@ The source is `experiments/smolvla-e2e-baseline/PROFILE.md` on the experiment br
 
 ## Open Questions
 
-*   **Thor power mode.** Whether NVIDIA's 517 sparse FP16 figure (and so the 258
-    derived figure) assumes the MAXN power mode (the unrestricted power setting) is not
+*   **Thor power mode.** Whether the spec peaks VLA-HWBench uses (FP8 517, and so FP16
+    258) assume the MAXN power mode (the unrestricted power setting) is not
     confirmed. The measured 153-155.5 TFLOP/s were taken at 120 W in one forum report.
 
 ## Critical User Journeys (CUJs)
@@ -378,7 +378,7 @@ arch:
     noc_link_bits: {value: 1024, unit: bit, label: measured, source: "arch.py:72"}
     clock_hz: {value: 1.0e9, unit: Hz, label: measured, source: "~/softhier@52859c3 pulp/pulp/chips/flex_cluster/flex_cluster.py:338"}
 thor:
-  fp16_dense: {value: 258, unit: TFLOP/s, label: inference, source: "NVIDIA Jetson Thor developer blog (517 TFLOP/s sparse FP16)", note: "517 / 2, assuming 2:4 sparsity doubles the figure; VLA-HWBench uses 258"}
+  fp16_dense: {value: 258, unit: TFLOP/s, label: inference, source: "wiki://resources/serving/vla-hwbench-edge-latency.md (VLA-HWBench Table 3: FP16 258, FP8 517)", note: "spec-derived by the paper; NVIDIA publishes no dense FP16 figure"}
   fp16_measured: {value: 153, unit: TFLOP/s, label: measured, source: "wiki://knowledge/mfu-from-measurements.md (Chalmers 2611.06710)"}
   fp16_forum: {value: 155.5, unit: TFLOP/s, label: measured, source: "NVIDIA developer forum t/344399", note: "self-reported, 120 W"}
   dram_bw: {value: 273, unit: GB/s, label: measured, source: "NVIDIA Jetson Thor developer blog"}
@@ -392,7 +392,8 @@ config and the kept LIBERO programs. `arch.pr1` copies PR1's parameters from
 per row, at the experiment-branch commit.
 
 Thor footnote in the constants file: 500 TFLOP/s (Google/Purdue) refers to DRIVE Thor,
-not Jetson Thor; 517 is NVIDIA's sparse FP16 figure. Neither is used.
+not Jetson Thor; 400 (VLA-Perf) has no stated method. Neither is used. 517 is Thor's FP8
+peak (VLA-HWBench Table 3) and is kept as `thor.fp8_dense` for the MFU rows.
 
 ### 3. Standalone SmolVLA model (`smolvla_ops.py`)
 
@@ -418,9 +419,9 @@ SoftHier library does. The wiki's per-part parameter table
 | `stage`          | vision, connector, prefix, expert                                                                           |
 | `layers`         | layer index or range (`0-11`)                                                                               |
 | `op`             | operator name (`q_proj`, `qk`, `softmax`, `pv`, `o_proj`, `mlp_up`, `gelu`, `layernorm`, `rmsnorm`, `rope`) |
-| `class`          | gemm, attn, norm, acti, softmax, elementwise                                                                |
-| `shape`          | (M, N, K) for matrix products; (rows, cols) otherwise                                                       |
-| `count`          | instances per call = layers x heads x flow steps that apply                                                 |
+| `class`          | gemm, attn, norm, acti, softmax, elementwise, data (transpose, pixel shuffle)                               |
+| `shape`          | (M, N, K) for matrix products; (h, Sq, Skv, d) for attention; (rows, cols) otherwise                        |
+| `count`          | instances per call = layers x flow steps that apply (x cameras for vision attention only)                   |
 | `flop`           | per call, all instances                                                                                     |
 | `bytes_unique`   | weights + inputs + outputs, each counted once per instance as defined below, fp16                          |
 | `bytes_weight`   | weight bytes per call as defined below                                                                      |
@@ -433,18 +434,19 @@ otherwise be off by about 10x:
 
 *   *Layers:* each layer has its own weights, so `bytes_weight` scales with the number
     of layers.
-*   *Heads:* heads slice one weight matrix, so `bytes_weight` does not scale with
-    heads. Activation bytes do.
+*   *Heads and batched cameras:* they share one weight matrix and are folded into the
+    shape, so `bytes_weight` does not scale with them. Vision cameras are batched into
+    the token rows of every per-token operator; attention runs per camera.
 *   *Flow steps:* the expert's weights do not fit on chip, so they are read again in
     every step. `bytes_weight` scales with flow steps. The page states this assumption.
-*   `bytes_unique` counts activations per instance, so it scales with all three.
+*   `bytes_unique` counts inputs, outputs and weights per instance, times `count`.
 
 **FLOP and byte formulas per class** (fp16, 2 B per element; `h` = heads, `hkv` = KV
 heads, `d` = head dim, `Sq`/`Skv` = query/key length):
 
 | Class                        | FLOP                                          | `bytes_weight`        | `bytes_unique`                                                               |
 | ---------------------------- | --------------------------------------------- | --------------------- | ---------------------------------------------------------------------------- |
-| gemm (M x K) . (K x N)       | 2 M N K (+ M N with bias)                     | 2 K N (+ 2 N bias)    | 2 (M K + M N) + `bytes_weight`                                               |
+| gemm (M x K) . (K x N)       | 2 M N K                                       | 2 K N                 | 2 (M K + M N) + `bytes_weight`                                               |
 | attn: QK^T                   | 2 h Sq Skv d                                  | 0                     | 2 (h Sq d + hkv Skv d) (score matrix not counted: intermediate)             |
 | attn: P.V                    | 2 h Sq Skv d                                  | 0                     | 2 (hkv Skv d + h Sq d)                                                       |
 | softmax (rows x cols)        | 5 per element (max, subtract, exp, sum, divide) | 0                   | 2 x 2 rows cols                                                              |
@@ -453,7 +455,12 @@ heads, `d` = head dim, `Sq`/`Skv` = query/key length):
 | acti: GELU (tanh form)       | 8 per element                                 | 0                     | 2 x 2 elements                                                               |
 | acti: SiLU x up (expert MLP) | 5 per element                                 | 0                     | 2 x 3 elements                                                               |
 | elementwise: RoPE            | 3 per element                                 | 0                     | 2 x 2 elements                                                               |
-| elementwise: add, bias       | 1 per element                                 | 0                     | 2 x 3 elements                                                               |
+| elementwise: residual add    | 1 per element                                 | 0                     | 2 x 3 elements                                                               |
+| elementwise: bias add        | 1 per element                                 | 2 N                   | 2 x 2 elements + `bytes_weight`                                              |
+
+Bias adds are separate rows, as in PR1's programs, so matrix-product FLOP compare
+directly with RedMulE work. `docs/analysis/conventions.md` holds the full table (also
+SiLU, scale, Euler update, data movement).
 
 The per-element FLOP counts for non-matrix classes are conventions (labelled inference
 on the page). They are small next to matrix products. The cost of these operators on
@@ -476,6 +483,19 @@ checked in the tests.
 **`stage_totals(rows)`** returns, per model stage: FLOP, matrix-product FLOP,
 `bytes_unique`, `bytes_weight` and FLOP per weight byte. Part 1 needs only these.
 
+**Reference computation and `Lowering`.** `build` follows the reference code (lerobot
+SmolVLA) at true token counts. A `Lowering` records a compiled program's shape choices
+and rewrites. PR1's (`pr1_lowering`) has four, all found while implementing the
+cross-check:
+
+*   prefix rows padded for RedMulE (65 to 128, 177 to 256), read from the prefix program;
+*   expert attention key length padded to a multiple of 32 inside the runtime
+    (softhier-mlir `b11cd5f` `runtime/sh_expert.inc.c:83`), not visible in the program;
+*   the cross-attention K/V projection of the prefix done once per call (the reference
+    code repeats it every step);
+*   the time-MLP input projection split: the time half is one row, the same for all chunk
+    tokens, and is folded into the bias on the host.
+
 ### 4. Cross-check against PR1's compiled programs (Part 1)
 
 The owner chose option (a) of the review: compare against the programs PR1 actually
@@ -493,19 +513,22 @@ programs (`arith`, `scf.for`, fused attention).
     *   The parser is PR1's `parse_profile.py` (standard library only; its
         `parse_mlir` and `flatten` expand `scf.for` and label `cross_attention`). It is
         loaded from a path given on the command line, at the experiment-branch commit.
-*   **Padding:** PR1 pads token counts for RedMulE (for example, prefix rows 128 for
-    65 tokens). The script reads the padded token counts per model stage from the
-    flattened programs. It evaluates the model twice: at those padded counts
-    ("padded") and at the true counts ("unpadded").
+*   **Shapes from the programs:** the script reads vision rows, the padded prefix rows
+    and the true prefix token count (cross-attention key rows) from the flattened
+    programs, checks the token counts against the model, and evaluates the model three
+    times: with `pr1_lowering` ("padded"), with PR1's rewrites at true counts
+    ("unpadded"), and as the reference computation.
 *   **Fused attention:** each head's QK^T and P.V count as 2 h Sq Skv d each, which
     matches the two RedMulE operations per head that `ops.csv` records.
 *   **Pass rule:** for each model stage, the padded model's matrix-product FLOP must be
     within 1 % of the sum of `redmule_flops` in `ops.csv` (G4a runs scaled with PR1's
     recipe for `libero-2cam`). The script exits non-zero otherwise.
+*   **Result (run 2026-11-12):** PASS. Every stage of both workloads is within
+    0.011 %; the residual is the one-row time half that PR1 runs on the host. Padding
+    adds 99 % to PR1's prefix matrix work for `pr1-1cam` and 47 % for `libero-2cam`.
 *   **Outputs:**
-    *   `docs/analysis/crosscheck.md`: a table per workload of stage, model FLOP padded
-        and unpadded, PR1 RedMulE FLOP, difference, and padding overhead (unpadded
-        against padded);
+    *   `docs/analysis/crosscheck.md`: a table per workload of stage, model FLOP padded,
+        unpadded and reference, PR1 RedMulE FLOP, difference, and padding overhead;
     *   `docs/analysis/crosscheck.json`: the same numbers, which `test_smolvla_ops.py`
         asserts so later model changes cannot drift silently.
 
@@ -660,10 +683,11 @@ The front-matter carries `follows: [basic-integration-of-components.md]`, `evide
 *   **Cons**: the expert is bandwidth-bound at batch size 1, so inheriting SoftHier's
     bandwidth silently would favour SoftHier.
 *   **Reason for Rejection (partial)**: iso-peak FP16 by cluster count is kept. On Thor,
-    vision and the ~2k-token prefix of `libero-2cam` reach about 2000 FLOP per weight
-    byte, against Thor's balance of 258 TFLOP/s / 273 GB/s ≈ 945 FLOP/B. This is an
-    estimate from the brainstorm and is re-derived by the model in Part 1; the claim
-    is limited to Thor. Bandwidth is a provisional, labelled parameter, never matched
+    the standalone model gives `libero-2cam` vision 2,489 FLOP per weight byte, above
+    Thor's balance of 258 TFLOP/s / 273 GB/s = 945 FLOP/B, while the prefix (183) and the
+    expert (55) are below it (inference, cross-checked; the brainstorm's "about 2000 for
+    vision and prefix" overstated the prefix). So only vision is compute-bound on Thor;
+    the claim is limited to Thor. Bandwidth is a provisional, labelled parameter, never matched
     silently.
 
 ### Alternative C: Wiki process alternatives (amend 0013 here; date-ordered status log; patch log mirroring the README)
@@ -847,15 +871,16 @@ one pull request to `main`. Commits use the repo's `[step] area: message` style.
 *   **Type / Scope**: Python module.
 *   **Proposed Changes**:
     *   `OpRow` (frozen dataclass) with the §3 columns.
-    *   `build(workload_id, *, padded_tokens: dict[str, int] | None = None) -> list[OpRow]`,
-        using the dimension sources, formulas and count rule of §3.
+    *   `build(constants, workload_id, lowering: Lowering | None = None) -> list[OpRow]`,
+        using the dimension sources, formulas and count rule of §3; `Lowering` and
+        `pr1_lowering(prefix_rows)` as in §3.
     *   `stage_totals(rows) -> dict[str, StageTotals]`.
     *   Part 1 fills every column except `unit_today` and `hand_kernel`.
 
 ##### 10. `infra/workload-modeling/workload_modeling/crosscheck.py` (Create)
 
 *   **Type / Scope**: command, run by hand.
-*   **Proposed Changes**: `python -m workload_modeling.crosscheck --parse-profile <path to parse_profile.py> --pr1 <published-fixi-rung6 dir> --libero <libero-G4a dir>`.
+*   **Proposed Changes**: `python -m workload_modeling.crosscheck --parse-profile <path to parse_profile.py> --pr1 <published-fixi-rung6 dir> --libero <libero-G4a dir> --experiment-commit <sha>`.
     *   It loads `parse_profile.py` by path (standard library only) and reads padded
         token counts from the flattened programs.
     *   It runs the model padded and unpadded, compares against the `redmule_flops`
