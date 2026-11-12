@@ -169,6 +169,19 @@ DRAMSys HBM. Label: measured per call. Values, tile settings and sources: `const
 `hand_kernels`. "in `qk`" marks work done inside that row's kernel call: FlatAttention runs QK^T, softmax and
 P.V in one call and transposes K on chip.
 
+Hardware the kernels ran on: the kernel repo's arch file (`constants.yaml` section `arch.stage1`). Read from
+the arch file: measured; totals computed from it: inference.
+
+| part | setting |
+| --- | --- |
+| mesh | 4 x 4 = 16 clusters at 1 GHz |
+| cluster | 5 Snitch cores: 4 with a Spatz vector unit (4 FPUs, VLEN 16384 bit), one data-mover core driving the iDMA |
+| matrix unit | RedMulE 32 x 16 CE per cluster, fp16: 1.024 TFLOP/s per cluster, 16.4 TFLOP/s in total |
+| L1 (TCDM) | 384 KiB per cluster, 6 MiB in total |
+| NoC | 1024-bit links |
+| HBM | 8 channels on the west and east edges, DRAMSys model (JEDEC HBM2E-4000, 64-bit, 2000 MHz, DDR); 64 GB/s per channel, 512 GB/s in total (inference: from DRAMSys's utilization report; the memspec alone gives half) |
+| balance | peak / HBM bandwidth = 32 FLOP per byte: an operator below this FLOP per byte of HBM traffic is bandwidth-bound here |
+
 | kernel | operators | output checked | how it was run |
 | --- | --- | --- | --- |
 | SummaGEMM | every matrix product | no (upstream preload: placeholder data) | M, N, K padded up to 4 x tile; tiles: fastest of a sweep per shape |

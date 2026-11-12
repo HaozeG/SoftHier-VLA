@@ -81,6 +81,24 @@ def kernel_sums(c, workload_id: str, rows: list[m.OpRow]) -> dict:
             "share": {g: f"{100 * v / grand:.0f}" if grand else "0" for g, v in tot.items()}}
 
 
+def hardware(c, arch: str = "stage1") -> dict:
+    """Arch parameters the hand-kernel times were measured on, plus totals computed from them."""
+    raw = lambda k: c.get(f"arch.{arch}.{k}").value
+    v = lambda k: (lambda x: int(x) if x == int(x) else x)(c.value(f"arch.{arch}.{k}"))
+    peak = c.peak_total(arch)
+    bw = v("hbm_channels") * v("hbm_bw_per_channel") * 1e9
+    return {
+        "mesh": f"{v('clusters_x')} x {v('clusters_y')}", "clusters": c.clusters(arch),
+        "clock_ghz": f"{v('clock_hz') / 1e9:g}", "cores": v("cores_per_cluster"), "spatz_cores": v("spatz_cores"),
+        "spatz_fu": v("spatz_function_units"), "vlen": v("spatz_vlen_bits"),
+        "redmule": f"{v('redmule_h')} x {v('redmule_w')}", "tcdm_kib": v("tcdm_bytes") // 1024,
+        "tcdm_total_mib": f"{c.clusters(arch) * v('tcdm_bytes') / 2**20:g}", "noc_bits": v("noc_link_bits"),
+        "hbm_channels": v("hbm_channels"), "hbm_device": raw("hbm_device"), "hbm_bw_ch": v("hbm_bw_per_channel"),
+        "hbm_bw_total": f"{bw / 1e9:g}", "peak_cluster": f"{c.peak_per_cluster(arch) / 1e12:.3f}",
+        "peak_total": f"{peak / 1e12:.1f}", "balance": f"{peak / bw:.0f}",
+    }
+
+
 def context(c, workload_id: str) -> dict:
     wl = c.workloads[workload_id]
     d = m.load_dims(wl)
@@ -108,7 +126,7 @@ def context(c, workload_id: str) -> dict:
     n_vis = m.vision_tokens(wl, d)
     tok = {"vision_out": n_vis, "image": wl.cameras * n_vis // d.shuffle ** 2, "prefix": m.prefix_tokens(wl, d)}
     return {"wl": wl, "d": d, "s": stages, "stages": list(m.STAGES), "total": total, "classes": classes,
-            "rows": view, "notes": STAGE_NOTES, "tok": tok, "_rows": rows, "ksum": kernel_sums(c, workload_id, rows),
+            "rows": view, "notes": STAGE_NOTES, "tok": tok, "_rows": rows, "ksum": kernel_sums(c, workload_id, rows), "hw": hardware(c),
             "kernel_repo": "HaozeG/gvsoc@580ac85 (branch gelu-layernorm-kernels)"}
 
 

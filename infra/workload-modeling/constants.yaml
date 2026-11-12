@@ -59,6 +59,10 @@ arch:
     noc_link_bits: {value: 1024, unit: bit, label: measured, source: "arch.py:72"}
     instruction_mem_bytes: {value: 65536, unit: B, label: measured, source: "arch.py:76 (0x10000)"}
     clock_hz: {value: 1.0e9, unit: Hz, label: measured, source: "~/softhier@52859c3 pulp/pulp/chips/flex_cluster/flex_cluster.py:338"}
+    spatz_vlen_bits: {value: 16384, unit: bit, label: measured, source: "~/softhier@52859c3 Spatz model (row of 4096 fp16 at e16/m4 is one strip)"}
+    hbm_channels: {value: 8, unit: "", label: measured, source: "arch.py:66 hbm_chan_placement = [4,0,0,4] (west 4, east 4)"}
+    hbm_device: {value: "JEDEC HBM2E-4000, 64-bit, 2000 MHz, DDR", unit: "", label: measured, source: "~/softhier@52859c3 core/models/memory/dramsys.cpp:128 -> dramsys_configs/hbm2-example.json -> memspec/JEDEC_16Gb_HBM2E-4000.json"}
+    hbm_bw_per_channel: {value: 64, unit: GB/s, label: inference, source: "DRAMSys report in kernel runs: AVG BW\\IDLE 453.29 Gb/s = 88.53 %", note: "full scale implied by DRAMSys's own utilization line; the memspec alone (64 bit x 4000 MT/s) gives 32 GB/s; difference not resolved"}
   pr1:
     repo: "third_party GVSoC soft_hier_release, PR1 arch file"
     file: "experiments/smolvla-e2e-baseline/profile/hw_spec.csv@68cd4eb"
