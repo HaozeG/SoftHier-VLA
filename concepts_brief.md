@@ -272,7 +272,50 @@ Decided by the owner during ideation:
 - Wiki: new `memories/status/` and `memories/patches/` areas approved. Patch files stay
   canonical in the code repo.
 
-Proposed staging (from the review, not yet decided):
+Decided by the owner after review round 1:
+
+- **Stage-1 arch:** the kernel-repo arch (5 cores per cluster, Spatz on 4 cores, RedMulE
+  32x16, 384 KiB TCDM, ~16.4 TFLOP/s at 16 clusters). All parameters stay configurable
+  and the owner may change them later.
+- **Thor alignment:** iso-peak-FLOPS at fp16 only. The knob is cluster count. HBM
+  capacity grows so the model fits. Spatz FLOPs do not count toward peak. Bandwidth
+  stays open for discussion. The Thor figure comes from ingested papers or other cited
+  sources (being looked up). If the dense 16-bit figure is 258 TFLOP/s, matching needs
+  about 16x the clusters (~256, e.g. a 16x16 mesh); this is arithmetic, not a validated
+  build.
+  - Caveat kept from the review: the owner's reason is that prefill is compute-bound
+    in benchmark papers. That holds on RTX 4090 (OpenVLA prefill 86 % compute-bound),
+    but on Jetson the wiki records π0.5 prefill near the ridge and GR00T N1.7 prefill
+    memory-bound. For SmolVLA on `libero-2cam`, vision and the ~2k-token prefill reach
+    about 2000 FLOP per weight byte (estimate), above Thor's balance of about 950 FLOP/B,
+    so they are compute-bound. The action expert stays bandwidth-bound, and it is the
+    largest latency share. Any RQ about the expert must state this.
+- **Primary workload:** `libero-2cam`.
+- **Baselines:** both measured numbers and labelled analytical estimates are allowed.
+- **Hand-tuned reference kernels:** only the four in `~/softhier/implementation`
+  (attn = FlatAttention, gemm = SUMMA, norm = RMSNorm, acti = Sigmoid/ReLU/SiLU) count
+  as hand-tuned optimal. Other kernels seen in local logs are ignored.
+- **Pattern table** (`workload-modeling/pattern-table.md`): derived from the wiki, part
+  of the owner's idea forming while analyzing workloads. Proposed home: the research
+  plan's working material (e.g. `docs/research-plan/working/`), tracked, with its
+  existing evidence labels.
+- **Naming of levels:** in this brief "S1" means the whole SmolVLA and "S0" a fast
+  MLP/transformer controller on the same chip. This conflicts with the wiki glossary
+  (System 2 = VLM, System 1 = action policy). The naming used in recent papers is being
+  looked up before anything goes into the glossary.
+- **Wiki changes:** done in a separate wiki-development session (new wiki-design decision
+  for `memories/status/` and `memories/patches/`, lint note types, first status entry,
+  patch log keyed by finding ID, recovery of the uncommitted first-baseline decision,
+  hardware glossary rows). The missing decision was found as an uncommitted draft in the
+  `smolvla-e2e-baseline` worktree's wiki copy.
+- **Naming of the next deliverables:** the owner expects the plan to change, so a fixed
+  label like "PR2a" is misleading. Proposed instead: name each piece of work by its
+  content, the same rule as status-log themes, e.g. branch `problem-definition` for the
+  problem statement, conventions, constants, hardware table and RQs; branch
+  `model-and-compiler-explainer` for the operator table and compiler walk-through. The
+  research plan's README records which pieces exist and their status.
+
+Proposed staging (from the review; labels below are working names, see naming above):
 
 - **Step 0, wiki-development session:**
   - Write a new wiki-design decision allowing labelled estimates in `memories/status/`
@@ -294,19 +337,14 @@ Proposed staging (from the review, not yet decided):
 - **PR3, measurement:** hand kernels on SmolVLA shapes on the chosen arch, then the
   bounded fusion estimates calibrated against them.
 
-Open questions for the owner (needed before PR2a):
+Still open:
 
-1. Which workload is primary: `pr1-1cam` (measured), `libero-2cam` (matches the
-   evaluation and the softmax-heavy case), or `release-3cam`?
-2. Which Thor figure and source? Is a measured SmolVLA-on-Thor latency available? Is
-   int8/fp8 in scope?
-3. Which knob matches Thor (cluster count, RedMulE size, NoC width or channels)? Should
-   HBM capacity grow so the model fits? Do Spatz FLOPs count toward peak?
-4. Stage-1 arch: PR1's 131 TFLOP/s arch with Spatz added, the kernel repo's 16.4 TFLOP/s
-   arch, or a new one?
-5. S2/S1/S0: is the policy "S1" all of SmolVLA, or only the action expert with the VLM
-   as S2? Is co-location an RQ now or roadmap only?
-6. Baselines: measured only, or are labelled analytical estimates allowed?
-7. Where does `workload-modeling/pattern-table.md` live, and is it tracked?
-8. Do the other kernels seen in `~/softhier` logs (spatz_relu, softmax_dp,
-   fused_eltwise, flash_mla) exist on another branch?
+1. The Thor dense fp16 figure and its source (lookup running; wiki has 258, 400 and
+   153 measured).
+2. The level naming convention from recent papers (lookup running), then one project
+   glossary entry.
+3. Is co-location of S0 with the policy an RQ in stage 1 (with a stand-in S0 model,
+   rate and deadline), or roadmap only?
+4. The measured PR1 baseline ran on the 131 TFLOP/s arch, not the chosen 16.4 TFLOP/s
+   arch. Measured baselines on the chosen arch need new runs (next measurement PR);
+   until then, RQ baselines on the chosen arch are estimates.
