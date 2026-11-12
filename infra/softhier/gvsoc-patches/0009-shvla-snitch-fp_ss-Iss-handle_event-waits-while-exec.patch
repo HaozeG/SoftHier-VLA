@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 17:46:24 +0100
+Subject: [PATCH 09/10] [shvla] snitch fp_ss: Iss::handle_event waits while
+ exec.is_stalled() (IO_REQ_PENDING FP access, SIMULATOR_NOTES #1)
+
+Offloaded FP loads/stores to HBM / L3 / remote TCDM return IO_REQ_PENDING; the
+subsystem completed them after the fixed latency anyway (optimistic timing, stale
+freg, in-flight IoReq reuse). Guard is the first statement of handle_event, before
+acc_req_ready=true: re-enqueue(1) until Lsu::data_response has called stalled_dec.
+
+Two places: nested core working tree snitch/snitch_fp_ss.cpp and a new file section
+in soft_hier/gvsoc_core.patch (applies without fuzz to pristine nested core HEAD
+bda268a4, cmp-identical). The author's gvsoc_snitch_fp_ss_pending.patch was not
+available; reconstructed from SIMULATOR_NOTES #1.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ soft_hier/gvsoc_core.patch | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/soft_hier/gvsoc_core.patch b/soft_hier/gvsoc_core.patch
+index b10d5ed..8ed25b1 100644
+--- a/soft_hier/gvsoc_core.patch
++++ b/soft_hier/gvsoc_core.patch
+@@ -3440,6 +3440,27 @@ index c7b46b87..d4cb9adb 100644
+  
+      // -----------USE MASTER AND SLAVE PORT TO HANDLE OFFLOAD REQUEST------------------
+      this->event = this->top.event_new((vp::Block *)this, handle_event);
++diff --git a/models/cpu/iss/src/snitch/snitch_fp_ss.cpp b/models/cpu/iss/src/snitch/snitch_fp_ss.cpp
++index ab1fe855..86eb4ab2 100644
++--- a/models/cpu/iss/src/snitch/snitch_fp_ss.cpp
+++++ b/models/cpu/iss/src/snitch/snitch_fp_ss.cpp
++@@ -246,6 +246,16 @@ void Iss::handle_event(vp::Block *__this, vp::ClockEvent *event)
++ {
++     Iss *_this = (Iss *)__this;
++ 
+++    // An offloaded FP load/store to HBM, L3 or remote TCDM returns IO_REQ_PENDING: the LSU stalls
+++    // this subsystem (exec.insn_stall) until Lsu::data_response. Do not complete the instruction
+++    // (and do not report the subsystem ready) before that response has arrived; retry next cycle.
+++    // (SIMULATOR_NOTES #1, gvsoc_snitch_fp_ss_pending.patch)
+++    if (_this->exec.is_stalled())
+++    {
+++        _this->event->enqueue(1);
+++        return;
+++    }
+++
++     _this->acc_req_ready = true;
++     
++     iss_reg_t pc = _this->acc_req.pc;
+ diff --git a/models/cpu/iss/src/spatz.cpp b/models/cpu/iss/src/spatz.cpp
+ index e4cb6c51..4db4b1a3 100644
+ --- a/models/cpu/iss/src/spatz.cpp

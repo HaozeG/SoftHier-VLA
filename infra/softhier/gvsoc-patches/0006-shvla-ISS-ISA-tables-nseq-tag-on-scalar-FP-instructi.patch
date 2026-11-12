@@ -1,0 +1,167 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 13:54:38 +0100
+Subject: [PATCH 06/10] [shvla] ISS ISA tables: nseq tag on scalar FP
+ instructions with an integer operand (SIMULATOR_NOTES #10)
+
+Scalar .s/.h/.ah/.b feq flt fle fcvt.w fcvt.wu fcvt.<fmt>.w fcvt.<fmt>.wu fmv.x fclass fmv.<fmt>.x
+lacked the nseq tag that the .d versions have, so they were queued in the FPU
+sequence buffer and the integer core read the destination register before the
+FP subsystem wrote it (late write-back clobbers newer values). Mirrors Rv32d.
+
+Two places: isa_riscv_gen.py and isa_smallfloats.py in the patched nested core
+working tree, and two new file sections in soft_hier/gvsoc_core.patch (applies
+without fuzz to pristine nested core HEAD bda268a4, cmp-identical).
+Evidence: LOG G3.2-diag (rung c H/G/OUT, rungs 3-5 inf/nan after the first
+scalar FP row op). The author's gvsoc_snitch_fp_int_nseq.patch was not
+available; tag set reconstructed from SIMULATOR_NOTES #10.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ soft_hier/gvsoc_core.patch | 126 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 126 insertions(+)
+
+diff --git a/soft_hier/gvsoc_core.patch b/soft_hier/gvsoc_core.patch
+index a3cd3ac..b10d5ed 100644
+--- a/soft_hier/gvsoc_core.patch
++++ b/soft_hier/gvsoc_core.patch
+@@ -3049,6 +3049,41 @@ index 8b348cd0..93155b84 100644
+  
+  };
+  
++diff --git a/models/cpu/iss/isa_gen/isa_riscv_gen.py b/models/cpu/iss/isa_gen/isa_riscv_gen.py
++index dff3e538..0c369839 100644
++--- a/models/cpu/iss/isa_gen/isa_riscv_gen.py
+++++ b/models/cpu/iss/isa_gen/isa_riscv_gen.py
++@@ -601,18 +601,18 @@ class Rv32f(IsaSubset):
++             Instr('fmin.s',    Format_RF, '0010100 ----- ----- 000 ----- 1010011', tags=['fconv', 'fnoncomp', 'fp_op']),
++             Instr('fmax.s',    Format_RF, '0010100 ----- ----- 001 ----- 1010011', tags=['fconv', 'fnoncomp', 'fp_op']),
++ 
++-            Instr('feq.s',    Format_RF2, '1010000 ----- ----- 010 ----- 1010011', tags=['fother', 'fp_op']),
++-            Instr('flt.s',    Format_RF2, '1010000 ----- ----- 001 ----- 1010011', tags=['fother', 'fp_op']),
++-            Instr('fle.s',    Format_RF2, '1010000 ----- ----- 000 ----- 1010011', tags=['fother', 'fp_op']),
++-
++-            Instr('fcvt.w.s', Format_R2F1,'1100000 00000 ----- --- ----- 1010011', tags=['fconv', 'fp_op']),
++-            Instr('fcvt.wu.s',Format_R2F1,'1100000 00001 ----- --- ----- 1010011', tags=['fconv', 'fp_op']),
++-            Instr('fcvt.s.w', Format_R2F2,'1101000 00000 ----- --- ----- 1010011', tags=['fconv', 'fp_op']),
++-            Instr('fcvt.s.wu',Format_R2F2,'1101000 00001 ----- --- ----- 1010011', tags=['fconv', 'fp_op']),
++-
++-            Instr('fmv.x.s',   Format_R3F,'1110000 00000 ----- 000 ----- 1010011', tags=['fmv', 'fp_op']),
++-            Instr('fclass.s',  Format_R3F,'1110000 00000 ----- 001 ----- 1010011', tags=['fother', 'fp_op']),
++-            Instr('fmv.s.x',  Format_R3F2,'1111000 00000 ----- 000 ----- 1010011', tags=['fmv', 'fp_op']),
+++            Instr('feq.s',    Format_RF2, '1010000 ----- ----- 010 ----- 1010011', tags=['fother', 'nseq', 'fp_op']),
+++            Instr('flt.s',    Format_RF2, '1010000 ----- ----- 001 ----- 1010011', tags=['fother', 'nseq', 'fp_op']),
+++            Instr('fle.s',    Format_RF2, '1010000 ----- ----- 000 ----- 1010011', tags=['fother', 'nseq', 'fp_op']),
+++
+++            Instr('fcvt.w.s', Format_R2F1,'1100000 00000 ----- --- ----- 1010011', tags=['fconv', 'nseq', 'fp_op']),
+++            Instr('fcvt.wu.s',Format_R2F1,'1100000 00001 ----- --- ----- 1010011', tags=['fconv', 'nseq', 'fp_op']),
+++            Instr('fcvt.s.w', Format_R2F2,'1101000 00000 ----- --- ----- 1010011', tags=['fconv', 'nseq', 'fp_op']),
+++            Instr('fcvt.s.wu',Format_R2F2,'1101000 00001 ----- --- ----- 1010011', tags=['fconv', 'nseq', 'fp_op']),
+++
+++            Instr('fmv.x.s',   Format_R3F,'1110000 00000 ----- 000 ----- 1010011', tags=['fmv', 'nseq', 'fp_op']),
+++            Instr('fclass.s',  Format_R3F,'1110000 00000 ----- 001 ----- 1010011', tags=['fother', 'nseq', 'fp_op']),
+++            Instr('fmv.s.x',  Format_R3F2,'1111000 00000 ----- 000 ----- 1010011', tags=['fmv', 'nseq', 'fp_op']),
++ 
++             # If RV64F supported
++             Instr('fcvt.l.s', Format_R2F1,'1100000 00010 ----- --- ----- 1010011', tags=['fconv', 'fp_op'], isa_tags=['rv64f']),
+ diff --git a/models/cpu/iss/isa_gen/isa_rvv.py b/models/cpu/iss/isa_gen/isa_rvv.py
+ index 3c39da9e..d6e0dbff 100644
+ --- a/models/cpu/iss/isa_gen/isa_rvv.py
+@@ -3246,6 +3281,97 @@ index 3c39da9e..d6e0dbff 100644
+              #                           V 1.0
+              Instr('vsetvli' ,   Format_OPVLI,    '- ----------- ----- 111 ----- 1010111'), # zimm = {3'b000,vma,vta,vsew[2:0],vlmul[2:0]}
+  
++diff --git a/models/cpu/iss/isa_gen/isa_smallfloats.py b/models/cpu/iss/isa_gen/isa_smallfloats.py
++index 1c006e13..b03df94f 100644
++--- a/models/cpu/iss/isa_gen/isa_smallfloats.py
+++++ b/models/cpu/iss/isa_gen/isa_smallfloats.py
++@@ -74,18 +74,18 @@ class Xf16(IsaSubset):
++             Instr('fmin.h',    Format_RF, '0010110 ----- ----- 000 ----- 1010011', tags=['sfconv', 'fp_op']),
++             Instr('fmax.h',    Format_RF, '0010110 ----- ----- 001 ----- 1010011', tags=['sfconv', 'fp_op']),
++ 
++-            Instr('feq.h',    Format_RF2, '1010010 ----- ----- 010 ----- 1010011', tags=['sfother', 'fp_op']),
++-            Instr('flt.h',    Format_RF2, '1010010 ----- ----- 001 ----- 1010011', tags=['sfother', 'fp_op']),
++-            Instr('fle.h',    Format_RF2, '1010010 ----- ----- 000 ----- 1010011', tags=['sfother', 'fp_op']),
+++            Instr('feq.h',    Format_RF2, '1010010 ----- ----- 010 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
+++            Instr('flt.h',    Format_RF2, '1010010 ----- ----- 001 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
+++            Instr('fle.h',    Format_RF2, '1010010 ----- ----- 000 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
++ 
++-            Instr('fcvt.w.h', Format_R2F1,'1100010 00000 ----- --- ----- 1010011', tags=['sfconv', 'fp_op']),
++-            Instr('fcvt.wu.h',Format_R2F1,'1100010 00001 ----- --- ----- 1010011', tags=['sfconv', 'fp_op']),
++-            Instr('fcvt.h.w', Format_R2F2,'1101010 00000 ----- --- ----- 1010011', tags=['sfconv', 'fp_op']),
++-            Instr('fcvt.h.wu',Format_R2F2,'1101010 00001 ----- --- ----- 1010011', tags=['sfconv', 'fp_op']),
+++            Instr('fcvt.w.h', Format_R2F1,'1100010 00000 ----- --- ----- 1010011', tags=['sfconv', 'nseq', 'fp_op']),
+++            Instr('fcvt.wu.h',Format_R2F1,'1100010 00001 ----- --- ----- 1010011', tags=['sfconv', 'nseq', 'fp_op']),
+++            Instr('fcvt.h.w', Format_R2F2,'1101010 00000 ----- --- ----- 1010011', tags=['sfconv', 'nseq', 'fp_op']),
+++            Instr('fcvt.h.wu',Format_R2F2,'1101010 00001 ----- --- ----- 1010011', tags=['sfconv', 'nseq', 'fp_op']),
++ 
++-            Instr('fmv.x.h',   Format_R3F,'1110010 00000 ----- 000 ----- 1010011', tags=['sfother', 'fp_op']),
++-            Instr('fclass.h',  Format_R3F,'1110010 00000 ----- 001 ----- 1010011', tags=['sfother', 'fp_op']),
++-            Instr('fmv.h.x',  Format_R3F2,'1111010 00000 ----- 000 ----- 1010011', tags=['sfother', 'fp_op']),
+++            Instr('fmv.x.h',   Format_R3F,'1110010 00000 ----- 000 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
+++            Instr('fclass.h',  Format_R3F,'1110010 00000 ----- 001 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
+++            Instr('fmv.h.x',  Format_R3F2,'1111010 00000 ----- 000 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
++ 
++             # If RV64Xf16 supported
++             Instr('fcvt.l.h', Format_R2F1,'1100010 00010 ----- --- ----- 1010011', tags=['sfconv', 'fp_op'], isa_tags=['rv64f16']),
++@@ -136,18 +136,18 @@ class Xf16alt(IsaSubset):
++             Instr('fmin.ah',    Format_RF, '0010110 ----- ----- 100 ----- 1010011', tags=['sfconv']),
++             Instr('fmax.ah',    Format_RF, '0010110 ----- ----- 101 ----- 1010011', tags=['sfconv']),
++ 
++-            Instr('feq.ah',    Format_RF2, '1010010 ----- ----- 110 ----- 1010011', tags=['sfother']),
++-            Instr('flt.ah',    Format_RF2, '1010010 ----- ----- 101 ----- 1010011', tags=['sfother']),
++-            Instr('fle.ah',    Format_RF2, '1010010 ----- ----- 100 ----- 1010011', tags=['sfother']),
+++            Instr('feq.ah',    Format_RF2, '1010010 ----- ----- 110 ----- 1010011', tags=['sfother', 'nseq']),
+++            Instr('flt.ah',    Format_RF2, '1010010 ----- ----- 101 ----- 1010011', tags=['sfother', 'nseq']),
+++            Instr('fle.ah',    Format_RF2, '1010010 ----- ----- 100 ----- 1010011', tags=['sfother', 'nseq']),
++ 
++-            Instr('fcvt.w.ah', Format_R2F1,'1100010 00000 ----- 101 ----- 1010011', tags=['sfconv']),
++-            Instr('fcvt.wu.ah',Format_R2F1,'1100010 00001 ----- 101 ----- 1010011', tags=['sfconv']),
++-            Instr('fcvt.ah.w', Format_R2F2,'1101010 00000 ----- 101 ----- 1010011', tags=['sfconv']),
++-            Instr('fcvt.ah.wu',Format_R2F2,'1101010 00001 ----- 101 ----- 1010011', tags=['sfconv']),
+++            Instr('fcvt.w.ah', Format_R2F1,'1100010 00000 ----- 101 ----- 1010011', tags=['sfconv', 'nseq']),
+++            Instr('fcvt.wu.ah',Format_R2F1,'1100010 00001 ----- 101 ----- 1010011', tags=['sfconv', 'nseq']),
+++            Instr('fcvt.ah.w', Format_R2F2,'1101010 00000 ----- 101 ----- 1010011', tags=['sfconv', 'nseq']),
+++            Instr('fcvt.ah.wu',Format_R2F2,'1101010 00001 ----- 101 ----- 1010011', tags=['sfconv', 'nseq']),
++ 
++-            Instr('fmv.x.ah',   Format_R3F,'1110010 00000 ----- 100 ----- 1010011', tags=['sfother']),
++-            Instr('fclass.ah',  Format_R3F,'1110010 00000 ----- 101 ----- 1010011', tags=['sfother']),
++-            Instr('fmv.ah.x',  Format_R3F2,'1111010 00000 ----- 100 ----- 1010011', tags=['sfother']),
+++            Instr('fmv.x.ah',   Format_R3F,'1110010 00000 ----- 100 ----- 1010011', tags=['sfother', 'nseq']),
+++            Instr('fclass.ah',  Format_R3F,'1110010 00000 ----- 101 ----- 1010011', tags=['sfother', 'nseq']),
+++            Instr('fmv.ah.x',  Format_R3F2,'1111010 00000 ----- 100 ----- 1010011', tags=['sfother', 'nseq']),
++ 
++             # If RV64Xf16alt supported
++             Instr('fcvt.l.ah', Format_R2F1,'1100010 00010 ----- 101 ----- 1010011', tags=['sfconv'], isa_tags=['rv64f16alt']),
++@@ -208,18 +208,18 @@ class Xf8(IsaSubset):
++             Instr('fmin.b',    Format_RF, '0010111 ----- ----- 000 ----- 1010011', tags=['sfconv', 'fp_op']),
++             Instr('fmax.b',    Format_RF, '0010111 ----- ----- 001 ----- 1010011', tags=['sfconv', 'fp_op']),
++ 
++-            Instr('feq.b',    Format_RF2, '1010011 ----- ----- 010 ----- 1010011', tags=['sfother', 'fp_op']),
++-            Instr('flt.b',    Format_RF2, '1010011 ----- ----- 001 ----- 1010011', tags=['sfother', 'fp_op']),
++-            Instr('fle.b',    Format_RF2, '1010011 ----- ----- 000 ----- 1010011', tags=['sfother', 'fp_op']),
+++            Instr('feq.b',    Format_RF2, '1010011 ----- ----- 010 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
+++            Instr('flt.b',    Format_RF2, '1010011 ----- ----- 001 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
+++            Instr('fle.b',    Format_RF2, '1010011 ----- ----- 000 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
++ 
++-            Instr('fcvt.w.b', Format_R2F1,'1100011 00000 ----- --- ----- 1010011', tags=['sfconv', 'fp_op']),
++-            Instr('fcvt.wu.b',Format_R2F1,'1100011 00001 ----- --- ----- 1010011', tags=['sfconv', 'fp_op']),
++-            Instr('fcvt.b.w', Format_R2F2,'1101011 00000 ----- --- ----- 1010011', tags=['sfconv', 'fp_op']),
++-            Instr('fcvt.b.wu',Format_R2F2,'1101011 00001 ----- --- ----- 1010011', tags=['sfconv', 'fp_op']),
+++            Instr('fcvt.w.b', Format_R2F1,'1100011 00000 ----- --- ----- 1010011', tags=['sfconv', 'nseq', 'fp_op']),
+++            Instr('fcvt.wu.b',Format_R2F1,'1100011 00001 ----- --- ----- 1010011', tags=['sfconv', 'nseq', 'fp_op']),
+++            Instr('fcvt.b.w', Format_R2F2,'1101011 00000 ----- --- ----- 1010011', tags=['sfconv', 'nseq', 'fp_op']),
+++            Instr('fcvt.b.wu',Format_R2F2,'1101011 00001 ----- --- ----- 1010011', tags=['sfconv', 'nseq', 'fp_op']),
++ 
++-            Instr('fmv.x.b',   Format_R3F,'1110011 00000 ----- 000 ----- 1010011', tags=['sfother', 'fp_op']),
++-            Instr('fclass.b',  Format_R3F,'1110011 00000 ----- 001 ----- 1010011', tags=['sfother', 'fp_op']),
++-            Instr('fmv.b.x',  Format_R3F2,'1111011 00000 ----- 000 ----- 1010011', tags=['sfother', 'fp_op']),
+++            Instr('fmv.x.b',   Format_R3F,'1110011 00000 ----- 000 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
+++            Instr('fclass.b',  Format_R3F,'1110011 00000 ----- 001 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
+++            Instr('fmv.b.x',  Format_R3F2,'1111011 00000 ----- 000 ----- 1010011', tags=['sfother', 'nseq', 'fp_op']),
++ 
++             # If RV64Xf8 supported
++             Instr('fcvt.l.b', Format_R2F1,'1100011 00010 ----- --- ----- 1010011', tags=['sfconv', 'fp_op'], isa_tags=['rv64f8']),
+ diff --git a/models/cpu/iss/src/exec/exec_inorder.cpp b/models/cpu/iss/src/exec/exec_inorder.cpp
+ index fb7456f0..4baf57d3 100644
+ --- a/models/cpu/iss/src/exec/exec_inorder.cpp

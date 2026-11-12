@@ -1,3 +1,8 @@
 [submodule "softhier_vla_wiki"]
 	path = softhier_vla_wiki
 	url = git@github.com:HaozeG/softhier_vla_wiki.git
+[submodule "third_party/gvsoc"]
+	path = third_party/gvsoc
+	url = https://github.com/gvsoc/gvsoc.git
+	branch = soft_hier_release
+	ignore = dirty

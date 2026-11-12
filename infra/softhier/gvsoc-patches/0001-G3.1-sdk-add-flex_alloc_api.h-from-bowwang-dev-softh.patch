@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 21:56:42 +0100
+Subject: [PATCH 01/10] [G3.1] sdk: add flex_alloc_api.h from
+ bowwang-dev/softhier-deeploy
+
+Copied unchanged from soft_hier/flex_cluster_sdk/runtime/deeploy_include/flex_alloc_api.h
+(branch bowwang-dev/softhier-deeploy, 99b60c3) into runtime/include/, which the SDK build
+searches. softhier-mlir's runtime/sh_ops.c includes it; it declares flex_hbm_malloc and
+flex_hbm_free, which flex_alloc.h of this branch already defines.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../flex_cluster_sdk/runtime/include/flex_alloc_api.h  | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+ create mode 100644 soft_hier/flex_cluster_sdk/runtime/include/flex_alloc_api.h
+
+diff --git a/soft_hier/flex_cluster_sdk/runtime/include/flex_alloc_api.h b/soft_hier/flex_cluster_sdk/runtime/include/flex_alloc_api.h
+new file mode 100644
+index 0000000..1a14e24
+--- /dev/null
++++ b/soft_hier/flex_cluster_sdk/runtime/include/flex_alloc_api.h
+@@ -0,0 +1,10 @@
++// flex_alloc_api.h
++#ifndef FLEX_ALLOC_API_H
++#define FLEX_ALLOC_API_H
++
++#include <stdint.h>
++
++void* flex_hbm_malloc(uint32_t size);
++void  flex_hbm_free(void* ptr);
++
++#endif

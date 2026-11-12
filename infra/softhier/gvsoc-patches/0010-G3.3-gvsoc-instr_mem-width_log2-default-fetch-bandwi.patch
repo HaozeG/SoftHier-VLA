@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 19:32:51 +0100
+Subject: [PATCH 10/10] [G3.3] gvsoc: instr_mem width_log2 default (fetch
+ bandwidth), as deeploy
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ soft_hier/flex_cluster/cluster_unit.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/soft_hier/flex_cluster/cluster_unit.py b/soft_hier/flex_cluster/cluster_unit.py
+index 3377003..4e6b202 100644
+--- a/soft_hier/flex_cluster/cluster_unit.py
++++ b/soft_hier/flex_cluster/cluster_unit.py
+@@ -206,7 +206,7 @@ class ClusterUnit(gvsoc.systree.Component):
+         loader = utils.loader.loader.ElfLoader(self, 'loader', binary=binary)
+ 
+         #Instruction memory
+-        instr_mem = memory.Memory(self, 'instr_mem', size=arch.insn_area.size, atomics=True, width_log2=-1, tech_node=arch.tech_node)
++        instr_mem = memory.Memory(self, 'instr_mem', size=arch.insn_area.size, atomics=True, tech_node=arch.tech_node)
+ 
+         #Instruction router
+         instr_router = router.Router(self, 'instr_router', bandwidth=8*arch.nb_core)

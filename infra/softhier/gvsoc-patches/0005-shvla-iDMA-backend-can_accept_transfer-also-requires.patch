@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 13:22:25 +0100
+Subject: [PATCH 05/10] [shvla] iDMA backend: can_accept_transfer() also
+ requires an empty regulation queue (fixes lost transfer / hbm_fill hang)
+
+The regulation handler forwards a queued transfer (and only then sets current_transfer_size)
+one cycle after enqueue_transfer(). In that window can_accept_transfer() still returned true,
+the middle-end pushed the next line, and the first transfer was overwritten before its bursts
+were issued: it is never read or acknowledged, so the DMA wait hangs. Seen as gemm1024_summa
+(softhier.hbm_fill, 2 KiB rows) and siglip_encoder_layer. 283 of 1024 rows lost, exactly those
+queued at regulation_queue depth = 1. Deeploy's backend (no regulation queue) passes the
+same ELF. Carried in soft_hier/gvsoc_pulp.patch and in the patched pulp working tree
+(pulp/pulp/idma/be/idma_be.cpp); the hunk applies to the nested pulp HEAD without offset or fuzz.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ soft_hier/gvsoc_pulp.patch | 36 ++++++++++++++++++++++--------------
+ 1 file changed, 22 insertions(+), 14 deletions(-)
+
+diff --git a/soft_hier/gvsoc_pulp.patch b/soft_hier/gvsoc_pulp.patch
+index 5ec394e..d8ee4dc 100644
+--- a/soft_hier/gvsoc_pulp.patch
++++ b/soft_hier/gvsoc_pulp.patch
+@@ -811,10 +811,10 @@ index e455f21..b369dd2 100644
+ +    void collective_generate(vp::IoReq * req, std::queue<int> * queue, int router_x, int router_y);
+  };
+ diff --git a/pulp/idma/be/idma_be.cpp b/pulp/idma/be/idma_be.cpp
+-index 4e3a273..b82eab5 100644
++index 4e3a273..9bd3fe7 100644
+ --- a/pulp/idma/be/idma_be.cpp
+ +++ b/pulp/idma/be/idma_be.cpp
+-@@ -27,7 +27,8 @@ IDmaBe::IDmaBe(vp::Component *idma, IdmaTransferProducer *me,
++@@ -27,7 +27,8 @@
+      IdmaBeConsumer *loc_be_read, IdmaBeConsumer *loc_be_write,
+      IdmaBeConsumer *ext_be_read, IdmaBeConsumer *ext_be_write)
+  :   Block(idma, "be"),
+@@ -824,7 +824,7 @@ index 4e3a273..b82eab5 100644
+  {
+      // Middle-end and backend protocols will be used later for interaction
+      this->me = me;
+-@@ -59,23 +60,55 @@ IdmaBeConsumer *IDmaBe::get_be_consumer(uint64_t base, uint64_t size, bool is_re
++@@ -59,32 +60,84 @@
+  // no active transfer
+  void IDmaBe::enqueue_transfer(IdmaTransfer *transfer)
+  {
+@@ -897,10 +897,20 @@ index 4e3a273..b82eab5 100644
+  }
+  
+  
+-@@ -85,6 +118,22 @@ bool IDmaBe::can_accept_transfer()
+-     return this->current_transfer_size == 0;
+- }
+- 
++ bool IDmaBe::can_accept_transfer()
++ {
++-    // Only accept a new transfer if no transfer is on-going.
++-    return this->current_transfer_size == 0;
++-}
++-
+++    // Only accept a new transfer if no transfer is on-going and none is waiting in the regulation
+++    // queue. The regulation handler forwards a queued transfer (and sets current_transfer_size) one
+++    // cycle after enqueue_transfer(); in that window current_transfer_size is still 0, the middle-end
+++    // pushes the next line, and the first transfer is lost (never issued, never acknowledged, the
+++    // DMA wait hangs).
+++    return this->current_transfer_size == 0 && this->regulation_queue.empty();
+++}
+++
+ +#ifdef ENABLE_DMA_SIMPLE_COLLECTIVE_IMPLEMENTATION
+ +uint64_t IDmaBe::get_collective_type()
+ +{
+@@ -920,19 +930,17 @@ index 4e3a273..b82eab5 100644
+  
+  
+  void IDmaBe::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
+-@@ -142,7 +191,10 @@ void IDmaBe::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
++@@ -142,6 +195,9 @@
+  void IDmaBe::update()
+  {
+      // Check if any action should be taken in the next cycle from the FSM handler
+--    this->fsm_event.enqueue();
+ +    this->transfer_regulation_event.enqueue();
+ +    // Also re-arm the FSM: it must be woken when can_accept_burst() was false and the
+ +    // regulation queue is empty, otherwise the current transfer never completes (hang).
+-+    this->fsm_event.enqueue();
++     this->fsm_event.enqueue();
+  }
+  
+- 
+-@@ -169,6 +220,11 @@ void IDmaBe::write_data(uint8_t *data, uint64_t size)
++@@ -169,6 +225,11 @@
+      transfer->dst += size;
+      transfer->size -= size;
+  
+@@ -944,7 +952,7 @@ index 4e3a273..b82eab5 100644
+      // And forward data.
+      // Note that the source backend already checked that the destination was ready by calling
+      // our is_ready_to_accept_data method
+-@@ -181,7 +237,7 @@ void IDmaBe::write_data(uint8_t *data, uint64_t size)
++@@ -181,7 +242,7 @@
+  void IDmaBe::ack_data(uint8_t *data, int size)
+  {
+      // Get the source backend protocol for the first transfer
+@@ -953,7 +961,7 @@ index 4e3a273..b82eab5 100644
+      IdmaBeConsumer *src_be = this->get_be_consumer(transfer->src, transfer->size, true);
+  
+      // And acknowledge the data to it so that the data can be freed
+-@@ -199,8 +255,12 @@ void IDmaBe::ack_data(uint8_t *data, int size)
++@@ -199,8 +260,12 @@
+          this->trace.msg(vp::Trace::LEVEL_TRACE, "Finished burst (transfer: %p)\n", transfer);
+  
+          // And if so, remove it and notify the middle end

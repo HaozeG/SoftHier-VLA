@@ -1,2 +1,7 @@
 CLAUDE.md
 
+
+.venv/
+__pycache__/
+infra/env.local.sh
+egm-review/
