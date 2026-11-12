@@ -29,9 +29,10 @@ memory map,Stack,per-cluster stack memory at 0x10000000 (128 KiB),,config,arch c
 memory map,Weights and activations,HBM at 0xC0000000 + offset; flat offsets from the frontends; separate preload ELF (150-200 MB per program),,config,softhier_mlir/sim/preload.py; flex_memory.ld .hbm/.data
 memory map,HBM node map,64 MiB per edge node: 0xC0-0xCF west W0-W3; 0xD0 north; 0xE0 east (no channel); 0xF0-0xFF south S0-S3,,config,flex_cluster.py:277-343 (hbm_node_aliase 1: no interleaving across nodes)
 measured,HBM ports actually used by the big GEMMs,W0 W1 W2 (W3 < 5 %; south ports 0 %),,measured,hbm_ports.py on the kept logs
-measured,Hottest port read bandwidth in big GEMMs,44-64 (W0),GB/s,measured,hbm_ports.py; 69-100 % of the 64 GB/s link; W0 carries 46-67 % of the bytes
+measured,Hottest port read bandwidth in big GEMMs,44-64 (W0; prefix and expert),GB/s,measured,hbm_ports.py; 69-100 % of the 64 GB/s link (vision 46-81 %); W0 carries 46-67 % of the bytes
 measured,Best GEMM throughput,15.9 (vision mlp_up),TFLOP/s,measured,ops.csv; 12.1 % of RedMulE peak
 measured,Whole-run RedMulE throughput,1.2 % of peak,,measured,PROFILE.md summary
+measured,HBM read cap with today's placement,115 (W0 serves 55.6 % of reads),GB/s,derived,64 / 0.556; GEMM windows read 95 GB/s on average = 83 % of the cap
 measured,Best HBM bandwidth (all ports),171 in one op instance; 127 mean over prefix mlp_gate,GB/s,measured,ops.csv / hbm_ports.py; 33 % / 25 % of the 512 GB/s chip ceiling
 measured,Cluster issue rate in core-bound ops,~0.9,instr/cycle,measured,insn_ops.csv (prefix silu_mul: 63 k int + 114 k FP in 198.7 k cycles); near the 1 instr/cycle model ceiling
 reference,DRAMSys HBM (not used in these runs),HBM2E-4000: 64 bit x 2 pseudo-channels x 4000 MT/s = 64 GB/s per channel,,config,core/models/memory/dramsys_configs (hbm2-example.json -> JEDEC_16Gb_HBM2E-4000.json)
