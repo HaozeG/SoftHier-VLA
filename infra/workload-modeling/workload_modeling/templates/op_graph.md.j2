@@ -53,24 +53,38 @@ FLOP share by class:
 | `{{ r.op }}` | {{ r.layers }} | {{ r.cls }} | {{ r.shape }} | {{ r.count }} | {{ r.gflop }} | {{ r.umb }} | {{ r.wmb }} | {{ r.ai }} | {{ r.unit_today }} | {{ r.hand_kernel }} | {{ r.kus }} |
 {% endfor %}
 {% endfor %}
-## Row operators on hand-written kernels
+## Composed estimate from hand-written kernels
 
-"kernel us per call" is the hand kernel simulated alone at one instance of the operator: kernel repo
-`{{ kernel_repo }}`, stage-1 arch (16 clusters, Spatz on 4 cores each), DRAMSys HBM. Label: measured per call.
-GELU, LayerNorm and Activation outputs are checked on the device against a replay golden; RMSNorm is the
-upstream kernel run with placeholder data (timing only, output not checked). Values and sources:
-`constants.yaml` section `hand_kernels`.
+"kernel us per call" is the operator's hand-written kernel simulated alone at one instance of the operator:
+kernel repo `{{ kernel_repo }}`, stage-1 arch (16 clusters, RedMulE 32 x 16 and Spatz on 4 cores per cluster),
+DRAMSys HBM. Label: measured per call. Values, tile settings and sources: `constants.yaml` section
+`hand_kernels`. "in `qk`" marks work done inside that row's kernel call: FlatAttention runs QK^T, softmax and
+P.V in one call and transposes K on chip.
 
-The sum below is count x time per call over the row operators that have a timed kernel. Label: estimate.
-It is not an end-to-end time: it leaves out the GEMM and attention kernels, the row operators without a
-kernel, data movement and layout changes between kernels, and any overlap; and it is on the stage-1 arch with
-DRAMSys HBM, not PR1's arch with ideal HBM, so it does not compare directly with PR1's numbers.
+| kernel | operators | output checked | how it was run |
+| --- | --- | --- | --- |
+| SummaGEMM | every matrix product | no (upstream preload: placeholder data) | M, N, K padded up to 4 x tile; tiles: fastest of a sweep per shape |
+| FlatAttention | QK^T, softmax, P.V | no (upstream preload: placeholder data) | no masking (prefix and expert need one: approximation); GQA folds query heads; blocks: fastest of a sweep; sequence lengths padded up to a block multiple |
+| LayerNorm, Activation, Eltwise | norms, activations, elementwise, pixel shuffle | yes, bit-exact against a replay golden | one row per cluster at a time |
+| RMSNorm | RMSNorm | no (upstream kernel, placeholder data) | upstream settings |
 
-| stage | timed row operators | sum, us | row operators without a kernel | their unique MB |
-| --- | --- | ---: | --- | ---: |
-{% for k in ksum -%}
-| {{ k.stage }} | {{ k.timed }} | {{ k.us }} | {{ k.untimed }} | {{ k.untimed_mb }} |
-{% endfor %}
+The composed time is the sum over operators of count x time per call. Label: estimate. It assumes kernels
+run back to back with nothing between them: no overlap, no layout change between kernels (the projections write
+token-major rows, FlatAttention reads head-major Q, K, V), and every kernel starting and ending in HBM.
+It is on the stage-1 arch with DRAMSys HBM, not PR1's arch with ideal HBM. Per-call times move by about 3 %
+with code placement alone (GELU: 68.1 to 70.5 us for the same loop at a 12-byte offset, mechanism not
+identified).
+
+| stage | GEMM, us | attention, us | row operators, us | total, us | inside another call | not covered |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+{% for k in ksum.stages -%}
+| {{ k.stage }} | {{ k["GEMM"] }} | {{ k["attention"] }} | {{ k["row operators"] }} | {{ k.total }} | {{ k.included }} | {{ k.uncovered }} |
+{% endfor -%}
+| **all** | {{ ksum.total["GEMM"] }} | {{ ksum.total["attention"] }} | {{ ksum.total["row operators"] }} | **{{ ksum.total.total }}** | | |
+
+Total: {{ ksum.total_ms }} ms per inference call (estimate); shares: GEMM {{ ksum.share["GEMM"] }} %, attention
+{{ ksum.share["attention"] }} %, row operators {{ ksum.share["row operators"] }} %.
+
 ## Limitations
 
 * **No tiling re-reads.** Bytes count each operand once per operator instance; re-reads caused by tiling

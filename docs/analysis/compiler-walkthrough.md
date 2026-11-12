@@ -105,11 +105,12 @@ output product, residual, LayerNorm, MLP up, GELU, MLP down, residual. A fused `
 ## 5. Operator to unit and hand-written kernel
 
 The kernel repo's hand-written kernels (`~/softhier@52859c3`, `implementation/sw/`) target the stage-1 arch with
-Spatz enabled. GELU and LayerNorm were added by this project on branch `gelu-layernorm-kernels`
-(`HaozeG/gvsoc@580ac85`), with outputs checked on the device against a replay golden; the changes and the
+Spatz enabled. GELU and LayerNorm (`HaozeG/gvsoc@580ac85`) and `Eltwise` (`dc749bc`: add, bias, scale, axpy,
+RoPE, pixel shuffle) were added by this project on branch `gelu-layernorm-kernels`, with outputs checked on the
+device against a replay golden; the changes and the
 simulator defects found on the way are logged in `wiki://memories/patches/softhier-kernel-repo.md`. Per-call times
-of the row-operator kernels at libero-2cam shapes are in [smolvla-op-graph.md](smolvla-op-graph.md), section
-"Row operators on hand-written kernels".
+of every kernel at libero-2cam shapes, and their sum per stage, are in [smolvla-op-graph.md](smolvla-op-graph.md),
+section "Composed estimate from hand-written kernels".
 
 | Operator | Unit in PR1's path | Hand-written kernel | Evidence in the kernel repo |
 | --- | --- | --- | --- |
@@ -122,8 +123,9 @@ of the row-operator kernels at libero-2cam shapes are in [smolvla-op-graph.md](s
 | GELU | Snitch cores | `Activation` (GELU, tanh form; added, `580ac85`) | upstream `Activation` covers Sigmoid, ReLU, SiLU (`Activation/include/Activation.h:128-142`); GELU added on branch `gelu-layernorm-kernels` |
 | SiLU x up (MLP gate) | Snitch cores | `Activation` (SiLU + gate) | `ACTI_ALGO_SILU` then `vector_lib_gate` multiply, `Activation.h:138-149, 253-269` |
 | SiLU (time MLP) | Snitch cores | `Activation` (SiLU) | `Activation.h:225-250` |
-| RoPE, bias add, residual add, scale, Euler update | Snitch cores | none | |
-| transpose, pixel shuffle | Snitch cores and iDMA | none | |
+| RoPE, bias add, residual add, scale, Euler update | Snitch cores | `Eltwise` (added, `dc749bc`) | `Eltwise/include/Eltwise.h` on branch `gelu-layernorm-kernels`; RoPE as softhier-mlir `sh_rope` |
+| transpose of K | Snitch cores and iDMA | inside `FlatAttention` | K is transposed in L1 by the transpose engine, `FlatAttention.h:159` |
+| pixel shuffle | Snitch cores and iDMA | `Eltwise` (pixel_shuffle, DMA only; added, `dc749bc`) | one 2D DMA per output row |
 | language embedding, state projection, time half of the time MLP | host | none | PR1 prepare step |
 
 ## 6. What is not built
@@ -134,7 +136,8 @@ of the row-operator kernels at libero-2cam shapes are in [smolvla-op-graph.md](s
   standalone programs; none is called from softhier-mlir's runtime, so PR1's end-to-end run does not use them.
 * **The linalg path.** `transforms/linalg_to_softhier.py` (lowers `linalg.matmul` only), `pipeline_gemm.py` and
   `distribute_summa.py` are the general pipeline of `docs/DESIGN.md` section 4; the SmolVLA frontends bypass them.
-* **Kernels for the remaining operators.** RoPE, the elementwise adds, transpose and pixel shuffle have no
-  hand-written kernel; FlatAttention has no masking, which the prefix and the expert need.
+* **Kernels for the remaining operators.** Every device operator now has a hand-written kernel, but
+  FlatAttention reads Q, K, V head-major while the projections write token-major rows, and no kernel does
+  that layout change; FlatAttention has no masking, which the prefix and the expert need.
 * **One program.** The chain is four programs because the weights exceed populated HBM; a single program needs
   more HBM in the arch (the 256-cluster proposal assumes 1 GiB, [hw-config.md](hw-config.md)).

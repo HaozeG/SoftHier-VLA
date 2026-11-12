@@ -51,22 +51,34 @@ def _us(ns: float | None) -> str:
     return "" if ns is None else f"{ns / 1e3:,.2f}"
 
 
-def kernel_sums(c, workload_id: str, rows: list[m.OpRow]) -> list[dict]:
-    """Per stage: row operators covered by a simulated hand kernel (count x ns per call) and those not."""
-    out = []
+GROUPS = (("GEMM", ("gemm",)), ("attention", ("attn", "softmax")), ("row operators", ROW_CLASSES))
+
+
+def kernel_sums(c, workload_id: str, rows: list[m.OpRow]) -> dict:
+    """Composed per-stage time: sum over rows of count x measured ns per call of the row's kernel.
+
+    Rows whose work runs inside another row's kernel call (m.INCLUDED_IN) add nothing; host rows and rows
+    without a simulated kernel are listed as not covered."""
+    stages, tot = [], {g: 0.0 for g, _ in GROUPS}
     for st in m.STAGES:
-        rs = [r for r in rows if r.stage == st and r.cls in ROW_CLASSES]
-        cov = [(r, m.hand_kernel_ns(c, workload_id, r)) for r in rs]
-        timed = [(r, ns) for r, ns in cov if ns is not None]
-        untimed = [r for r, ns in cov if ns is None]
-        out.append({
-            "stage": st,
-            "us": f"{sum(r.count * ns for r, ns in timed) / 1e3:,.1f}",
-            "timed": ", ".join(f"`{r.op}`" for r, _ in timed) or "none",
-            "untimed": ", ".join(f"`{r.op}`" for r in untimed) or "none",
-            "untimed_mb": _mb(sum(r.bytes_unique for r in untimed)),
+        rs = [r for r in rows if r.stage == st]
+        ns = {r.op: m.hand_kernel_ns(c, workload_id, r) for r in rs}
+        grp = {}
+        for g, classes in GROUPS:
+            grp[g] = sum(r.count * ns[r.op] for r in rs if r.cls in classes and ns[r.op] is not None) / 1e3
+            tot[g] += grp[g]
+        included = [r for r in rs if (r.stage, r.op) in m.INCLUDED_IN]
+        uncovered = [r for r in rs if ns[r.op] is None and (r.stage, r.op) not in m.INCLUDED_IN]
+        stages.append({
+            "stage": st, **{g: f"{v:,.1f}" for g, v in grp.items()}, "total": f"{sum(grp.values()):,.1f}",
+            "total_us": sum(grp.values()),
+            "included": ", ".join(f"`{r.op}` (in `{m.INCLUDED_IN[(r.stage, r.op)]}`)" for r in included) or "none",
+            "uncovered": ", ".join(f"`{r.op}`" + (" (host)" if r.op in m.HOST_OPS else "") for r in uncovered) or "none",
         })
-    return out
+    grand = sum(tot.values())
+    return {"stages": stages, "total": {**{g: f"{v:,.1f}" for g, v in tot.items()}, "total": f"{grand:,.1f}"},
+            "total_ms": f"{grand / 1e3:,.2f}",
+            "share": {g: f"{100 * v / grand:.0f}" if grand else "0" for g, v in tot.items()}}
 
 
 def context(c, workload_id: str) -> dict:
@@ -90,7 +102,8 @@ def context(c, workload_id: str) -> dict:
     view = [{
         "stage": r.stage, "op": r.op, "layers": r.layers, "cls": r.cls, "shape": _shape(r), "count": r.count,
         "gflop": _g(r.flop), "umb": _mb(r.bytes_unique), "wmb": _mb(r.bytes_weight), "ai": _ai(r.flop_per_wbyte),
-        "unit_today": r.unit_today, "hand_kernel": r.hand_kernel, "kus": _us(m.hand_kernel_ns(c, workload_id, r)),
+        "unit_today": r.unit_today, "hand_kernel": r.hand_kernel, "kus": (f"in `{m.INCLUDED_IN[(r.stage, r.op)]}`" if (r.stage, r.op) in m.INCLUDED_IN
+                else _us(m.hand_kernel_ns(c, workload_id, r))),
     } for r in rows]
     n_vis = m.vision_tokens(wl, d)
     tok = {"vision_out": n_vis, "image": wl.cameras * n_vis // d.shuffle ** 2, "prefix": m.prefix_tokens(wl, d)}

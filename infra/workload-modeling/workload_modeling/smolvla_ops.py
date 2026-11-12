@@ -434,10 +434,53 @@ HAND_KERNEL_TIME = {
 }
 
 
+# Rows whose work runs inside another row's kernel call: FlatAttention does QK^T, softmax and P.V in one
+# call (time on the qk row) and transposes K on chip with the transpose engine.
+INCLUDED_IN = {
+    ("vision", "softmax"): "qk", ("vision", "pv"): "qk", ("vision", "transpose_k"): "qk",
+    ("prefix", "softmax"): "qk", ("prefix", "pv"): "qk",
+    ("expert", "self_softmax"): "self_qk", ("expert", "self_pv"): "self_qk",
+    ("expert", "cross_softmax"): "cross_qk", ("expert", "cross_pv"): "cross_qk",
+}
+ATTN_CALL_OPS = {"qk", "self_qk", "cross_qk"}
+
+
+def eltwise_kind(op: str) -> str | None:
+    """Operator of the Eltwise kernel that implements an elementwise or data row."""
+    if op.startswith("bias_"):
+        return "bias"
+    if op.startswith("residual_") or op == "pos_embed_add":
+        return "add"
+    if op.startswith("rope_"):
+        return "rope"
+    if op == "embed_scale":
+        return "scale"
+    if op == "euler_update":
+        return "axpy"
+    if op == "pixel_shuffle":
+        return "pixel_shuffle"
+    return None
+
+
+def hand_kernel_key(row: OpRow) -> str | None:
+    """constants key of the row's simulated kernel: hand_kernels.<stage>.<kernel>_<row shape>."""
+    if (row.stage, row.op) in HAND_KERNEL_TIME:
+        return HAND_KERNEL_TIME[(row.stage, row.op)]
+    if row.op in HOST_OPS or (row.stage, row.op) in INCLUDED_IN:
+        return None
+    shape = "x".join(map(str, row.shape))
+    if row.cls == "gemm":
+        return f"hand_kernels.{row.stage}.gemm_{shape}"
+    if row.op in ATTN_CALL_OPS:
+        return f"hand_kernels.{row.stage}.flatattention_{shape}"
+    kind = eltwise_kind(row.op)
+    return f"hand_kernels.{row.stage}.eltwise_{kind}_{shape}" if kind else None
+
+
 def hand_kernel_ns(c, workload_id: str, row: OpRow) -> float | None:
     """Measured ns per call of the row's hand kernel, if one was simulated at this workload and shape."""
-    key = HAND_KERNEL_TIME.get((row.stage, row.op))
-    if key is None:
+    key = hand_kernel_key(row)
+    if key is None or key not in c.entries:
         return None
     e = c.get(key)
     shape = key.rsplit("_", 1)[1]
@@ -454,6 +497,13 @@ def unit_and_kernel(row: OpRow) -> tuple[str, str]:
     if row.cls == "attn":
         mask = "" if row.stage == "vision" else "; masking not supported"
         return "RedMulE", f"FlatAttention{mask}"
+    if row.op == "transpose_k":
+        return "Snitch cores and iDMA", "FlatAttention (K transposed on chip by the transpose engine)"
+    kind = eltwise_kind(row.op)
+    if kind == "pixel_shuffle":
+        return "Snitch cores and iDMA", "Eltwise (pixel_shuffle, DMA only)"
+    if kind:
+        return CORES, f"Eltwise ({kind})"
     if row.cls == "data":
         return "Snitch cores and iDMA", "none"
     return CORES, KERNEL_BY_OP.get(row.op, "none")

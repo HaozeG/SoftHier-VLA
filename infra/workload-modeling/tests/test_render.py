@@ -72,12 +72,35 @@ def test_csv_has_all_rows(c):
 
 
 def test_hand_kernel_times_and_stage_sums(c):
-    rows = m.annotate(m.build(c, "libero-2cam"))
-    timed = [r for r in rows if m.hand_kernel_ns(c, "libero-2cam", r) is not None]
-    assert len(timed) == 13
-    assert all(r.cls in render.ROW_CLASSES for r in timed)
-    sums = {k["stage"]: k for k in render.kernel_sums(c, "libero-2cam", rows)}
-    want = sum(r.count * m.hand_kernel_ns(c, "libero-2cam", r) for r in timed if r.stage == "vision") / 1e3
-    assert sums["vision"]["us"] == f"{want:,.1f}"
+    wl = "libero-2cam"
+    rows = m.annotate(m.build(c, wl))
+    ns = {(r.stage, r.op): m.hand_kernel_ns(c, wl, r) for r in rows}
+    # Every operator outside the host prepare step has a simulated kernel or runs inside another row's call.
+    for r in rows:
+        if r.op in m.HOST_OPS:
+            continue
+        key = (r.stage, r.op)
+        if key in m.INCLUDED_IN:
+            assert ns[(r.stage, m.INCLUDED_IN[key])] is not None, r.op
+        else:
+            assert ns[key] is not None, (r.stage, r.op, m.hand_kernel_key(r))
+    sums = render.kernel_sums(c, wl, rows)
+    want = sum(r.count * ns[(r.stage, r.op)] for r in rows if ns[(r.stage, r.op)] is not None) / 1e3
+    assert sums["total"]["total"] == f"{want:,.1f}"
+    vision = next(k for k in sums["stages"] if k["stage"] == "vision")
+    want_v = sum(r.count * ns[(r.stage, r.op)] for r in rows
+                 if r.stage == "vision" and r.cls == "gemm") / 1e3
+    assert vision["GEMM"] == f"{want_v:,.1f}"
     # Times are for libero-2cam shapes only; another workload gets none.
     assert not any(m.hand_kernel_ns(c, "pr1-1cam", r) for r in m.annotate(m.build(c, "pr1-1cam")))
+
+
+def test_eltwise_and_attention_mapping(c):
+    rows = {(r.stage, r.op): r for r in m.annotate(m.build(c, "libero-2cam"))}
+    assert rows[("vision", "bias_q")].hand_kernel == "Eltwise (bias)"
+    assert rows[("prefix", "rope_q")].hand_kernel == "Eltwise (rope)"
+    assert rows[("expert", "euler_update")].hand_kernel == "Eltwise (axpy)"
+    assert rows[("connector", "pixel_shuffle")].hand_kernel.startswith("Eltwise (pixel_shuffle")
+    assert rows[("vision", "transpose_k")].hand_kernel.startswith("FlatAttention")
+    assert m.hand_kernel_key(rows[("expert", "self_qk")]) == "hand_kernels.expert.flatattention_15x50x227x64"
+    assert m.hand_kernel_key(rows[("expert", "self_pv")]) is None          # inside the self_qk call
