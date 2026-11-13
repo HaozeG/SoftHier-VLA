@@ -1,0 +1,238 @@
+# Stage-1 constants for SoftHier-VLA.
+#
+# Every number that appears in more than one stage-1 document lives here.
+# Key path: group.name (for example pr1.expert_step_ms, thor.fp16_dense, arch.stage1.redmule_h).
+# Entry fields: value, unit, label, source; optional workload, arch, note.
+# Labels: measured | estimate | inference (the wiki's set, softhier_vla_wiki/tools/wiki.py:88).
+# A figure computed from a source's number is `inference`, with the computation in `note`.
+# Inputs read as given (arch-file parameters, checkpoint configs, vendor spec figures) are `measured`
+# with the file or spec as source (docs/analysis/conventions.md, "Inputs read as given").
+# Figures computed from arch parameters (peak per cluster, totals) are not stored:
+# workload_modeling/constants.py computes them.
+#
+# PR1 sources: experiments/smolvla-e2e-baseline/ on branch worktree-smolvla-e2e-baseline,
+# commit 68cd4eb (PROFILE.md, profile/hw_spec.csv). PR1 merged to main as e832bfb.
+#
+# Thor footnote: 500 TFLOP/s (Google/Purdue, arXiv 2603.02271) is DRIVE Thor, not Jetson Thor;
+# 400 (VLA-Perf) has no stated method. Neither is used.
+
+workloads:
+  pr1-1cam:
+    checkpoint: lerobot/smolvla_base@5e8d12a6e2975b0e5e5fce7c8caf47c371d257b6
+    cameras: 1
+    image_size: 256            # per camera, square; PR1's published configuration
+    language_tokens: 48
+    state_tokens: 1
+    label: measured
+    source: "docs/designs/smolvla-softhier-baseline.md@e832bfb; kept programs published-fixi-rung6"
+  libero-2cam:
+    checkpoint: lerobot/smolvla_libero@a24f1f380461b665158d52acd140152c79e8b36d
+    cameras: 2
+    image_size: 512
+    language_tokens: 48
+    state_tokens: 1
+    primary: true
+    label: measured
+    source: "PROFILE.md@68cd4eb#libero-configuration-estimate; kept programs libero-G4a"
+  release-3cam:
+    checkpoint: lerobot/smolvla_base@5e8d12a6e2975b0e5e5fce7c8caf47c371d257b6
+    cameras: 3
+    image_size: 512
+    language_tokens: 48
+    state_tokens: 1
+    label: inference
+    source: "wiki://resources/models/smolvla.md (released config: three cameras at 512x512)"
+    note: "No RQ uses this workload; kept for the several-models step."
+
+arch:
+  stage1:
+    repo: "~/softhier@52859c3 (branch softhier_deeploy)"
+    file: implementation/config/arch/arch.py
+    clusters_x: {value: 4, unit: "", label: measured, source: "arch.py:24"}
+    clusters_y: {value: 4, unit: "", label: measured, source: "arch.py:25"}
+    cores_per_cluster: {value: 5, unit: "", label: measured, source: "arch.py:26"}
+    spatz_cores: {value: 4, unit: "", label: measured, source: "arch.py:45 spatz_attaced_core_list = [0, 1, 2, 3]"}
+    spatz_function_units: {value: 4, unit: "", label: measured, source: "arch.py:47"}
+    redmule_h: {value: 32, unit: CE, label: measured, source: "arch.py:50"}
+    redmule_w: {value: 16, unit: CE, label: measured, source: "arch.py:51"}
+    tcdm_bytes: {value: 393216, unit: B, label: measured, source: "arch.py:32 (0x60000)"}
+    noc_link_bits: {value: 1024, unit: bit, label: measured, source: "arch.py:72"}
+    instruction_mem_bytes: {value: 65536, unit: B, label: measured, source: "arch.py:76 (0x10000)"}
+    clock_hz: {value: 1.0e9, unit: Hz, label: measured, source: "~/softhier@52859c3 pulp/pulp/chips/flex_cluster/flex_cluster.py:338"}
+    spatz_vlen_bits: {value: 16384, unit: bit, label: measured, source: "~/softhier@52859c3 Spatz model (row of 4096 fp16 at e16/m4 is one strip)"}
+    hbm_channels: {value: 8, unit: "", label: measured, source: "arch.py:66 hbm_chan_placement = [4,0,0,4] (west 4, east 4)"}
+    hbm_device: {value: "JEDEC HBM2E-4000, 64-bit, 2000 MHz, DDR", unit: "", label: measured, source: "~/softhier@52859c3 core/models/memory/dramsys.cpp:128 -> dramsys_configs/hbm2-example.json -> memspec/JEDEC_16Gb_HBM2E-4000.json"}
+    hbm_bw_per_channel: {value: 64, unit: GB/s, label: inference, source: "DRAMSys report in kernel runs: AVG BW\\IDLE 453.29 Gb/s = 88.53 %", note: "full scale implied by DRAMSys's own utilization line; the memspec alone (64 bit x 4000 MT/s) gives 32 GB/s; difference not resolved"}
+  pr1:
+    repo: "third_party GVSoC soft_hier_release, PR1 arch file"
+    file: "experiments/smolvla-e2e-baseline/profile/hw_spec.csv@68cd4eb"
+    clusters_x: {value: 4, unit: "", label: measured, source: "hw_spec.csv: arch num_cluster_x/y = 4"}
+    clusters_y: {value: 4, unit: "", label: measured, source: "hw_spec.csv: arch num_cluster_x/y = 4"}
+    cores_per_cluster: {value: 3, unit: "", label: measured, source: "hw_spec.csv: num_core_per_cluster = 3"}
+    spatz_cores: {value: 0, unit: "", label: measured, source: "PR1 arch file: spatz_attaced_core_list = []"}
+    redmule_h: {value: 128, unit: CE, label: measured, source: "hw_spec.csv: redmule_ce_height/width"}
+    redmule_w: {value: 32, unit: CE, label: measured, source: "hw_spec.csv: redmule_ce_height/width"}
+    tcdm_bytes: {value: 1048576, unit: B, label: measured, source: "hw_spec.csv: TCDM 1 MiB"}
+    noc_link_bits: {value: 512, unit: bit, label: measured, source: "hw_spec.csv: noc_link_width"}
+    instruction_mem_bytes: {value: 65536, unit: B, label: measured, source: "hw_spec.csv: instruction memory 64 KiB"}
+    clock_hz: {value: 1.0e9, unit: Hz, label: measured, source: "hw_spec.csv: flex_cluster.py:353 Clock_domain 1 GHz"}
+
+thor:
+  fp16_dense:
+    value: 258
+    unit: TFLOP/s
+    label: inference
+    source: "wiki://resources/serving/vla-hwbench-edge-latency.md (VLA-HWBench Table 3: FP16 258, FP8 517, FP4 1035)"
+    note: "Spec-derived by the paper; NVIDIA publishes no dense FP16 figure. Equals FP8 517 / 2. Alignment value for iso-peak FP16."
+  fp16_measured:
+    value: 153
+    unit: TFLOP/s
+    label: measured
+    source: "wiki://knowledge/mfu-from-measurements.md (Chalmers)"
+  fp16_forum:
+    value: 155.5
+    unit: TFLOP/s
+    label: measured
+    source: "NVIDIA developer forum, topic 344399"
+    note: "self-reported (community, not independently checked), 120 W"
+  fp8_dense:
+    value: 517
+    unit: TFLOP/s
+    label: inference
+    source: "wiki://resources/serving/vla-hwbench-edge-latency.md (Table 3)"
+    note: "Peak used for the per-stage MFU rows in wiki://knowledge/mfu-from-measurements.md"
+  dram_bw:
+    value: 273
+    unit: GB/s
+    label: measured
+    source: "wiki://resources/serving/vla-hwbench-edge-latency.md (Table 3)"
+    note: "Spec value; also used as the provisional SoftHier HBM bandwidth for RQ2 (inference)"
+  dram_bytes:
+    value: 128
+    unit: GB
+    label: measured
+    source: "wiki://resources/serving/vla-xpu-characterization-sjtu.md"
+
+pr1:
+  e2e_ms:
+    {value: 120.7, unit: ms, label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#phase-table (120.705 ms)", note: "ideal HBM"}
+  core_op_share:
+    {value: 64.5, unit: "%", label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#what-dominates-and-why finding 2", note: "elementwise 26.3 + attention 25.0 + norm 12.9; attention includes per-head QK/PV staging and softmax; elementwise includes RoPE, bias and residual adds"}
+  libero_softmax_share:
+    {value: 43.8, unit: "%", label: estimate, workload: libero-2cam, arch: pr1, source: "PROFILE.md@68cd4eb#libero-configuration-estimate", note: "per-head softmax, 288 calls; scaled from G4a partial runs"}
+  libero_rowop_share:
+    {value: 60, unit: "%", label: estimate, workload: libero-2cam, arch: pr1, source: "PROFILE.md@68cd4eb#libero-configuration-estimate", note: "softmax + GELU + LayerNorm, about 60 %"}
+  expert_step_ms:
+    {value: 7.761, unit: ms, label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#expert-step-anatomy-step-5-measured", note: "flow step 5; ideal HBM"}
+  expert_hbm_read_per_step:
+    {value: 335, unit: MB, label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#what-dominates-and-why finding 1", note: "ideal HBM"}
+  expert_weight_bytes_per_step:
+    {value: 193, unit: MB, label: estimate, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#what-dominates-and-why finding 1", note: "computed from op shapes"}
+  gemm_cluster_use:
+    {value: "1-10 of 16", unit: clusters, label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#compiler-view-why", note: "vision and prefix GEMMs parallelise over output tiles only"}
+  libero_e2e_ms:
+    {value: 479.1, unit: ms, label: estimate, workload: libero-2cam, arch: pr1, source: "PROFILE.md@68cd4eb#libero-configuration-estimate", note: "scaled from G4a partial runs; ideal HBM"}
+  mfu:
+    {value: 1.2, unit: "%", label: measured, workload: pr1-1cam, arch: pr1, source: "PROFILE.md@68cd4eb#hardware-activity", note: "189.2 GFLOP in 120.705 ms over 131.07 TFLOP/s"}
+
+# Hand-written kernels simulated alone at one operator instance of the workload (ns per call).
+# Repo: HaozeG/gvsoc implementation/ (branch gelu-layernorm-kernels, base softhier_deeploy 52859c3; 580ac85 for
+# LayerNorm, Activation and RMSNorm, dc749bc for Eltwise, SummaGEMM and FlatAttention), arch stage1
+# (implementation/config/arch/arch.py), DRAMSys HBM, built out of tree against ~/softhier's install.
+# LayerNorm, Activation and Eltwise outputs are checked on the device against a replay golden. RMSNorm,
+# SummaGEMM and FlatAttention run the upstream preload (placeholder data): timing only.
+# SummaGEMM pads M, N, K up to 4 x tile; FlatAttention pads sequence lengths up to a block multiple and has no
+# masking. Their tile and block settings are the fastest of a sweep per shape (source: the chosen setting).
+# Key: <stage>.<kernel>_<operator row shape>; map from operators: smolvla_ops.hand_kernel_key.
+# Per-call times move by about 3 % with code placement alone (GELU 68.1 vs 70.5 us, same loop, 12-byte offset).
+hand_kernels:
+  vision:
+    layernorm_1024x768:
+      {value: 21250, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 lnorm m=1024 n=768 eps=1e-6", note: "bit-exact against the replay on all 16 clusters; the ISS leaves vfwadd.wv, vfwsub.vf, vmv.x.s, vmv.s.x, vmv.v.i untimed (optimistic)"}
+    gelu_1024x3072:
+      {value: 70519, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 acti algo=gelu m=1024 n=3072", note: "bit-exact against the replay on all 16 clusters"}
+    gemm_1024x3072x768:
+      {value: 323923, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=1024 n=3072 k=768 tile=256/128/128 scale=4x4", note: "fastest of 63 tile settings (323,923 to 5,113,014 ns); padded to 1024x3072x768 (1.00x nominal work); timing only, output not checked; ops: vision mlp_up"}
+    gemm_1024x768x3072:
+      {value: 333053, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=1024 n=768 k=3072 tile=128/64/256 scale=4x4", note: "fastest of 63 tile settings (333,053 to 5,419,051 ns); padded to 1024x768x3072 (1.00x nominal work); timing only, output not checked; ops: vision mlp_down"}
+    gemm_1024x768x768:
+      {value: 88879, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=1024 n=768 k=768 tile=256/64/128 scale=4x4", note: "fastest of 62 tile settings (88,879 to 1,351,364 ns); padded to 1024x768x768 (1.00x nominal work); timing only, output not checked; ops: vision patch_embed, q/k/v/o_proj"}
+    flatattention_12x1024x1024x64:
+      {value: 264512, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc attn heads=12/12 sq=1024 skv=1024 d=64 scale=4x4 block=512x512 async", note: "fastest of 29 settings (264,512 to 1,634,406 ns); QK^T, softmax, P.V in one call, no masking; sequence padded (1.00x nominal score elements); timing only, output not checked; ops: vision qk, softmax, pv; async mode (needs an even head count per group) with KV heads padded to 16, scale 2x2, block 512x256: 255,913 ns after scaling to the busiest group's exact head count (inference, not used)"}
+    eltwise_add_1024x768:
+      {value: 26145, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=add m=1024 n=768", note: "bit-exact against the replay on all 16 clusters"}
+    eltwise_bias_1024x768:
+      {value: 19046, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=bias m=1024 n=768", note: "bit-exact against the replay on all 16 clusters"}
+    eltwise_bias_1024x3072:
+      {value: 57705, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=bias m=1024 n=3072", note: "bit-exact against the replay on all 16 clusters"}
+  connector:
+    gemm_128x960x12288:
+      {value: 219646, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=128 n=1024 k=12288 tile=32/256/256 scale=4x4", note: "fastest of 19 tile settings (219,646 to 3,606,873 ns); padded to 128x1024x12288 (1.07x nominal work); timing only, output not checked; ops: connector_proj"}
+    eltwise_pixel_shuffle_2048x768:
+      {value: 21110, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=pixel_shuffle m=128 n=12288", note: "bit-exact against the replay on all 16 clusters"}
+    eltwise_scale_128x960:
+      {value: 2351, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=scale m=128 n=960", note: "bit-exact against the replay on all 16 clusters"}
+  prefix:
+    rmsnorm_177x960:
+      {value: 8519, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 norm m=177 n=960", note: "upstream RMSNorm (one core per cluster), timing only: placeholder data, output not checked"}
+    silu_gate_177x2560:
+      {value: 17262, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 acti algo=silu gate=1 m=177 n=2560", note: "bit-exact against the replay on all 16 clusters"}
+    gemm_177x2560x960:
+      {value: 100691, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=256 n=2560 k=1024 tile=64/128/256 scale=4x4", note: "fastest of 33 tile settings (100,691 to 1,421,772 ns); padded to 256x2560x1024 (1.54x nominal work); timing only, output not checked; ops: prefix mlp_gate, mlp_up"}
+    gemm_177x320x960:
+      {value: 20938, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=256 n=512 k=1024 tile=64/128/128 scale=4x4", note: "fastest of 59 tile settings (20,938 to 427,252 ns); padded to 256x512x1024 (2.47x nominal work); timing only, output not checked; ops: prefix k_proj, v_proj"}
+    gemm_177x960x2560:
+      {value: 92231, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=256 n=1024 k=2560 tile=64/128/256 scale=4x4", note: "fastest of 36 tile settings (92,231 to 1,366,802 ns); padded to 256x1024x2560 (1.54x nominal work); timing only, output not checked; ops: prefix mlp_down"}
+    gemm_177x960x960:
+      {value: 39477, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=256 n=1024 k=1024 tile=64/256/128 scale=4x4", note: "fastest of 36 tile settings (39,477 to 526,430 ns); padded to 256x1024x1024 (1.65x nominal work); timing only, output not checked; ops: prefix q_proj, o_proj"}
+    flatattention_15x177x177x64:
+      {value: 55752, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc attn heads=15/5 sq=192 skv=192 d=64 scale=4x4 block=192x192 collective", note: "fastest of 34 settings (55,752 to 271,161 ns); QK^T, softmax, P.V in one call, no masking; sequence padded (1.18x nominal score elements); timing only, output not checked; ops: prefix qk, softmax, pv (unmasked); async mode (needs an even head count per group) with KV heads padded to 8, scale 2x2, block 192x192: 26,904 ns after scaling to the busiest group's exact head count (inference, not used)"}
+    eltwise_add_177x960:
+      {value: 5213, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=add m=177 n=960", note: "bit-exact against the replay on all 16 clusters"}
+    eltwise_rope_177x320:
+      {value: 2585, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=rope m=177 n=320 head_dim=64", note: "bit-exact against the replay on all 16 clusters"}
+    eltwise_rope_177x960:
+      {value: 3566, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=rope m=177 n=960 head_dim=64", note: "bit-exact against the replay on all 16 clusters"}
+  expert:
+    rmsnorm_50x720:
+      {value: 2335, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 norm m=50 n=720", note: "upstream RMSNorm (one core per cluster), timing only: placeholder data, output not checked"}
+    silu_gate_50x2048:
+      {value: 4119, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 acti algo=silu gate=1 m=50 n=2048", note: "bit-exact against the replay on all 16 clusters"}
+    silu_50x720:
+      {value: 1460, unit: ns, label: measured, workload: libero-2cam, arch: stage1, source: "HaozeG/gvsoc@580ac85 acti algo=silu m=50 n=720", note: "bit-exact against the replay on all 16 clusters"}
+    gemm_177x320x320:
+      {value: 9763, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=256 n=512 k=320 tile=64/128/64 scale=4x4", note: "fastest of 40 tile settings (9,763 to 131,399 ns); padded to 256x512x320 (2.31x nominal work); timing only, output not checked; ops: expert cross_k/v_proj"}
+    gemm_50x1600x720:
+      {value: 34140, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=2048 k=768 tile=16/256/256 scale=4x4", note: "fastest of 18 tile settings (34,140 to 274,634 ns); padded to 64x2048x768 (1.75x nominal work); timing only, output not checked; ops: expert qkv_proj"}
+    gemm_50x32x720:
+      {value: 5669, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=64 k=768 tile=16/16/256 scale=4x4", note: "fastest of 5 tile settings (5,669 to 17,144 ns); padded to 64x64x768 (2.73x nominal work); timing only, output not checked; ops: expert action_out_proj"}
+    gemm_50x4096x720:
+      {value: 67216, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=4096 k=768 tile=16/256/256 scale=4x4", note: "fastest of 19 tile settings (67,216 to 683,153 ns); padded to 64x4096x768 (1.36x nominal work); timing only, output not checked; ops: expert mlp_gateup"}
+    gemm_50x720x1440:
+      {value: 30146, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=1024 k=1536 tile=16/256/256 scale=4x4", note: "fastest of 19 tile settings (30,146 to 248,702 ns); padded to 64x1024x1536 (1.94x nominal work); timing only, output not checked; ops: expert time_mlp_in"}
+    gemm_50x720x2048:
+      {value: 38787, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=1024 k=2048 tile=16/256/256 scale=4x4", note: "fastest of 19 tile settings (38,787 to 381,702 ns); padded to 64x1024x2048 (1.82x nominal work); timing only, output not checked; ops: expert mlp_down"}
+    gemm_50x720x32:
+      {value: 2630, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=1024 k=32 tile=16/256/32 scale=4x4", note: "fastest of 5 tile settings (2,630 to 12,365 ns); padded to 64x1024x32 (1.82x nominal work); timing only, output not checked; ops: expert action_in_proj"}
+    gemm_50x720x720:
+      {value: 16869, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=1024 k=768 tile=16/256/128 scale=4x4", note: "fastest of 18 tile settings (16,869 to 124,239 ns); padded to 64x1024x768 (1.94x nominal work); timing only, output not checked; ops: expert time_mlp_out"}
+    gemm_50x720x960:
+      {value: 21372, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=1024 k=1024 tile=16/256/128 scale=4x4", note: "fastest of 19 tile settings (21,372 to 164,456 ns); padded to 64x1024x1024 (1.94x nominal work); timing only, output not checked; ops: expert o_proj"}
+    gemm_50x960x720:
+      {value: 16869, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc gemm m=64 n=1024 k=768 tile=16/256/128 scale=4x4", note: "fastest of 19 tile settings (16,869 to 163,233 ns); padded to 64x1024x768 (1.46x nominal work); timing only, output not checked; ops: expert q_proj"}
+    flatattention_15x50x177x64:
+      {value: 19104, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc attn heads=15/5 sq=64 skv=192 d=64 scale=4x4 block=192x192 collective", note: "fastest of 34 settings (19,104 to 90,433 ns); QK^T, softmax, P.V in one call, no masking; sequence padded (1.39x nominal score elements); timing only, output not checked; ops: expert cross_qk, cross_softmax, cross_pv (unmasked); async mode (needs an even head count per group) with KV heads padded to 8, scale 2x2, block 192x192: 12,260 ns after scaling to the busiest group's exact head count (inference, not used)"}
+    flatattention_15x50x227x64:
+      {value: 19807, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc attn heads=15/5 sq=64 skv=256 d=64 scale=4x4 block=192x256 collective", note: "fastest of 33 settings (19,807 to 116,276 ns); QK^T, softmax, P.V in one call, no masking; sequence padded (1.44x nominal score elements); timing only, output not checked; ops: expert self_qk, self_softmax, self_pv (unmasked); async mode (needs an even head count per group) with KV heads padded to 6, scale 4x4, block 192x256: 13,792 ns after scaling to the busiest group's exact head count (inference, not used)"}
+    eltwise_add_50x720:
+      {value: 1627, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=add m=50 n=720", note: "bit-exact against the replay on all 16 clusters"}
+    eltwise_axpy_50x32:
+      {value: 718, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=axpy m=50 n=32", note: "bit-exact against the replay on all 16 clusters"}
+    eltwise_bias_50x32:
+      {value: 701, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=bias m=50 n=32", note: "bit-exact against the replay on all 16 clusters"}
+    eltwise_bias_50x720:
+      {value: 1496, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=bias m=50 n=720", note: "bit-exact against the replay on all 16 clusters"}
+    eltwise_rope_50x320:
+      {value: 945, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=rope m=50 n=320 head_dim=64", note: "bit-exact against the replay on all 16 clusters"}
+    eltwise_rope_50x960:
+      {value: 1436, unit: "ns", label: "measured", workload: "libero-2cam", arch: "stage1", source: "HaozeG/gvsoc@dc749bc elt op=rope m=50 n=960 head_dim=64", note: "bit-exact against the replay on all 16 clusters"}
