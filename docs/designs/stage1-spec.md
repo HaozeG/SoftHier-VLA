@@ -411,3 +411,21 @@ Decided by the owner (2026-11-19):
     kernel outputs south, RedMulE kernel outputs west.
 *   **Thor alignment:** none for now; the baseline comes first.
 *   **Carried-over rows:** clock, instruction memory, NoC and the data-mover core are confirmed.
+
+Open questions from the H1 baseline (2026-11-20):
+
+*   **Expert GEMMs use few clusters.** The picked settings for the nine M = 50 expert shapes use 8 or
+    16 of 64 clusters (`splitN_s2g2`, `splitN_s2g4`; `action_out_proj` 50 x 32 x 720 uses 1). This is
+    a limit of the search, not a measured optimum: SummaGEMM is correct only for square SUMMA groups
+    (`SummaGEMM.h:165` steps X along M by `summa_group_x`, while `M_iter` and the Z offset use
+    `summa_group_y`), so a group of scale s pads M to s x m_tile; scale 4 or 8 pads 50 rows to at
+    least 128 (2.56x work), above the sweep's 2.5x cap; and wider split-N at scale 2 (`s2g8`,
+    `s2g16`) was not among the candidates measured. Measured trend: 50 x 4096 x 720 takes 59.6 us on
+    8 clusters and 32.4 us on 16. The expert GEMMs are 13.6 of W1's 35.2 ms. Candidate fix: a
+    non-square group (one cluster tall, N across the row, split-N over the rows), after correcting
+    line 165 and checking the store rotation for non-square groups.
+*   **Tile search is not exhaustive.** Per GEMM shape about 10 settings were run (9 to 12): the top of
+    a rough cost model, K-tile variants of its best, the best of each scale and upstream `opt()`. The
+    pick is the fastest measured setting, not proven best. For M >= 192 every measured candidate uses
+    all 64 clusters at no padded work; for M = 50 the candidate set is small (see above).
+*   **FlatAttention async with `sx = 4, sy = 8`** gives wrong output (§4.3 item 10); cause not found.
