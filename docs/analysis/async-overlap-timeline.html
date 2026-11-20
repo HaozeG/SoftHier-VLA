@@ -1,0 +1,341 @@
+<title>SmolVLA VLM–Expert Overlap on H1</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600&display=swap">
+<style>
+/* Layout: a single technical column; figures drawn to one ms scale from the estimate script's JSON. */
+:root {
+  --bg: #f7f8fa; --panel: #ffffff; --fg: #1d2330; --muted: #5b6475; --rule: #d9dde5;
+  --obs: #2f4e8c; --vision: #3a5f9e; --prefix: #3f9b5a; --fresh: #4f97dc; --stale: #9fb6cc;
+  --reused: #b9bec7; --kv: #e0a030; --cut: #d64545; --vlmcell: #3f9b5a; --expcell: #4f97dc;
+  --font-body: "IBM Plex Sans", system-ui, sans-serif;
+  --font-head: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12151c; --panel: #1a1f29; --fg: #e4e8ef; --muted: #9aa3b4; --rule: #2e3543;
+  --obs: #6f8fd0; --vision: #5f84c6; --prefix: #4fb26c; --fresh: #5ea7ea; --stale: #5d7387;
+  --reused: #5b616c; --kv: #e8b04a; --cut: #ef6b6b; --vlmcell: #4fb26c; --expcell: #5ea7ea; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12151c; --panel: #1a1f29; --fg: #e4e8ef; --muted: #9aa3b4; --rule: #2e3543;
+  --obs: #6f8fd0; --vision: #5f84c6; --prefix: #4fb26c; --fresh: #5ea7ea; --stale: #5d7387;
+  --reused: #5b616c; --kv: #e8b04a; --cut: #ef6b6b; --vlmcell: #4fb26c; --expcell: #5ea7ea; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 36px; }
+h1, h2 { font-family: var(--font-head); font-weight: 600; text-wrap: balance; margin: 0; letter-spacing: .01em; }
+h1 { font-size: 1.9rem; } h2 { font-size: 1.3rem; }
+p { margin: 0; max-width: 72ch; }
+.lede { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+section { display: grid; gap: 14px; }
+.fig { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 14px; overflow-x: auto; }
+.fig svg { display: block; }
+.cap { font-size: .85rem; color: var(--muted); max-width: 90ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .82rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
+table { border-collapse: collapse; font-size: .88rem; width: 100%; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.tablebox { overflow-x: auto; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; }
+.meshes { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.mesh { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 12px; display: grid; gap: 8px; min-width: 0; }
+.mesh h3 { margin: 0; font-size: .95rem; font-family: var(--font-head); font-weight: 600; }
+.mesh .pair { display: flex; gap: 14px; flex-wrap: wrap; }
+.mesh .note { font-size: .8rem; color: var(--muted); }
+ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; max-width: 80ch; }
+code { font-family: var(--font-mono); font-size: .85em; }
+.tag { font-family: var(--font-mono); font-size: .72rem; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--rule); color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header class="lede">
+    <div class="eyebrow">SoftHier-VLA · stage 1 · W1 (vlabench-3cam) on H1 · <span class="tag">estimate</span></div>
+    <h1>SmolVLA VLM–Expert Overlap on H1</h1>
+    <p>What V-AEFusion (run the first flow steps on the previous call's VLM cache while the VLM runs) and DP-Cache (reuse flow-step results) would do to one SmolVLA call, using the stage-1 kernel sums after the expert GEMMs moved to the full mesh (commit <code>dcd221d</code>, 28.99 ms per call). Methods from Zhou et al. (SJTU), arXiv 2604.24447, §5.2.2 and §5.3. Numbers come from <code>docs/analysis/async_overlap_estimate.py</code>.</p>
+  </header>
+
+  <section>
+    <h2>One policy call, drawn like the paper's Fig. 9</h2>
+    <div class="legend" id="legend1"></div>
+    <div class="fig"><svg id="pipe" role="img" aria-label="Timeline of one policy call for each scenario"></svg></div>
+    <p class="cap">One ms scale for every row. Two lanes appear where the VLM and the expert run at the same time. Stale steps read the previous call's prefix KV cache; fresh steps read this call's. The cross K/V projection (0.09 ms, orange) needs the fresh prefix, so it always sits after the VLM. Reused steps (DP-Cache) take no time and are drawn as dashed chips. The red bracket is the reduction against the baseline. The paper draws the robot as stopped from model start to resume; the controller section below shows what that means in control ticks.</p>
+  </section>
+
+  <section>
+    <h2>DP-Cache steps, drawn like the paper's Fig. 7</h2>
+    <div class="fig"><svg id="chain" role="img" aria-label="DP-Cache computed and reused flow steps"></svg></div>
+    <p class="cap">Assumed pattern: steps 4 and 5 reuse step 3, steps 7 and 8 reuse step 6 (4 of 10 reused). The paper fixes its stable segment only for a 100-step diffusion (steps 20 to 80, S = 4); 4 of 10 is chosen so the saved share of expert time (40 %) matches the paper's π0 result (102 → 79 ms, about 38 % of expert time). Lower row: with Fusion k = 5, the reused steps 4 and 5 fall inside the stale window, which is already hidden behind the VLM, so only the reuse of 7 and 8 shortens the call.</p>
+  </section>
+
+  <section>
+    <h2>Summary</h2>
+    <div class="tablebox"><table id="tbl"></table></div>
+    <p class="cap">One-tick rate = the highest control rate at which a call still finishes within one control period (1 / latency). Fusion and DP-Cache do not multiply: 1.18 × 1.235 would be 1.46×, the model gives 1.36×, because the stale window is free under Fusion and caching there saves nothing. Design rule: place reused steps in the fresh tail.</p>
+  </section>
+
+  <section>
+    <h2>What the controller sees</h2>
+    <div class="fig"><svg id="ctrl" role="img" aria-label="Controller timelines for stop-and-go and asynchronous execution"></svg></div>
+    <p class="cap">30 Hz control (33.3 ms period, SmolVLA's async assumption), 50-action chunks, a new call every 25 ticks (an example). <b>Stop-and-go</b> (the paper's Fig. 9 view): the robot pauses for one call; at 30 Hz every scenario fits in one tick, so the pause shrinks from 29.0 to 21.3 ms in a 833 ms cycle (3.4 % → 2.5 % of the time). <b>Asynchronous execution</b> (RTC, SmolVLA async): the call hides under the queue; latency sets observation staleness (29.0 → 21.3 ms, still 1 tick at 10 and 30 Hz, 2 ticks at 50 Hz). In both modes the stale steps read a prefix cache that is one replan interval old (25 ticks = 833 ms here), not one latency old; the paper's coherence measurement (KV cosine 97.99 % / 96.91 %) is over that same interval, a chunk's execution.</p>
+  </section>
+
+  <section>
+    <h2>Spatial mapping per phase</h2>
+    <div class="legend" id="legend2"></div>
+    <div class="meshes" id="meshes"></div>
+    <p class="cap">8 × 8 clusters of H1. HBM sits on the west and south edges; the stage-1 placement rule puts second operands (weights) on the south edge, so an expert strip on the bottom row reaches all 8 south channels through its own edge nodes. After <code>dcd221d</code> the fresh phase is the same in every scenario (expert on the full mesh); the scenarios differ only in the overlap phase, as the user suggested.</p>
+  </section>
+
+  <section>
+    <h2>Assumptions and what to measure next</h2>
+    <ul>
+      <li><b>VLM on 56 or 48 clusters</b> is scaled linearly (64/56, 64/48). This decides B: the split pays off only while the VLM slows by less than the hidden expert time, 5 steps × 1.10 = 5.52 ms, i.e. at most 1.31× on 17.86 ms. At c = 16 the linear slowdown (1.33×) already loses. <b>Measure VLM kernels on 56 and 48 clusters first.</b></li>
+      <li><b>Expert stale step on c clusters</b> uses measured sub-mesh times: the fastest checked setting per shape with ≤ c clusters from the GEMM and attention sweeps (GEMMs 1.91 ms per step on 8 clusters, 1.35 ms on 16; attention picks already use ≤ 8 clusters, 0.20 ms). Row operators are scaled by 64/c (upper bound). On 8 clusters a stale step takes 2.29 to 3.50 ms, under the 4.08 ms that would let it limit B.</li>
+      <li><b>Not modelled</b>: NoC and HBM contention between the two groups; the reconfiguration from a c-cluster group to the full mesh at the KV switch; two kernels sharing a cluster (a cluster runs one kernel at a time, so A has no physical mapping on SoftHier and is a bound).</li>
+      <li><b>Accuracy</b>: no source measures the combination. SJTU's stale-step limit (≤ 5 of 10, Table 7) is for π0 on a real dual-arm robot. In SmolVLA the robot state sits in the VLM prefix and the self-attention layers also read the prefix cache, so stale steps carry stale state as well as stale images.</li>
+      <li>DP-Cache's 4-of-10 pattern is a calibration to π0, not a SmolVLA measurement; the cached data (one 50 × 32 velocity per reused step) is negligible in memory.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+const D = {"inputs":{"vision_ms":14.688600000000001,"connector_prefix_ms":3.1762,"vlm_ms":17.8648,"cross_kv_ms":0.09073600000000001,"step_ms":1.1038363999999998,"baseline_ms":28.9939},"stale_step_ms":{"8":{"same":2.287796,"lin":3.497256},"16":{"same":1.719525,"lin":2.2378649999999998}},"breakeven":{"hidden_ms_k5":5.519182,"max_vlm_slowdown_k5":1.308941717791411,"max_stale_step_c8_ms":4.0833828571428565},"rows":[{"name":"Baseline","k":0,"c":0,"row":"same","cache":false,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[],"fresh":[1,2,3,4,5,6,7,8,9,10],"reused":[],"total_ms":28.9939,"speedup":1.0,"one_tick_hz":34.49001341661522},{"name":"DP-Cache","k":0,"c":0,"row":"same","cache":true,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[],"fresh":[1,2,3,6,9,10],"reused":[4,5,7,8],"total_ms":24.5785544,"speedup":1.1796422006006992,"one_tick_hz":40.68587532552362},{"name":"Fusion A: no contention","k":5,"c":0,"row":"same","cache":false,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3,4,5],"fresh":[6,7,8,9,10],"reused":[],"total_ms":23.474718,"speedup":1.2351117487332541,"one_tick_hz":42.59902078482902},{"name":"Fusion B: split c=8","k":5,"c":8,"row":"lin","cache":false,"vlm_ms":20.416914285714284,"stale_step_ms":3.497256,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3,4,5],"fresh":[6,7,8,9,10],"reused":[],"total_ms":26.026832285714285,"speedup":1.1140003394079692,"one_tick_hz":38.42188665229476},{"name":"Fusion B: split c=16","k":5,"c":16,"row":"lin","cache":false,"vlm_ms":23.81973333333333,"stale_step_ms":2.2378649999999998,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3,4,5],"fresh":[6,7,8,9,10],"reused":[],"total_ms":29.429651333333332,"speedup":0.9851934591953599,"one_tick_hz":33.97933562560952},{"name":"Fusion A + DP-Cache","k":5,"c":0,"row":"same","cache":true,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3],"fresh":[6,9,10],"reused":[4,5,7,8],"total_ms":21.267045200000002,"speedup":1.3633252634456243,"one_tick_hz":47.02110662745006},{"name":"Fusion B c=8 + DP-Cache","k":3,"c":8,"row":"lin","cache":true,"vlm_ms":20.416914285714284,"stale_step_ms":3.497256,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3],"fresh":[6,9,10],"reused":[4,5,7,8],"total_ms":23.819159485714284,"speedup":1.2172511803948962,"one_tick_hz":41.98300954321068}]};
+
+const NS = "http://www.w3.org/2000/svg";
+const css = v => `var(--${v})`;
+function el(tag, attrs, parent, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text !== undefined) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function legend(id, items) {
+  document.getElementById(id).innerHTML = items.map(([c, t, dash]) =>
+    `<span><i class="sw" style="background:${dash ? 'transparent' : css(c)};${dash ? `border:1.5px dashed ${css(c)}` : ''}"></i>${t}</span>`).join("");
+}
+legend("legend1", [["obs","Observation"],["vision","Vision encoder (3 cameras)"],["prefix","Connector + VLM prefill"],
+  ["stale","Stale flow step (previous KV)"],["fresh","Fresh flow step"],["kv","Cross K/V"],["reused","Reused step (DP-Cache)",1],["cut","Latency reduction"]]);
+
+/* ---------- Figure: pipeline ---------- */
+(function pipeline() {
+  const svg = document.getElementById("pipe");
+  const L = 190, W = 1000, X0 = L, PX = (W - L - 70) / 30; // 30 ms span
+  const x = t => X0 + t * PX;
+  const laneH = 22, gap = 6, groupGap = 22;
+  const I = D.inputs, base = I.baseline_ms;
+  let y = 34;
+  // axis
+  const axis = el("g", {}, svg);
+  for (let t = 0; t <= 30; t += 5) {
+    el("line", {x1: x(t), x2: x(t), y1: 22, y2: 2000, stroke: css("rule"), "stroke-width": 1}, axis);
+    el("text", {x: x(t), y: 14, "text-anchor": "middle", "font-size": 11, fill: css("muted"), "font-family": "var(--font-mono)"}, axis, t + (t === 30 ? " ms" : ""));
+  }
+  function block(g, t0, dur, yy, color, label, opts = {}) {
+    const w = Math.max(dur * PX, 1.5);
+    el("rect", {x: x(t0), y: yy, width: w, height: laneH, rx: 3, fill: opts.hollow ? "none" : css(color),
+      stroke: opts.hollow ? css(color) : "none", "stroke-dasharray": opts.hollow ? "3 2" : "", "stroke-width": 1.5}, g);
+    if (label && w > 14) el("text", {x: x(t0) + w / 2, y: yy + laneH / 2 + 4, "text-anchor": "middle", "font-size": 11,
+      fill: opts.hollow ? css("muted") : "#fff", "font-weight": 500}, g, label);
+  }
+  function reusedChips(g, after, yy, steps, tAt) {
+    steps.forEach((s, i) => {
+      const cx = x(tAt(s)) - 3;
+      el("rect", {x: cx, y: yy - 9, width: 12, height: 8, rx: 1.5, fill: "none", stroke: css("reused"), "stroke-dasharray": "2 1.5", "stroke-width": 1.2}, g);
+      el("text", {x: cx + 6, y: yy - 11.5, "text-anchor": "middle", "font-size": 8.5, fill: css("muted")}, g, s);
+    });
+  }
+  D.rows.forEach(r => {
+    const g = el("g", {}, svg);
+    const two = r.k > 0;
+    const vscale = r.vlm_ms / I.vlm_ms;
+    const tv = I.vision_ms * vscale, tp = I.connector_prefix_ms * vscale;
+    const yV = y, yE = two ? y + laneH + gap : y;
+    // labels
+    el("text", {x: 0, y: y + 15, "font-size": 13, "font-weight": 600, fill: css("fg")}, g, r.name);
+    const sub = r.c ? `VLM on ${64 - r.c}, stale steps on ${r.c} clusters` : (two ? "no contention (bound)" : "sequential, full mesh");
+    el("text", {x: 0, y: y + 30, "font-size": 10.5, fill: css("muted")}, g, sub);
+    if (two) {
+      el("text", {x: L - 8, y: yV + 15, "text-anchor": "end", "font-size": 10, fill: css("muted")}, g, "VLM");
+      el("text", {x: L - 8, y: yE + 15, "text-anchor": "end", "font-size": 10, fill: css("muted")}, g, "expert");
+    }
+    // observation tick
+    el("rect", {x: x(0) - 5, y: yV, width: 4, height: laneH, fill: css("obs")}, g);
+    block(g, 0, tv, yV, "vision", "Vision " + tv.toFixed(1));
+    block(g, tv, tp, yV, "prefix", tp > 2 ? "Prefill " + tp.toFixed(1) : "");
+    // expert
+    let t = 0;
+    const startOf = {};
+    r.stale.forEach(s => { startOf[s] = t; block(g, t, r.stale_step_ms, yE + 0, "stale", "s" + s); t += r.stale_step_ms; });
+    const staleEnd = t;
+    let tf = Math.max(r.vlm_ms, staleEnd);
+    block(g, tf, I.cross_kv_ms, yE, "kv", "");
+    tf += I.cross_kv_ms;
+    const fStart = tf;
+    r.fresh.forEach(s => { startOf[s] = tf; block(g, tf, r.fresh_step_ms, yE, "fresh", String(s)); tf += r.fresh_step_ms; });
+    if (two && staleEnd < r.vlm_ms) {
+      el("line", {x1: x(staleEnd), x2: x(r.vlm_ms), y1: yE + laneH / 2, y2: yE + laneH / 2, stroke: css("muted"), "stroke-dasharray": "2 3"}, g);
+    }
+    // reused chips: placed at the start of the next computed step after the reused one
+    if (r.reused.length) {
+      const all = [...r.stale, ...r.fresh].sort((a, b) => a - b);
+      const at = s => { const nxt = all.find(v => v > s); return nxt ? startOf[nxt] : tf; };
+      reusedChips(g, 0, yE, r.reused, at);
+    }
+    // end marker and reduction bracket
+    el("line", {x1: x(r.total_ms), x2: x(r.total_ms), y1: yV - 4, y2: yE + laneH + 4, stroke: css("fg"), "stroke-width": 1.5}, g);
+    const red = base - r.total_ms;
+    const yB = yE + laneH + 9;
+    if (Math.abs(red) > 0.05) {
+      const a = Math.min(r.total_ms, base), b = Math.max(r.total_ms, base);
+      el("path", {d: `M${x(a)},${yB - 4} V${yB} H${x(b)} V${yB - 4}`, fill: "none", stroke: css("cut"), "stroke-width": 1.5}, g);
+    }
+    const lbl = `${r.total_ms.toFixed(2)} ms  ${r.speedup.toFixed(2)}×` + (Math.abs(red) > 0.05 ? (red > 0 ? `  (−${red.toFixed(1)} ms)` : `  (+${(-red).toFixed(1)} ms)`) : "");
+    el("text", {x: x(Math.max(r.total_ms, base)) + 6, y: yE + 15, "font-size": 11, fill: red < -0.05 ? css("cut") : css("fg"), "font-family": "var(--font-mono)"}, g, lbl);
+    y = yE + laneH + groupGap + (r.reused.length ? 6 : 0);
+  });
+  // top robot markers like Fig. 9
+  el("text", {x: x(0), y: 28, "font-size": 10, fill: css("cut"), "text-anchor": "start"}, svg, "▼ robot stops, model starts");
+  el("text", {x: x(base), y: 28, "font-size": 10, fill: css("cut"), "text-anchor": "middle"}, svg, "▼ baseline resume");
+  svg.setAttribute("viewBox", `0 0 ${W + 120} ${y}`);
+  svg.setAttribute("width", W + 120);
+})();
+
+/* ---------- Figure: DP-Cache chain ---------- */
+(function chain() {
+  const svg = document.getElementById("chain");
+  const comp = new Set([1, 2, 3, 6, 9, 10]);
+  const bw = 64, bh = 30, gx = 14, x0 = 150;
+  const rows = [["DP-Cache alone", null], ["Fusion k = 5 + DP-Cache", 5]];
+  rows.forEach(([name, k], ri) => {
+    const y = 26 + ri * 74;
+    el("text", {x: 0, y: y + 19, "font-size": 12.5, "font-weight": 600, fill: css("fg")}, svg, name);
+    for (let s = 1; s <= 10; s++) {
+      const xx = x0 + (s - 1) * (bw + gx);
+      const isC = comp.has(s), isStale = k && s <= k;
+      const color = isC ? (isStale ? "stale" : (k ? "fresh" : "prefix")) : "reused";
+      el("rect", {x: xx, y, width: bw, height: bh, rx: 4, fill: isC ? css(color) : "none", stroke: css(color),
+        "stroke-dasharray": isC ? "" : "4 3", "stroke-width": 1.5}, svg);
+      el("text", {x: xx + bw / 2, y: y + 19, "text-anchor": "middle", "font-size": 12, fill: isC ? "#fff" : css("muted"),
+        "font-family": "var(--font-mono)"}, svg, "x" + s);
+      el("text", {x: xx + bw / 2, y: y - 6, "text-anchor": "middle", "font-size": 10, fill: css("muted")}, svg,
+        isC ? (comp.has(s + 1) || s === 10 ? "computed" : "cached") : "reused");
+      if (!isC) {
+        const src = s <= 5 ? 3 : 6;
+        if (s === src + 1) el("path", {d: `M${x0 + (src - 1) * (bw + gx) + bw / 2},${y + bh} v8 H${xx + bw / 2 + (bw + gx)} v-8`,
+          fill: "none", stroke: css("prefix"), "stroke-width": 1.2}, svg);
+      }
+      if (k && s <= k && !isC) el("text", {x: xx + bw / 2, y: y + bh + 20, "text-anchor": "middle", "font-size": 9.5, fill: css("cut")}, svg, "saves 0");
+      if (k && s > k && !isC) el("text", {x: xx + bw / 2, y: y + bh + 20, "text-anchor": "middle", "font-size": 9.5, fill: css("prefix")}, svg, "−1.10 ms");
+    }
+    if (k) {
+      const xe = x0 + k * (bw + gx) - gx / 2;
+      el("line", {x1: xe, x2: xe, y1: y - 16, y2: y + bh + 6, stroke: css("kv"), "stroke-width": 2}, svg);
+      el("text", {x: xe + 4, y: y - 16, "font-size": 9.5, fill: css("kv")}, svg, "KV switch");
+      el("text", {x: x0, y: y + bh + 34, "font-size": 10, fill: css("muted")}, svg, "← stale window, hidden behind the VLM");
+    }
+  });
+  const W = x0 + 10 * (bw + gx);
+  svg.setAttribute("viewBox", `0 0 ${W} 190`); svg.setAttribute("width", W);
+})();
+
+/* ---------- Table ---------- */
+(function table() {
+  const t = document.getElementById("tbl");
+  const head = "<tr><th>Scenario</th><th>Overlap phase</th><th>Stale / fresh / reused steps</th><th style='text-align:right'>Call</th><th style='text-align:right'>vs 28.99 ms</th><th style='text-align:right'>One-tick rate</th></tr>";
+  const desc = r => r.k === 0 ? "none" : (r.c ? `VLM ${64 - r.c} cl. (${r.vlm_ms.toFixed(2)} ms) ∥ expert ${r.c} cl. (${r.stale_step_ms.toFixed(2)} ms/step)` : "both at full speed (bound)");
+  t.innerHTML = head + D.rows.map(r => `<tr><td>${r.name}</td><td>${desc(r)}</td><td>${r.stale.length} / ${r.fresh.length} / ${r.reused.length}</td>
+    <td class="num">${r.total_ms.toFixed(2)} ms</td><td class="num">${r.speedup.toFixed(3)}×</td><td class="num">${r.one_tick_hz.toFixed(1)} Hz</td></tr>`).join("");
+})();
+
+/* ---------- Figure: controller ---------- */
+(function ctrl() {
+  const svg = document.getElementById("ctrl");
+  const P = 1000 / 30, M = 25, L = 170, W = 1000;
+  const span = 2 * M * P + 120; // two replan cycles
+  const PX = (W - L - 20) / span, x = t => L + t * PX;
+  let y = 30;
+  for (let i = 0; i * P <= span; i++) {
+    const big = i % 5 === 0;
+    el("line", {x1: x(i * P), x2: x(i * P), y1: 20, y2: big ? 24 : 22, stroke: css("muted")}, svg);
+    if (i % 10 === 0) el("text", {x: x(i * P), y: 14, "text-anchor": "middle", "font-size": 10, fill: css("muted"), "font-family": "var(--font-mono)"}, svg, `${i} tick`);
+  }
+  const lanes = [
+    ["Stop-and-go, baseline", "stop", D.rows[0].total_ms],
+    ["Stop-and-go, Fusion A + Cache", "stop", D.rows[5].total_ms],
+    ["Async execution, baseline", "async", D.rows[0].total_ms],
+  ];
+  lanes.forEach(([name, mode, l]) => {
+    el("text", {x: 0, y: y + 14, "font-size": 12, "font-weight": 600, fill: css("fg")}, svg, name);
+    let t = 0;
+    for (let c = 0; c < 2; c++) {
+      if (mode === "stop") {
+        el("rect", {x: x(t), y, width: l * PX, height: 18, fill: css("cut"), rx: 2}, svg);
+        el("text", {x: x(t) + l * PX + 3, y: y + 13, "font-size": 9.5, fill: css("cut")}, svg, c === 0 ? `pause ${l.toFixed(1)} ms` : "");
+        t += l;
+        el("rect", {x: x(t), y, width: M * P * PX, height: 18, fill: css("fresh"), opacity: .35, rx: 2}, svg);
+        el("text", {x: x(t + M * P / 2), y: y + 13, "text-anchor": "middle", "font-size": 10, fill: css("fg")}, svg, `execute ${M} actions (${(M * P).toFixed(0)} ms)`);
+        t += M * P;
+      } else {
+        const t0 = c * M * P;
+        el("rect", {x: x(t0), y, width: M * P * PX, height: 18, fill: css("fresh"), opacity: .35, rx: 2}, svg);
+        el("rect", {x: x(t0), y: y + 22, width: l * PX, height: 10, fill: css("prefix"), rx: 2}, svg);
+        el("text", {x: x(t0) + l * PX + 4, y: y + 31, "font-size": 9.5, fill: css("muted")}, svg, c === 0 ? `call on obs ${c}: observation staleness = l = ${l.toFixed(1)} ms (1 tick at 30 Hz)` : "");
+      }
+    }
+    if (mode === "async") {
+      const yy = y + 48;
+      el("path", {d: `M${x(0)},${yy} H${x(M * P)}`, stroke: css("stale"), "stroke-width": 2, "marker-end": ""}, svg);
+      el("text", {x: x(M * P / 2), y: yy + 13, "text-anchor": "middle", "font-size": 10, fill: css("muted")}, svg, `stale steps of call 1 read the KV of call 0: ${M} ticks = ${(M * P).toFixed(0)} ms old`);
+      y += 30;
+    }
+    y += 36;
+  });
+  svg.setAttribute("viewBox", `0 0 ${W} ${y}`); svg.setAttribute("width", W);
+})();
+
+/* ---------- Mesh maps ---------- */
+legend("legend2", [["vlmcell", "VLM kernels"], ["expcell", "expert kernels"], ["stale", "expert, stale steps"], ["kv", "HBM edge (west, south)"]]);
+(function meshes() {
+  const host = document.getElementById("meshes");
+  const cs = 15, n = 8;
+  function grid(title, fill) {
+    const W = n * cs + 14, H = n * cs + 30;
+    const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, width: W, height: H});
+    el("text", {x: 10, y: 11, "font-size": 10.5, fill: css("muted")}, svg, title);
+    el("rect", {x: 2, y: 16, width: 5, height: n * cs, fill: css("kv")}, svg);
+    el("rect", {x: 10, y: 18 + n * cs, width: n * cs, height: 5, fill: css("kv")}, svg);
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      const f = fill(r, c), xx = 10 + c * cs, yy = 16 + r * cs;
+      if (Array.isArray(f)) {
+        el("path", {d: `M${xx + 1},${yy + 1} h${cs - 2} L${xx + 1},${yy + cs - 1} Z`, fill: css(f[0])}, svg);
+        el("path", {d: `M${xx + cs - 1},${yy + 1} V${yy + cs - 1} H${xx + 1} Z`, fill: css(f[1])}, svg);
+      } else el("rect", {x: xx + 1, y: yy + 1, width: cs - 2, height: cs - 2, rx: 2, fill: css(f)}, svg);
+    }
+    return svg;
+  }
+  const cards = [
+    ["Baseline / DP-Cache", "VLM 17.86 ms", () => "vlmcell", "expert, 10 steps (6 with DP-Cache)", () => "expcell",
+      "Sequential. DP-Cache keeps the mapping and removes 4 expert steps (0.79 GB less weight streaming per call)."],
+    ["Fusion A: no contention", "overlap 17.86 ms", () => ["vlmcell", "stale"], "fresh steps", () => "expcell",
+      "Each cluster shown running both. A cluster runs one kernel at a time, so this has no mapping on SoftHier; it bounds B."],
+    ["Fusion B: c = 8", "overlap 20.42 ms", r => r === 7 ? "stale" : "vlmcell", "fresh steps", () => "expcell",
+      "Bottom row runs the stale steps next to the south (weight) channels; VLM on 56 clusters. Group reconfigures to the full mesh at the KV switch (not modelled). 1.11×."],
+    ["Fusion B: c = 16", "overlap 23.82 ms", r => r >= 6 ? "stale" : "vlmcell", "fresh steps", () => "expcell",
+      "VLM on 48 clusters slows by 6 ms if linear, more than the 5.5 ms of hidden expert time: 0.985×, slower than not splitting."],
+  ];
+  cards.forEach(([h, t1, f1, t2, f2, note]) => {
+    const card = document.createElement("div"); card.className = "mesh";
+    card.innerHTML = `<h3>${h}</h3>`;
+    const pair = document.createElement("div"); pair.className = "pair";
+    pair.appendChild(grid("phase 1: " + t1, f1)); pair.appendChild(grid("phase 2: " + t2, f2));
+    card.appendChild(pair);
+    const p = document.createElement("div"); p.className = "note"; p.textContent = note; card.appendChild(p);
+    host.appendChild(card);
+  });
+})();
+</script>
