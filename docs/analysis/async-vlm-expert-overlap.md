@@ -28,14 +28,22 @@ Zhou et al. (SJTU), arXiv 2604.24447; wiki note `wiki://resources/serving/vla-xp
 | VLM part (vision + connector + prefix) | 17.86 ms | [smolvla-op-graph.md](smolvla-op-graph.md): 14.69 + 0.17 + 3.01 |
 | cross K/V projection | 0.09 ms | once per call; needs the fresh prefix |
 | expert flow step, full mesh | 1.104 ms | (11.13 - 0.09) / 10 |
-| expert flow step on 8 clusters | 2.29-3.50 ms | measured sub-mesh GEMM and attention picks (below); row ops x1 to x8 |
-| expert flow step on 16 clusters | 1.72-2.24 ms | as above, row ops x1 to x4 |
+| expert flow step on 8 clusters | 2.93-4.14 ms | one row of 8 at the origin: measured GEMMs that fit, attention heads in rounds (below); row ops x1 to x8 |
+| expert flow step on 16 clusters | 1.86-2.38 ms | two rows of 8 at the origin, as above; row ops x1 to x4 |
 | baseline per call | 28.99 ms | stage-1 composed estimate |
 
-Sub-mesh expert kernels: for each per-step shape, the fastest checked setting that uses at most c
-clusters in `gemm_sweep_h1.csv`, `gemm_smallm_h1.csv` and `attn_sweep_h1.csv`. GEMMs per step:
-1.91 ms on 8 clusters, 1.35 ms on 16, 0.73 ms on 64. The attention picks already use at most 8
-clusters (0.20 ms per step).
+Sub-mesh expert kernels. SummaGEMM and FlatAttention tile the mesh from cluster (0, 0) with
+power-of-two groups (`grid_sync_group_init`: group id = (8 / gx) (y / gy) + x / gx; ids below the
+group count are active), so a sub-mesh time counts only if its active groups lie inside one fixed
+footprint: one row of 8 for c = 8, two rows of 8 for c = 16.
+
+- GEMMs: the fastest checked setting in `gemm_sweep_h1.csv` / `gemm_smallm_h1.csv` whose groups fit
+  (measured): 2.18 ms per step on the row of 8 (1 x 1 or 1 x 2 groups; the 2 x 2 settings need a
+  4 x 2 block), 1.35 ms on two rows, 0.73 ms on the full mesh.
+- Attention: the picked `coll_s8x1` spreads the 5 KV heads (GQA folded) over 5 groups of 8 x 1, i.e.
+  40 clusters, so no sub-mesh time was measured. Inside the footprint fewer groups fit and the heads
+  run in ceil(5 / groups) rounds at the measured per-head time (estimate): 0.57 ms per step on the
+  row of 8, 0.34 ms on two rows, 0.20 ms on the full mesh.
 
 Model: T = max(T_VLM(64 - c), n_stale x e_stale(c)) + cross K/V + n_fresh x e, with k <= 5.
 
@@ -46,7 +54,7 @@ Model: T = max(T_VLM(64 - c), n_stale x e_stale(c)) + cross K/V + n_fresh x e, w
 | Baseline | none | 0 / 10 / 0 | 28.99 ms | 1.00x | 34.5 Hz |
 | DP-Cache | none | 0 / 6 / 4 | 24.58 ms | 1.18x | 40.7 Hz |
 | Overlap, ideal | both at full speed (bound) | 5 / 5 / 0 | 23.47 ms | 1.24x | 42.6 Hz |
-| Overlap, 8-cluster split | VLM on 56 (20.42 ms), expert on 8 | 5 / 5 / 0 | 26.03 ms | 1.11x | 38.4 Hz |
+| Overlap, 8-cluster split | VLM on 56 (20.42 ms), expert on 8 | 5 / 5 / 0 | 26.30 ms | 1.10x | 38.0 Hz |
 | Overlap, 16-cluster split | VLM on 48 (23.82 ms), expert on 16 | 5 / 5 / 0 | 29.43 ms | 0.985x | 34.0 Hz |
 | Overlap, ideal + DP-Cache | bound | 3 / 3 / 4 | 21.27 ms | 1.36x | 47.0 Hz |
 | Overlap, 8-cluster split + DP-Cache | VLM on 56, expert on 8 | 3 / 3 / 4 | 23.82 ms | 1.22x | 42.0 Hz |
@@ -56,10 +64,14 @@ One-tick rate: the highest control rate at which a call still fits in one contro
 - **The earlier "tuned GEMMs" variant is now the baseline.** The earlier estimate assumed full-mesh expert GEMMs
   at 29.09 ms; `dcd221d` measured 28.99 ms. The overlap variants therefore differ only in the overlap phase: the
   fresh-step phase is the full-mesh expert in every scenario.
-- **A split is limited by the VLM, not the expert.** The split gains while the VLM loses less than the hidden
-  expert time, 5 x 1.10 = 5.52 ms, i.e. a VLM slowdown of at most 1.31x. With linear scaling, c = 8
-  costs 2.55 ms (net 1.11x) and c = 16 costs 5.96 ms (net loss). At c = 8 the stale steps would set the overlap time only
-  above 4.08 ms per step; the measured range is 2.29-3.50 ms.
+- **Both sides limit a split.** The split gains while the VLM loses less than the hidden expert
+  time, 5 x 1.10 = 5.52 ms, i.e. a VLM slowdown of at most 1.31x. With linear scaling, c = 16 costs
+  5.96 ms (net loss). At c = 8 the VLM costs 2.55 ms, and the stale steps on the row of 8 take
+  2.93-4.14 ms each; at the upper end five of them (20.7 ms) outlast the VLM (20.42 ms), giving 1.10x.
+- **The linear VLM slowdown is likely optimistic.** The kernels start their groups at cluster (0, 0)
+  with no origin offset, so the VLM cannot yet run on "the other 56" at all, and power-of-two groups
+  tile only part of an 8 x 7 region (4 x 4 groups: 8 x 4 = 32 clusters; 2 x 2 groups: 8 x 6 = 48). At
+  an effective 48 clusters (1.33x) the 8-cluster split also loses.
 - **Overlap and DP-Cache do not multiply** (1.18 x 1.24 = 1.46, model 1.36). Under overlap the stale
   window is hidden behind the VLM, so reusing steps 4 and 5 saves nothing; only reuse in the fresh tail
   (7, 8) shortens the call. Put reused steps in the fresh tail.
@@ -89,11 +101,11 @@ of stale actions at these rates.
 | --- | --- | --- |
 | Baseline / DP-Cache | VLM on 64 | expert on 64 (6 steps with DP-Cache) |
 | Overlap, ideal | both on 64, no slowdown (bound) | expert on 64 |
-| Overlap, 8-cluster split | VLM on rows 0-6, stale steps on row 7 | expert on 64 |
-| Overlap, 16-cluster split | VLM on rows 0-5, stale steps on rows 6-7 | expert on 64 |
+| Overlap, 8-cluster split | VLM on rows 1-7, stale steps on row 0 (origin) | expert on 64 |
+| Overlap, 16-cluster split | VLM on rows 2-7, stale steps on rows 0-1 (origin) | expert on 64 |
 
-The bottom-row placement follows the stage-1 HBM rule (second operands, i.e. weights, on the south
-edge): a bottom-row strip reaches all 8 south channels through its own edge nodes. It is illustrative.
+The stale-step group takes the origin rows because the kernels place groups from cluster (0, 0);
+which HBM edge those rows touch is not checked here.
 The reconfiguration from the c-cluster group to the full mesh at the KV switch is not modelled.
 
 ## Assumptions
@@ -108,7 +120,8 @@ The reconfiguration from the c-cluster group to the full mesh at the KV switch i
 ## Open measurements
 
 1. VLM kernels (vision and prefix) on 56 and 48 clusters. This decides whether the split pays.
-2. Expert row kernels on 8 and 16 clusters, to narrow e_stale.
+2. Expert attention and row kernels confined to one and two rows (attention needs a head-to-group
+   limit), to replace the head-rounds estimate and the row-op range.
 3. The two cluster groups running concurrently in GVSoC, for NoC and HBM contention and the cost of
    the KV-switch reconfiguration.
 4. SmolVLA accuracy with k stale steps and with step reuse (LIBERO or VLABench).
