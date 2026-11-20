@@ -102,11 +102,11 @@ def best_k(name, **kw):
 ROWS = [
     run("Baseline", 0),
     run("DP-Cache", 0, cache=True),
-    run("Fusion A: no contention", 5),
-    best_k("Fusion B: split c=8", c=8, row="lin"),
-    best_k("Fusion B: split c=16", c=16, row="lin"),
-    run("Fusion A + DP-Cache", 5, cache=True),
-    best_k("Fusion B c=8 + DP-Cache", c=8, row="lin", cache=True),
+    run("Overlap, ideal", 5),
+    best_k("Overlap, 8-cluster split", c=8, row="lin"),
+    best_k("Overlap, 16-cluster split", c=16, row="lin"),
+    run("Overlap, ideal + DP-Cache", 5, cache=True),
+    best_k("Overlap, 8-cluster split + DP-Cache", c=8, row="lin", cache=True),
 ]
 
 OUT = dict(

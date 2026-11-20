@@ -49,14 +49,33 @@ td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text
 ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; max-width: 80ch; }
 code { font-family: var(--font-mono); font-size: .85em; }
 .tag { font-family: var(--font-mono); font-size: .72rem; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--rule); color: var(--muted); }
+.defs { display: grid; gap: 8px; max-width: 80ch; }
+.defs > div { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 4px 14px; align-items: baseline; }
+.defs > div .tag { grid-column: 1; justify-self: start; }
+.defs > div > span:last-child { grid-column: 2; grid-row: 1 / span 2; }
+.defs .sub { padding-left: 18px; }
+.defs .sub b { font-weight: 500; }
+@media (max-width: 560px) { .defs > div { grid-template-columns: 1fr; } .defs > div > span:last-child { grid-column: 1; grid-row: auto; } }
 </style>
 
 <div class="wrap">
   <header class="lede">
     <div class="eyebrow">SoftHier-VLA · stage 1 · W1 (vlabench-3cam) on H1 · <span class="tag">estimate</span></div>
     <h1>SmolVLA VLM–Expert Overlap on H1</h1>
-    <p>What V-AEFusion (run the first flow steps on the previous call's VLM cache while the VLM runs) and DP-Cache (reuse flow-step results) would do to one SmolVLA call, using the stage-1 kernel sums after the expert GEMMs moved to the full mesh (commit <code>dcd221d</code>, 28.99 ms per call). Methods from Zhou et al. (SJTU), arXiv 2604.24447, §5.2.2 and §5.3. Numbers come from <code>docs/analysis/async_overlap_estimate.py</code>.</p>
+    <p>How much two speedups from the SJTU paper would shorten one SmolVLA call: the overlap of the VLM with the first flow steps, and DP-Cache. Inputs are the stage-1 kernel sums after the expert GEMMs moved to the full mesh (commit <code>dcd221d</code>, 28.99 ms per call). Methods from Zhou et al. (SJTU), arXiv 2604.24447, §5.2.2 and §5.3. Numbers come from <code>docs/analysis/async_overlap_estimate.py</code>.</p>
   </header>
+
+  <section>
+    <h2>How to read this page</h2>
+    <p>Today one SmolVLA call runs in two strict phases on all 64 clusters: the VLM (vision encoder, then prefill) for 17.86 ms, then 10 flow steps of the action expert for 11.13 ms. The page compares two ways from the SJTU paper to shorten that call, alone and together.</p>
+    <div class="defs">
+      <div><b>DP-Cache</b><span>Skip some flow steps by reusing the result of an earlier step. The mapping does not change; the expert phase just gets shorter.</span></div>
+      <div><b>Overlap</b> <span class="tag">V-AEFusion in the paper</span><span>Start the first k = 5 flow steps before the VLM finishes, on the previous call's VLM output ("stale" steps). After the VLM finishes, run the remaining 5 steps on the fresh output. The question is how the mesh runs the VLM and the stale steps at the same time:</span></div>
+      <div class="sub"><b>Overlap, ideal</b><span>Assumes both run at full speed with no interference. A cluster can only run one kernel at a time, so this is an upper bound, not a real mapping.</span></div>
+      <div class="sub"><b>Overlap, 8- or 16-cluster split</b><span>Give 8 or 16 clusters to the stale steps and the rest to the VLM. Both slow down; the measured sub-mesh kernel times and a linear VLM slowdown set how much.</span></div>
+    </div>
+    <p>After the VLM finishes, every variant runs the fresh steps on the full mesh, so the variants differ only in the overlap phase.</p>
+  </section>
 
   <section>
     <h2>One policy call, drawn like the paper's Fig. 9</h2>
@@ -68,13 +87,13 @@ code { font-family: var(--font-mono); font-size: .85em; }
   <section>
     <h2>DP-Cache steps, drawn like the paper's Fig. 7</h2>
     <div class="fig"><svg id="chain" role="img" aria-label="DP-Cache computed and reused flow steps"></svg></div>
-    <p class="cap">Assumed pattern: steps 4 and 5 reuse step 3, steps 7 and 8 reuse step 6 (4 of 10 reused). The paper fixes its stable segment only for a 100-step diffusion (steps 20 to 80, S = 4); 4 of 10 is chosen so the saved share of expert time (40 %) matches the paper's π0 result (102 → 79 ms, about 38 % of expert time). Lower row: with Fusion k = 5, the reused steps 4 and 5 fall inside the stale window, which is already hidden behind the VLM, so only the reuse of 7 and 8 shortens the call.</p>
+    <p class="cap">Assumed pattern: steps 4 and 5 reuse step 3, steps 7 and 8 reuse step 6 (4 of 10 reused). The paper fixes its stable segment only for a 100-step diffusion (steps 20 to 80, S = 4); 4 of 10 is chosen so the saved share of expert time (40 %) matches the paper's π0 result (102 → 79 ms, about 38 % of expert time). Lower row: with overlap (k = 5), the reused steps 4 and 5 fall inside the stale window, which is already hidden behind the VLM, so only the reuse of 7 and 8 shortens the call.</p>
   </section>
 
   <section>
     <h2>Summary</h2>
     <div class="tablebox"><table id="tbl"></table></div>
-    <p class="cap">One-tick rate = the highest control rate at which a call still finishes within one control period (1 / latency). Fusion and DP-Cache do not multiply: 1.18 × 1.235 would be 1.46×, the model gives 1.36×, because the stale window is free under Fusion and caching there saves nothing. Design rule: place reused steps in the fresh tail.</p>
+    <p class="cap">One-tick rate = the highest control rate at which a call still finishes within one control period (1 / latency). Overlap and DP-Cache do not multiply: 1.18 × 1.235 would be 1.46×, the model gives 1.36×, because the stale steps are already hidden behind the VLM and caching there saves nothing. Design rule: place reused steps in the fresh tail.</p>
   </section>
 
   <section>
@@ -87,15 +106,15 @@ code { font-family: var(--font-mono); font-size: .85em; }
     <h2>Spatial mapping per phase</h2>
     <div class="legend" id="legend2"></div>
     <div class="meshes" id="meshes"></div>
-    <p class="cap">8 × 8 clusters of H1. HBM sits on the west and south edges; the stage-1 placement rule puts second operands (weights) on the south edge, so an expert strip on the bottom row reaches all 8 south channels through its own edge nodes. After <code>dcd221d</code> the fresh phase is the same in every scenario (expert on the full mesh); the scenarios differ only in the overlap phase, as the user suggested.</p>
+    <p class="cap">8 × 8 clusters of H1. HBM sits on the west and south edges; the stage-1 placement rule puts second operands (weights) on the south edge, so an expert strip on the bottom row reaches all 8 south channels through its own edge nodes. After <code>dcd221d</code> the fresh phase is the same in every scenario (expert on the full mesh); the variants differ only in the overlap phase.</p>
   </section>
 
   <section>
     <h2>Assumptions and what to measure next</h2>
     <ul>
-      <li><b>VLM on 56 or 48 clusters</b> is scaled linearly (64/56, 64/48). This decides B: the split pays off only while the VLM slows by less than the hidden expert time, 5 steps × 1.10 = 5.52 ms, i.e. at most 1.31× on 17.86 ms. At c = 16 the linear slowdown (1.33×) already loses. <b>Measure VLM kernels on 56 and 48 clusters first.</b></li>
-      <li><b>Expert stale step on c clusters</b> uses measured sub-mesh times: the fastest checked setting per shape with ≤ c clusters from the GEMM and attention sweeps (GEMMs 1.91 ms per step on 8 clusters, 1.35 ms on 16; attention picks already use ≤ 8 clusters, 0.20 ms). Row operators are scaled by 64/c (upper bound). On 8 clusters a stale step takes 2.29 to 3.50 ms, under the 4.08 ms that would let it limit B.</li>
-      <li><b>Not modelled</b>: NoC and HBM contention between the two groups; the reconfiguration from a c-cluster group to the full mesh at the KV switch; two kernels sharing a cluster (a cluster runs one kernel at a time, so A has no physical mapping on SoftHier and is a bound).</li>
+      <li><b>VLM on 56 or 48 clusters</b> is scaled linearly (64/56, 64/48). This decides the split variants: a split pays off only while the VLM slows by less than the hidden expert time, 5 steps × 1.10 = 5.52 ms, i.e. at most 1.31× on 17.86 ms. At c = 16 the linear slowdown (1.33×) already loses. <b>Measure VLM kernels on 56 and 48 clusters first.</b></li>
+      <li><b>Expert stale step on c clusters</b> uses measured sub-mesh times: the fastest checked setting per shape with ≤ c clusters from the GEMM and attention sweeps (GEMMs 1.91 ms per step on 8 clusters, 1.35 ms on 16; attention picks already use ≤ 8 clusters, 0.20 ms). Row operators are scaled by 64/c (upper bound). On 8 clusters a stale step takes 2.29 to 3.50 ms, under the 4.08 ms at which the stale steps, not the VLM, would set the overlap time.</li>
+      <li><b>Not modelled</b>: NoC and HBM contention between the two groups; the reconfiguration from a c-cluster group to the full mesh at the KV switch; two kernels sharing a cluster (a cluster runs one kernel at a time, so the ideal overlap has no physical mapping on SoftHier and is a bound).</li>
       <li><b>Accuracy</b>: no source measures the combination. SJTU's stale-step limit (≤ 5 of 10, Table 7) is for π0 on a real dual-arm robot. In SmolVLA the robot state sits in the VLM prefix and the self-attention layers also read the prefix cache, so stale steps carry stale state as well as stale images.</li>
       <li>DP-Cache's 4-of-10 pattern is a calibration to π0, not a SmolVLA measurement; the cached data (one 50 × 32 velocity per reused step) is negligible in memory.</li>
     </ul>
@@ -103,7 +122,7 @@ code { font-family: var(--font-mono); font-size: .85em; }
 </div>
 
 <script>
-const D = {"inputs":{"vision_ms":14.688600000000001,"connector_prefix_ms":3.1762,"vlm_ms":17.8648,"cross_kv_ms":0.09073600000000001,"step_ms":1.1038363999999998,"baseline_ms":28.9939},"stale_step_ms":{"8":{"same":2.287796,"lin":3.497256},"16":{"same":1.719525,"lin":2.2378649999999998}},"breakeven":{"hidden_ms_k5":5.519182,"max_vlm_slowdown_k5":1.308941717791411,"max_stale_step_c8_ms":4.0833828571428565},"rows":[{"name":"Baseline","k":0,"c":0,"row":"same","cache":false,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[],"fresh":[1,2,3,4,5,6,7,8,9,10],"reused":[],"total_ms":28.9939,"speedup":1.0,"one_tick_hz":34.49001341661522},{"name":"DP-Cache","k":0,"c":0,"row":"same","cache":true,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[],"fresh":[1,2,3,6,9,10],"reused":[4,5,7,8],"total_ms":24.5785544,"speedup":1.1796422006006992,"one_tick_hz":40.68587532552362},{"name":"Fusion A: no contention","k":5,"c":0,"row":"same","cache":false,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3,4,5],"fresh":[6,7,8,9,10],"reused":[],"total_ms":23.474718,"speedup":1.2351117487332541,"one_tick_hz":42.59902078482902},{"name":"Fusion B: split c=8","k":5,"c":8,"row":"lin","cache":false,"vlm_ms":20.416914285714284,"stale_step_ms":3.497256,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3,4,5],"fresh":[6,7,8,9,10],"reused":[],"total_ms":26.026832285714285,"speedup":1.1140003394079692,"one_tick_hz":38.42188665229476},{"name":"Fusion B: split c=16","k":5,"c":16,"row":"lin","cache":false,"vlm_ms":23.81973333333333,"stale_step_ms":2.2378649999999998,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3,4,5],"fresh":[6,7,8,9,10],"reused":[],"total_ms":29.429651333333332,"speedup":0.9851934591953599,"one_tick_hz":33.97933562560952},{"name":"Fusion A + DP-Cache","k":5,"c":0,"row":"same","cache":true,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3],"fresh":[6,9,10],"reused":[4,5,7,8],"total_ms":21.267045200000002,"speedup":1.3633252634456243,"one_tick_hz":47.02110662745006},{"name":"Fusion B c=8 + DP-Cache","k":3,"c":8,"row":"lin","cache":true,"vlm_ms":20.416914285714284,"stale_step_ms":3.497256,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3],"fresh":[6,9,10],"reused":[4,5,7,8],"total_ms":23.819159485714284,"speedup":1.2172511803948962,"one_tick_hz":41.98300954321068}]};
+const D = {"inputs":{"vision_ms":14.688600000000001,"connector_prefix_ms":3.1762,"vlm_ms":17.8648,"cross_kv_ms":0.09073600000000001,"step_ms":1.1038363999999998,"baseline_ms":28.9939},"stale_step_ms":{"8":{"same":2.287796,"lin":3.497256},"16":{"same":1.719525,"lin":2.2378649999999998}},"breakeven":{"hidden_ms_k5":5.519182,"max_vlm_slowdown_k5":1.308941717791411,"max_stale_step_c8_ms":4.0833828571428565},"rows":[{"name":"Baseline","k":0,"c":0,"row":"same","cache":false,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[],"fresh":[1,2,3,4,5,6,7,8,9,10],"reused":[],"total_ms":28.9939,"speedup":1.0,"one_tick_hz":34.49001341661522},{"name":"DP-Cache","k":0,"c":0,"row":"same","cache":true,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[],"fresh":[1,2,3,6,9,10],"reused":[4,5,7,8],"total_ms":24.5785544,"speedup":1.1796422006006992,"one_tick_hz":40.68587532552362},{"name":"Overlap, ideal","k":5,"c":0,"row":"same","cache":false,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3,4,5],"fresh":[6,7,8,9,10],"reused":[],"total_ms":23.474718,"speedup":1.2351117487332541,"one_tick_hz":42.59902078482902},{"name":"Overlap, 8-cluster split","k":5,"c":8,"row":"lin","cache":false,"vlm_ms":20.416914285714284,"stale_step_ms":3.497256,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3,4,5],"fresh":[6,7,8,9,10],"reused":[],"total_ms":26.026832285714285,"speedup":1.1140003394079692,"one_tick_hz":38.42188665229476},{"name":"Overlap, 16-cluster split","k":5,"c":16,"row":"lin","cache":false,"vlm_ms":23.81973333333333,"stale_step_ms":2.2378649999999998,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3,4,5],"fresh":[6,7,8,9,10],"reused":[],"total_ms":29.429651333333332,"speedup":0.9851934591953599,"one_tick_hz":33.97933562560952},{"name":"Overlap, ideal + DP-Cache","k":5,"c":0,"row":"same","cache":true,"vlm_ms":17.8648,"stale_step_ms":1.1038363999999998,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3],"fresh":[6,9,10],"reused":[4,5,7,8],"total_ms":21.267045200000002,"speedup":1.3633252634456243,"one_tick_hz":47.02110662745006},{"name":"Overlap, 8-cluster split + DP-Cache","k":3,"c":8,"row":"lin","cache":true,"vlm_ms":20.416914285714284,"stale_step_ms":3.497256,"fresh_step_ms":1.1038363999999998,"stale":[1,2,3],"fresh":[6,9,10],"reused":[4,5,7,8],"total_ms":23.819159485714284,"speedup":1.2172511803948962,"one_tick_hz":41.98300954321068}]};
 
 const NS = "http://www.w3.org/2000/svg";
 const css = v => `var(--${v})`;
@@ -119,12 +138,12 @@ function legend(id, items) {
     `<span><i class="sw" style="background:${dash ? 'transparent' : css(c)};${dash ? `border:1.5px dashed ${css(c)}` : ''}"></i>${t}</span>`).join("");
 }
 legend("legend1", [["obs","Observation"],["vision","Vision encoder (3 cameras)"],["prefix","Connector + VLM prefill"],
-  ["stale","Stale flow step (previous KV)"],["fresh","Fresh flow step"],["kv","Cross K/V"],["reused","Reused step (DP-Cache)",1],["cut","Latency reduction"]]);
+  ["stale","Stale flow step (previous call's VLM output)"],["fresh","Fresh flow step (this call's VLM output)"],["kv","Cross K/V"],["reused","Reused step (DP-Cache)",1],["cut","Latency reduction"]]);
 
 /* ---------- Figure: pipeline ---------- */
 (function pipeline() {
   const svg = document.getElementById("pipe");
-  const L = 190, W = 1000, X0 = L, PX = (W - L - 70) / 30; // 30 ms span
+  const L = 270, W = 1080, X0 = L, PX = (W - L - 70) / 30; // 30 ms span
   const x = t => X0 + t * PX;
   const laneH = 22, gap = 6, groupGap = 22;
   const I = D.inputs, base = I.baseline_ms;
@@ -157,7 +176,7 @@ legend("legend1", [["obs","Observation"],["vision","Vision encoder (3 cameras)"]
     const yV = y, yE = two ? y + laneH + gap : y;
     // labels
     el("text", {x: 0, y: y + 15, "font-size": 13, "font-weight": 600, fill: css("fg")}, g, r.name);
-    const sub = r.c ? `VLM on ${64 - r.c}, stale steps on ${r.c} clusters` : (two ? "no contention (bound)" : "sequential, full mesh");
+    const sub = r.c ? `VLM on ${64 - r.c} clusters, stale steps on ${r.c}` : (two ? "upper bound: no interference" : "VLM, then expert, full mesh");
     el("text", {x: 0, y: y + 30, "font-size": 10.5, fill: css("muted")}, g, sub);
     if (two) {
       el("text", {x: L - 8, y: yV + 15, "text-anchor": "end", "font-size": 10, fill: css("muted")}, g, "VLM");
@@ -209,8 +228,8 @@ legend("legend1", [["obs","Observation"],["vision","Vision encoder (3 cameras)"]
 (function chain() {
   const svg = document.getElementById("chain");
   const comp = new Set([1, 2, 3, 6, 9, 10]);
-  const bw = 64, bh = 30, gx = 14, x0 = 150;
-  const rows = [["DP-Cache alone", null], ["Fusion k = 5 + DP-Cache", 5]];
+  const bw = 64, bh = 30, gx = 14, x0 = 200;
+  const rows = [["DP-Cache alone", null], ["Overlap (k = 5) + DP-Cache", 5]];
   rows.forEach(([name, k], ri) => {
     const y = 26 + ri * 74;
     el("text", {x: 0, y: y + 19, "font-size": 12.5, "font-weight": 600, fill: css("fg")}, svg, name);
@@ -255,7 +274,7 @@ legend("legend1", [["obs","Observation"],["vision","Vision encoder (3 cameras)"]
 /* ---------- Figure: controller ---------- */
 (function ctrl() {
   const svg = document.getElementById("ctrl");
-  const P = 1000 / 20, M = 25, L = 170, W = 1000;
+  const P = 1000 / 20, M = 25, L = 250, W = 1080;
   const span = 2 * M * P + 120; // two replan cycles
   const PX = (W - L - 20) / span, x = t => L + t * PX;
   let y = 30;
@@ -266,7 +285,7 @@ legend("legend1", [["obs","Observation"],["vision","Vision encoder (3 cameras)"]
   }
   const lanes = [
     ["Stop-and-go, baseline", "stop", D.rows[0].total_ms],
-    ["Stop-and-go, Fusion A + Cache", "stop", D.rows[5].total_ms],
+    ["Stop-and-go, overlap ideal + DP-Cache", "stop", D.rows[5].total_ms],
     ["Async execution, baseline", "async", D.rows[0].total_ms],
   ];
   lanes.forEach(([name, mode, l]) => {
@@ -321,11 +340,11 @@ legend("legend2", [["vlmcell", "VLM kernels"], ["expcell", "expert kernels"], ["
   const cards = [
     ["Baseline / DP-Cache", "VLM 17.86 ms", () => "vlmcell", "expert, 10 steps (6 with DP-Cache)", () => "expcell",
       "Sequential. DP-Cache keeps the mapping and removes 4 expert steps (0.79 GB less weight streaming per call)."],
-    ["Fusion A: no contention", "overlap 17.86 ms", () => ["vlmcell", "stale"], "fresh steps", () => "expcell",
-      "Each cluster shown running both. A cluster runs one kernel at a time, so this has no mapping on SoftHier; it bounds B."],
-    ["Fusion B: c = 8", "overlap 20.42 ms", r => r === 7 ? "stale" : "vlmcell", "fresh steps", () => "expcell",
+    ["Overlap, ideal", "overlap 17.86 ms", () => ["vlmcell", "stale"], "fresh steps", () => "expcell",
+      "Each cluster shown running both. A cluster runs one kernel at a time, so this has no mapping on SoftHier; it bounds the split variants."],
+    ["Overlap, 8-cluster split", "overlap 20.42 ms", r => r === 7 ? "stale" : "vlmcell", "fresh steps", () => "expcell",
       "Bottom row runs the stale steps next to the south (weight) channels; VLM on 56 clusters. Group reconfigures to the full mesh at the KV switch (not modelled). 1.11×."],
-    ["Fusion B: c = 16", "overlap 23.82 ms", r => r >= 6 ? "stale" : "vlmcell", "fresh steps", () => "expcell",
+    ["Overlap, 16-cluster split", "overlap 23.82 ms", r => r >= 6 ? "stale" : "vlmcell", "fresh steps", () => "expcell",
       "VLM on 48 clusters slows by 6 ms if linear, more than the 5.5 ms of hidden expert time: 0.985×, slower than not splitting."],
   ];
   cards.forEach(([h, t1, f1, t2, f2, note]) => {

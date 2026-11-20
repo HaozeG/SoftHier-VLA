@@ -45,25 +45,25 @@ Model: T = max(T_VLM(64 - c), n_stale x e_stale(c)) + cross K/V + n_fresh x e, w
 | --- | --- | --- | ---: | ---: | ---: |
 | Baseline | none | 0 / 10 / 0 | 28.99 ms | 1.00x | 34.5 Hz |
 | DP-Cache | none | 0 / 6 / 4 | 24.58 ms | 1.18x | 40.7 Hz |
-| Fusion A: no contention | both at full speed (bound) | 5 / 5 / 0 | 23.47 ms | 1.24x | 42.6 Hz |
-| Fusion B: split c = 8 | VLM on 56 (20.42 ms), expert on 8 | 5 / 5 / 0 | 26.03 ms | 1.11x | 38.4 Hz |
-| Fusion B: split c = 16 | VLM on 48 (23.82 ms), expert on 16 | 5 / 5 / 0 | 29.43 ms | 0.985x | 34.0 Hz |
-| Fusion A + DP-Cache | bound | 3 / 3 / 4 | 21.27 ms | 1.36x | 47.0 Hz |
-| Fusion B c = 8 + DP-Cache | VLM on 56, expert on 8 | 3 / 3 / 4 | 23.82 ms | 1.22x | 42.0 Hz |
+| Overlap, ideal | both at full speed (bound) | 5 / 5 / 0 | 23.47 ms | 1.24x | 42.6 Hz |
+| Overlap, 8-cluster split | VLM on 56 (20.42 ms), expert on 8 | 5 / 5 / 0 | 26.03 ms | 1.11x | 38.4 Hz |
+| Overlap, 16-cluster split | VLM on 48 (23.82 ms), expert on 16 | 5 / 5 / 0 | 29.43 ms | 0.985x | 34.0 Hz |
+| Overlap, ideal + DP-Cache | bound | 3 / 3 / 4 | 21.27 ms | 1.36x | 47.0 Hz |
+| Overlap, 8-cluster split + DP-Cache | VLM on 56, expert on 8 | 3 / 3 / 4 | 23.82 ms | 1.22x | 42.0 Hz |
 
 One-tick rate: the highest control rate at which a call still fits in one control period (1 / T).
 
-- **Old scenario C is now the baseline.** The earlier estimate assumed tuned full-mesh expert GEMMs
-  at 29.09 ms; `dcd221d` measured 28.99 ms. A and B therefore differ only in the overlap phase: the
+- **The earlier "tuned GEMMs" variant is now the baseline.** The earlier estimate assumed full-mesh expert GEMMs
+  at 29.09 ms; `dcd221d` measured 28.99 ms. The overlap variants therefore differ only in the overlap phase: the
   fresh-step phase is the full-mesh expert in every scenario.
-- **B is set by the VLM, not the expert.** The split gains while the VLM loses less than the hidden
+- **A split is limited by the VLM, not the expert.** The split gains while the VLM loses less than the hidden
   expert time, 5 x 1.10 = 5.52 ms, i.e. a VLM slowdown of at most 1.31x. With linear scaling, c = 8
-  costs 2.55 ms (net 1.11x) and c = 16 costs 5.96 ms (net loss). At c = 8 the stale steps limit B only
+  costs 2.55 ms (net 1.11x) and c = 16 costs 5.96 ms (net loss). At c = 8 the stale steps would set the overlap time only
   above 4.08 ms per step; the measured range is 2.29-3.50 ms.
-- **Fusion and DP-Cache do not multiply** (1.18 x 1.24 = 1.46, model 1.36). Under Fusion the stale
+- **Overlap and DP-Cache do not multiply** (1.18 x 1.24 = 1.46, model 1.36). Under overlap the stale
   window is hidden behind the VLM, so reusing steps 4 and 5 saves nothing; only reuse in the fresh tail
   (7, 8) shortens the call. Put reused steps in the fresh tail.
-- **A has no physical mapping on SoftHier**: a cluster runs one kernel at a time. It is a bound.
+- **The ideal overlap has no physical mapping on SoftHier**: a cluster runs one kernel at a time. It is a bound.
 
 ## The controller
 
@@ -88,9 +88,9 @@ of stale actions at these rates.
 | scenario | phase 1: VLM (with stale steps) | phase 2: fresh steps |
 | --- | --- | --- |
 | Baseline / DP-Cache | VLM on 64 | expert on 64 (6 steps with DP-Cache) |
-| Fusion A | both on 64, no slowdown (bound) | expert on 64 |
-| Fusion B c = 8 | VLM on rows 0-6, stale steps on row 7 | expert on 64 |
-| Fusion B c = 16 | VLM on rows 0-5, stale steps on rows 6-7 | expert on 64 |
+| Overlap, ideal | both on 64, no slowdown (bound) | expert on 64 |
+| Overlap, 8-cluster split | VLM on rows 0-6, stale steps on row 7 | expert on 64 |
+| Overlap, 16-cluster split | VLM on rows 0-5, stale steps on rows 6-7 | expert on 64 |
 
 The bottom-row placement follows the stage-1 HBM rule (second operands, i.e. weights, on the south
 edge): a bottom-row strip reaches all 8 south channels through its own edge nodes. It is illustrative.
