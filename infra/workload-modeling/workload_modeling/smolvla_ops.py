@@ -462,24 +462,55 @@ def eltwise_kind(op: str) -> str | None:
     return None
 
 
-def hand_kernel_key(row: OpRow) -> str | None:
-    """constants key of the row's simulated kernel: hand_kernels.<stage>.<kernel>_<row shape>."""
-    if (row.stage, row.op) in HAND_KERNEL_TIME:
+# Row operators by kernel name in the constants key (h1_kernels; hand_kernels uses HAND_KERNEL_TIME).
+ROW_KERNEL = {
+    "ln1": "layernorm", "ln2": "layernorm", "ln_post": "layernorm", "gelu": "gelu",
+    "rmsnorm_attn": "rmsnorm", "rmsnorm_mlp": "rmsnorm", "rmsnorm_final": "rmsnorm",
+    "silu_mul": "silu_gate", "time_silu": "silu",
+}
+
+
+@dataclass(frozen=True)
+class KernelSet:
+    """Where a workload's hand-kernel times live: constants group and the arch section they ran on."""
+    group: str
+    arch: str
+    lowering: Lowering
+
+
+# Stage-1 lowering (docs/designs/stage1-spec.md §3.3): reference computation plus cross K/V once per call.
+STAGE1_LOWERING = Lowering(kv_proj_per_step=False)
+STAGE1_LOWERING_W1B = Lowering(kv_proj_per_step=False, batch_cameras=True)
+KERNEL_SETS = {
+    "libero-2cam": KernelSet("hand_kernels", "stage1", Lowering()),   # kernel-repo arch, before stage 1
+    "vlabench-3cam": KernelSet("h1_kernels", "h1", STAGE1_LOWERING),  # H1 (stage-1 spec §4)
+}
+
+
+def kernel_set(workload_id: str) -> KernelSet:
+    return KERNEL_SETS.get(workload_id, KERNEL_SETS["libero-2cam"])
+
+
+def hand_kernel_key(row: OpRow, group: str = "hand_kernels") -> str | None:
+    """constants key of the row's simulated kernel: <group>.<stage>.<kernel>_<row shape>."""
+    if group == "hand_kernels" and (row.stage, row.op) in HAND_KERNEL_TIME:
         return HAND_KERNEL_TIME[(row.stage, row.op)]
     if row.op in HOST_OPS or (row.stage, row.op) in INCLUDED_IN:
         return None
     shape = "x".join(map(str, row.shape))
     if row.cls == "gemm":
-        return f"hand_kernels.{row.stage}.gemm_{shape}"
+        return f"{group}.{row.stage}.gemm_{shape}"
     if row.op in ATTN_CALL_OPS:
-        return f"hand_kernels.{row.stage}.flatattention_{shape}"
+        return f"{group}.{row.stage}.flatattention_{shape}"
+    if group != "hand_kernels" and row.op in ROW_KERNEL:
+        return f"{group}.{row.stage}.{ROW_KERNEL[row.op]}_{shape}"
     kind = eltwise_kind(row.op)
-    return f"hand_kernels.{row.stage}.eltwise_{kind}_{shape}" if kind else None
+    return f"{group}.{row.stage}.eltwise_{kind}_{shape}" if kind else None
 
 
 def hand_kernel_ns(c, workload_id: str, row: OpRow) -> float | None:
     """Measured ns per call of the row's hand kernel, if one was simulated at this workload and shape."""
-    key = hand_kernel_key(row)
+    key = hand_kernel_key(row, kernel_set(workload_id).group)
     if key is None or key not in c.entries:
         return None
     e = c.get(key)

@@ -47,7 +47,7 @@ def test_all_entries_valid(c):
 
 
 def test_primary_workload(c):
-    assert c.primary_workload.id == "libero-2cam"
+    assert c.primary_workload.id == "vlabench-3cam"
 
 
 def test_peaks_exact(c):

@@ -6,7 +6,21 @@ Per-stage compute and memory needs of one SmolVLA policy call, from the standalo
 
 Conventions ([conventions.md](conventions.md)): fp16 (2 B per element); `bytes_weight` re-reads each layer's weights once per call and the expert's weights once per flow step; `bytes_unique` adds each operator's inputs and outputs; FLOP per weight byte = FLOP / `bytes_weight`. Non-matrix FLOP use per-element conventions.
 
-## `libero-2cam` (primary)
+## `vlabench-3cam` (primary)
+
+Checkpoint `lerobot/smolvla_base@5e8d12a6`; 3 camera(s) at 512x512, 48 language tokens, 1 state token.
+
+| stage | tokens | GFLOP | of which matrix | FLOP share % | unique MB | weight MB | FLOP per weight byte |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| vision | 3 x 1024 | 645.385 | 641.427 | 76.5 | 5,765.7 | 518.6 | 1,244 |
+| connector | 192 | 4.530 | 4.530 | 0.5 | 38.9 | 23.6 | 192 |
+| prefix | 241 | 79.552 | 79.381 | 9.4 | 675.2 | 314.8 | 253 |
+| expert | 50 x 10 steps | 114.584 | 114.254 | 13.6 | 2,701.3 | 1,997.0 | 57 |
+| **total** | | 844.051 | 839.591 | 100.0 | 9,181.0 | 2,854.0 | 296 |
+
+Expert per flow step: 11.458 GFLOP, 199.7 MB of weights (includes the cross-attention K/V projection, which the reference code repeats every step).
+
+## `libero-2cam`
 
 Checkpoint `lerobot/smolvla_libero@a24f1f38`; 2 camera(s) at 512x512, 48 language tokens, 1 state token.
 

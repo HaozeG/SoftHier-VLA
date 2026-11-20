@@ -99,10 +99,60 @@ def hardware(c, arch: str = "stage1") -> dict:
     }
 
 
-def context(c, workload_id: str) -> dict:
+# Text of the composed-estimate section per kernel group (what was run, on which arch, how it was checked).
+KERNEL_PAGES = {
+    "hand_kernels": {
+        "intro": "kernel repo `HaozeG/gvsoc@580ac85` (branch gelu-layernorm-kernels), kernel-repo arch (16 clusters, "
+                 "RedMulE 32 x 16 and Spatz on 4 cores per cluster), DRAMSys HBM. Not a stage-1 reference "
+                 "(docs/designs/stage1-spec.md §1)",
+        "arch_text": "the kernel repo's arch file (`constants.yaml` section `arch.stage1`)",
+        "kernels": [
+            ("SummaGEMM", "every matrix product", "no (upstream preload: placeholder data)",
+             "M, N, K padded up to 4 x tile; tiles: fastest of a sweep per shape"),
+            ("FlatAttention", "QK^T, softmax, P.V", "no (upstream preload: placeholder data)",
+             "no masking (prefix and expert need one: approximation); GQA folds query heads; blocks: fastest of a "
+             "sweep; sequence lengths padded up to a block multiple"),
+            ("LayerNorm, Activation, Eltwise", "norms, activations, elementwise, pixel shuffle",
+             "yes, bit-exact against a replay golden", "one row per cluster at a time"),
+            ("RMSNorm", "RMSNorm", "no (upstream kernel, placeholder data)", "upstream settings"),
+        ],
+        "checks": "SummaGEMM and FlatAttention outputs are not checked. As a check that a picked setting did its whole "
+                  "problem, its DRAMSys traffic was compared with the minimum the padded problem must move (operands "
+                  "read once, output written once): every pick moves 1.0 to 3.2 times that minimum. A smaller GEMM "
+                  "shape is never slower than a larger one that contains it.",
+        "platform": "It is on the kernel-repo arch with DRAMSys HBM, not PR1's arch with ideal HBM.",
+    },
+    "h1_kernels": {
+        "intro": "kernel repo `HaozeG/gvsoc@aa57690` (branch gelu-layernorm-kernels, the frozen stage-1 build), "
+                 "H1 (64 clusters, RedMulE 32 x 32, Spatz on 4 cores per cluster), GVSoC with the SoftHier-VLA patch "
+                 "series 0001-0012, DRAMSys HBM; protocol: docs/designs/stage1-spec.md §4.3",
+        "arch_text": "H1, `infra/kernel-runs/arch/arch_h1.py` (`constants.yaml` section `arch.h1`)",
+        "kernels": [
+            ("SummaGEMM", "every matrix product", "yes, bit-exact against a replay golden",
+             "M, N, K padded to tile multiples (stage-1 store fix); tile, scale and Nosplit or split-N: fastest checked "
+             "setting of a sweep per shape, re-run on the frozen build"),
+            ("FlatAttention", "QK^T, softmax, P.V", "yes, within 0.02 of a float64 golden",
+             "no masking (prefix and expert need one: approximation); GQA folds query heads; group shape, blocks and "
+             "collective or async mode: fastest checked setting of a sweep; sequence lengths padded to a block multiple"),
+            ("LayerNorm, Activation, Eltwise", "norms, activations, elementwise, pixel shuffle",
+             "yes, bit-exact against a replay golden", "one run per shape, exact shape"),
+            ("RMSNorm", "RMSNorm", "yes, 32 ULP against float64 x / rms(x)",
+             "one run per shape; the kernel has no weight and no eps (one multiply per element short)"),
+        ],
+        "checks": "Every time comes from a run whose output check passed on all 64 clusters, under "
+                  "`MALLOC_PERTURB_` (uninitialised simulator memory would show). Simulator fixes found on the way "
+                  "(RedMulE buffers, FlooNoC reductions) are patches 0011 and 0012.",
+        "platform": "It is on H1 with DRAMSys HBM, not PR1's arch with ideal HBM.",
+    },
+}
+
+
+def context(c, workload_id: str, lowering: m.Lowering | None = None, variant: str = "") -> dict:
     wl = c.workloads[workload_id]
     d = m.load_dims(wl)
-    rows = m.annotate(m.build(c, workload_id))
+    ks = m.kernel_set(workload_id)
+    lowering = lowering or ks.lowering
+    rows = m.annotate(m.build(c, workload_id, lowering))
     tot = m.stage_totals(rows)
     all_flop = sum(t.flop for t in tot.values())
     stages = {
@@ -126,18 +176,32 @@ def context(c, workload_id: str) -> dict:
     n_vis = m.vision_tokens(wl, d)
     tok = {"vision_out": n_vis, "image": wl.cameras * n_vis // d.shuffle ** 2, "prefix": m.prefix_tokens(wl, d)}
     return {"wl": wl, "d": d, "s": stages, "stages": list(m.STAGES), "total": total, "classes": classes,
-            "rows": view, "notes": STAGE_NOTES, "tok": tok, "_rows": rows, "ksum": kernel_sums(c, workload_id, rows), "hw": hardware(c),
-            "kernel_repo": "HaozeG/gvsoc@580ac85 (branch gelu-layernorm-kernels)"}
+            "rows": view, "notes": STAGE_NOTES, "tok": tok, "_rows": rows, "ksum": kernel_sums(c, workload_id, rows),
+            "hw": hardware(c, ks.arch), "kp": KERNEL_PAGES[ks.group], "group": ks.group, "variant": variant,
+            "lowering": lowering, "lowering_text": lowering_text(lowering)}
 
 
-def render_md(c, workload_id: str) -> str:
+def lowering_text(low: m.Lowering) -> str:
+    """The lowering's departures from the reference computation, in words (empty for the reference)."""
+    parts = []
+    if not low.kv_proj_per_step:
+        parts.append("the expert's cross-attention K/V projection runs once per call, not in every flow step")
+    if low.batch_cameras:
+        parts.append("the cameras are batched into one vision-encoder call (M = cameras x 1024 for every per-token "
+                     "product and row operator; attention stays per camera)")
+    if low.prefix_rows or low.kv_align > 1 or low.time_in_split:
+        parts.append("PR1's padding and time-MLP split (see crosscheck.md)")
+    return "; ".join(parts)
+
+
+def render_md(c, workload_id: str, lowering: m.Lowering | None = None, variant: str = "") -> str:
     env = Environment(loader=FileSystemLoader(TEMPLATES), undefined=StrictUndefined, keep_trailing_newline=True,
                       autoescape=False)
-    return env.get_template("op_graph.md.j2").render(**context(c, workload_id))
+    return env.get_template("op_graph.md.j2").render(**context(c, workload_id, lowering, variant))
 
 
-def render_csv(c, workload_id: str) -> str:
-    rows = m.annotate(m.build(c, workload_id))
+def render_csv(c, workload_id: str, lowering: m.Lowering | None = None) -> str:
+    rows = m.annotate(m.build(c, workload_id, lowering or m.kernel_set(workload_id).lowering))
     f = io.StringIO()
     w = csv.writer(f, lineterminator="\n")
     w.writerow(["stage", "layers", "op", "class", "shape", "count", "flop", "bytes_unique", "bytes_weight",

@@ -71,9 +71,10 @@ def test_csv_has_all_rows(c):
     assert len(text.strip().splitlines()) == len(m.build(c, "libero-2cam")) + 1
 
 
-def test_hand_kernel_times_and_stage_sums(c):
-    wl = "libero-2cam"
-    rows = m.annotate(m.build(c, wl))
+@pytest.mark.parametrize("wl,low", [("libero-2cam", None), ("vlabench-3cam", m.STAGE1_LOWERING),
+                                    ("vlabench-3cam", m.STAGE1_LOWERING_W1B)])
+def test_hand_kernel_times_and_stage_sums(c, wl, low):
+    rows = m.annotate(m.build(c, wl, low))
     ns = {(r.stage, r.op): m.hand_kernel_ns(c, wl, r) for r in rows}
     # Every operator outside the host prepare step has a simulated kernel or runs inside another row's call.
     for r in rows:
@@ -83,7 +84,7 @@ def test_hand_kernel_times_and_stage_sums(c):
         if key in m.INCLUDED_IN:
             assert ns[(r.stage, m.INCLUDED_IN[key])] is not None, r.op
         else:
-            assert ns[key] is not None, (r.stage, r.op, m.hand_kernel_key(r))
+            assert ns[key] is not None, (r.stage, r.op, m.hand_kernel_key(r, m.kernel_set(wl).group))
     sums = render.kernel_sums(c, wl, rows)
     want = sum(r.count * ns[(r.stage, r.op)] for r in rows if ns[(r.stage, r.op)] is not None) / 1e3
     assert sums["total"]["total"] == f"{want:,.1f}"
@@ -91,7 +92,7 @@ def test_hand_kernel_times_and_stage_sums(c):
     want_v = sum(r.count * ns[(r.stage, r.op)] for r in rows
                  if r.stage == "vision" and r.cls == "gemm") / 1e3
     assert vision["GEMM"] == f"{want_v:,.1f}"
-    # Times are for libero-2cam shapes only; another workload gets none.
+    # Times are per workload; another workload gets none.
     assert not any(m.hand_kernel_ns(c, "pr1-1cam", r) for r in m.annotate(m.build(c, "pr1-1cam")))
 
 
@@ -106,14 +107,30 @@ def test_eltwise_and_attention_mapping(c):
     assert m.hand_kernel_key(rows[("expert", "self_pv")]) is None          # inside the self_qk call
 
 
-def test_gemm_times_monotonic_in_shape(c):
+@pytest.mark.parametrize("group,n", [("hand_kernels", 18), ("h1_kernels", 21)])
+def test_gemm_times_monotonic_in_shape(c, group, n):
     """A GEMM contained in a larger one (every dimension <=) is not slower: catches a starved tile sweep."""
     t = {}
     for key, e in c.entries.items():
-        if key.startswith("hand_kernels.") and ".gemm_" in key:
+        if key.startswith(group + ".") and ".gemm_" in key:
             t[tuple(int(x) for x in key.rsplit("_", 1)[1].split("x"))] = float(e.value)
-    assert len(t) == 18
+    assert len(t) == n
     for a, ta in t.items():
         for b, tb in t.items():
             if a != b and all(x <= y for x, y in zip(a, b)):
                 assert ta <= tb, (a, ta, b, tb)
+
+
+def test_h1_entries_provenance(c):
+    """Every H1 time is measured on vlabench-3cam and arch h1, and names the kernel build and simulator tree."""
+    h1 = {k: e for k, e in c.entries.items() if k.startswith("h1_kernels.")}
+    assert len(h1) == 51
+    for k, e in h1.items():
+        assert (e.label, e.workload, e.arch, e.unit) == ("measured", "vlabench-3cam", "h1", "ns"), k
+        assert "HaozeG/gvsoc@" in e.source and "+ build " in e.source and "GVSoC tree " in e.source, k
+
+
+def test_w1b_page_states_lowering(c):
+    page = render.render_md(c, "vlabench-3cam", m.STAGE1_LOWERING_W1B, "W1-b: cameras batched")
+    assert "cameras are batched" in page and "Vision per camera" not in page
+    assert "h1_kernels" in page and "arch.h1" in page

@@ -109,8 +109,9 @@ Spatz enabled. GELU and LayerNorm (`HaozeG/gvsoc@580ac85`) and `Eltwise` (`dc749
 RoPE, pixel shuffle) were added by this project on branch `gelu-layernorm-kernels`, with outputs checked on the
 device against a replay golden; the changes and the
 simulator defects found on the way are logged in `wiki://memories/patches/softhier-kernel-repo.md`. Per-call times
-of every kernel at libero-2cam shapes, and their sum per stage, are in [smolvla-op-graph.md](smolvla-op-graph.md),
-section "Composed estimate from hand-written kernels".
+of every kernel at libero-2cam shapes on the kernel-repo arch, and their sum per stage, are in
+[smolvla-op-graph-libero-2cam.md](smolvla-op-graph-libero-2cam.md); the stage-1 times on H1 for `vlabench-3cam` are in
+[smolvla-op-graph.md](smolvla-op-graph.md), section "Composed estimate from hand-written kernels".
 
 | Operator | Unit in PR1's path | Hand-written kernel | Evidence in the kernel repo |
 | --- | --- | --- | --- |

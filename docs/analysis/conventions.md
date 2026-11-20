@@ -8,7 +8,8 @@ or state their workload, arch and label.
 
 | ID | Checkpoint | Cameras | Image | Tokens (vision per camera / prefix) | Role |
 | --- | --- | --- | --- | --- | --- |
-| `libero-2cam` | `lerobot/smolvla_libero@a24f1f38` | 2 | 512x512 | 1024 / 177 | primary |
+| `vlabench-3cam` | `lerobot/smolvla_base@5e8d12a6` | 3 | 512x512 | 1024 / 241 | primary: stage-1 target W1 ([stage1-spec.md](../designs/stage1-spec.md)) |
+| `libero-2cam` | `lerobot/smolvla_libero@a24f1f38` | 2 | 512x512 | 1024 / 177 | primary before stage 1 |
 | `pr1-1cam` | `lerobot/smolvla_base@5e8d12a6` | 1 | 256x256 | 256 / 65 | PR1's measured configuration |
 | `release-3cam` | `lerobot/smolvla_base@5e8d12a6` | 3 | 512x512 | 1024 / 241 | released config; no RQ uses it |
 
