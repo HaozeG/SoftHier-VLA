@@ -28,6 +28,7 @@ kernels that ship with GVSoC. Design: `docs/designs/smolvla-softhier-baseline.md
 | `run_kernel_tests.sh` | runs the kernels `gemm`, `norm`, `acti`, `attn`; prints a table |
 | `stamp.py` | `write <arch>`, `check <arch>` (exit 0 match, 1 with the difference), `permalinks`, `series-hash` |
 | `gvsoc_env.sh` | sourced by the scripts: PATH, PYTHONPATH, SYSTEMC_HOME, LD_LIBRARY_PATH as GVSoC's `sourceme.sh` sets them, plus the uv venv |
+| `require_sim.sh` | sourced by every run script: `require_sim <arch> [run_dir]` refuses unless `stamp.py check <arch>` passes and copies the stamp into the run folder; `sim_lock` holds a lock on the tree (one build or run at a time); unsets `SOFTHIER_IDEAL_HBM` |
 | `pyproject.toml`, `uv.lock` | Python 3.12 environment for GVSoC's tools (not a package); setuptools is pinned `<81` because GVSoC's `reggen` imports `pkg_resources` |
 
 Usage, from the repo root, after `source infra/env.sh`:
@@ -54,7 +55,9 @@ It also records the GVSoC patch series: SHA-256 of `series` and the listed patch
 tree and the tree of `HEAD`. `check` fails if the series files differ from the SHA-256 in `gvsoc-patches/expected`,
 if `HEAD^{tree}` is not the expected tree (the tree of base + series), or if the base is not an ancestor of `HEAD`;
 commit ids of the applied patches do not matter, the tree does.
-Rule: one simulator build per worktree. A run is refused when `stamp.py check` fails, and nothing
+Where the tree is: `SOFTHIER_HOME` (`infra/env.sh`) is the worktree's own `third_party/gvsoc` if it is initialised, otherwise one shared tree at `$SHVLA_DATA/gvsoc` that every worktree uses. `setup.sh` clones the shared tree (submodule URL, upstream base) when it is missing, then applies the series as for the submodule. `build_arch.sh` and every run take the tree's lock (`.shvla_lock`).
+
+Rule: one simulator build per tree, for one arch at a time. A run is refused when `stamp.py check` fails, and nothing
 rebuilds by itself. After any change to the arch file or the simulator sources, run
 `build_arch.sh` explicitly. GVSoC's own preparation patches the nested `core` and `pulp`
 checkouts; this shows up as a diff and is part of the stamp. Untracked files (build products) are

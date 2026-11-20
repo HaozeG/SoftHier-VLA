@@ -66,7 +66,19 @@ fi
 echo "Prerequisites OK."
 
 # ---------------------------------------------------------------- 2. submodule, uv
-if git -C "$SHVLA_ROOT" submodule status "$rel_gvsoc" | grep -q '^-'; then
+if [ "$rel_gvsoc" = "$gvsoc" ]; then
+    # Shared tree outside the repository (default $SHVLA_DATA/gvsoc, see infra/env.sh): a plain clone of
+    # the submodule's URL at the upstream base of the patch series.
+    if [ ! -e "$gvsoc/.git" ]; then
+        url="$(git -C "$SHVLA_ROOT" config -f .gitmodules submodule.third_party/gvsoc.url)"
+        base="$(sed -n 's/^BASE=//p' "$here/gvsoc-patches/expected")"
+        git clone "$url" "$gvsoc"
+        git -C "$gvsoc" checkout --detach "$base"
+        git -C "$gvsoc" submodule update --init --recursive
+    else
+        echo "Shared GVSoC tree $gvsoc already cloned."
+    fi
+elif git -C "$SHVLA_ROOT" submodule status "$rel_gvsoc" | grep -q '^-'; then
     git -C "$SHVLA_ROOT" submodule update --init --recursive "$rel_gvsoc"
 else
     echo "Submodule $rel_gvsoc already initialised."

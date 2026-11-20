@@ -24,6 +24,10 @@ mkdir -p "$log_dir"
 log="$log_dir/$(basename "$arch" .py).log"
 stamp="$SOFTHIER_HOME/.shvla_stamp.json"
 
+# one build or run at a time on a (possibly shared) tree; see require_sim.sh
+exec 9>"$SOFTHIER_HOME/.shvla_lock"
+flock -n 9 || { echo "waiting for the lock on $SOFTHIER_HOME" >&2; flock 9; }
+
 rm -f "$stamp"
 echo "Building hardware for $arch with pwr_interval_ps=$SHVLA_PWR_INTERVAL_PS (log: $log)"
 start=$SECONDS

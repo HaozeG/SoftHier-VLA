@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 23:28:06 +0100
+Subject: [PATCH] [shvla] RedMulE model: zero-initialise X/W/Y/Z buffers (first
+ job read uninitialised heap)
+
+LightRedmule allocated access_buffer, y_buffer_preload, w_buffer, x_buffer, z_buffer_compute and z_buffer_previos with new uint8_t[] and never initialised them. X/W are cleared only after each compute (INSTR_LOAD_W_COMPUTE), and a load fills only k_size * elem_size bytes of a bandwidth-wide row, so the first RedMulE job of each cluster multiplied heap garbage in the rest of each row. Fresh pages are zero, so this showed only where a buffer landed on reused heap: the first 32-row block of the first tile of a few clusters (8x8 SUMMA group on the H1 arch, varying run to run). Under MALLOC_PERTURB_=85 half of a 512^3 GEMM was wrong and the 4x4-group run failed too (timer also moved). Found with valgrind memcheck (uninitialised values from these allocations reaching fp16_to_float / float_to_fp16).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ soft_hier/flex_cluster/light_redmule.cpp | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/soft_hier/flex_cluster/light_redmule.cpp b/soft_hier/flex_cluster/light_redmule.cpp
+index b9b4bdd..18287f9 100644
+--- a/soft_hier/flex_cluster/light_redmule.cpp
++++ b/soft_hier/flex_cluster/light_redmule.cpp
+@@ -277,12 +277,15 @@ LightRedmule::LightRedmule(vp::ComponentConf &config)
+     this->iter_z_row_ptr    = 0;
+ 
+     //Initialize Buffers
+-    this->access_buffer     = new uint8_t[this->bandwidth * 2];
+-    this->y_buffer_preload  = new uint8_t [this->LOCAL_BUFFER_H * this->LOCAL_BUFFER_W * this->elem_size];
+-    this->w_buffer          = new uint8_t [this->LOCAL_BUFFER_N * this->LOCAL_BUFFER_W * this->elem_size];
+-    this->x_buffer          = new uint8_t [this->LOCAL_BUFFER_H * this->LOCAL_BUFFER_N * this->elem_size];
+-    this->z_buffer_compute  = new uint8_t [this->LOCAL_BUFFER_H * this->LOCAL_BUFFER_W * this->elem_size];
+-    this->z_buffer_previos  = new uint8_t [this->LOCAL_BUFFER_H * this->LOCAL_BUFFER_W * this->elem_size];
++    // Zero-initialised (value-initialised with ()): the X/W buffers are cleared only after each compute
++    // (INSTR_LOAD_W_COMPUTE), and a load fills only k_size * elem_size bytes of a bandwidth-wide row, so the
++    // first job after construction multiplied whatever the heap held in the rest of each row.
++    this->access_buffer     = new uint8_t[this->bandwidth * 2]();
++    this->y_buffer_preload  = new uint8_t [this->LOCAL_BUFFER_H * this->LOCAL_BUFFER_W * this->elem_size]();
++    this->w_buffer          = new uint8_t [this->LOCAL_BUFFER_N * this->LOCAL_BUFFER_W * this->elem_size]();
++    this->x_buffer          = new uint8_t [this->LOCAL_BUFFER_H * this->LOCAL_BUFFER_N * this->elem_size]();
++    this->z_buffer_compute  = new uint8_t [this->LOCAL_BUFFER_H * this->LOCAL_BUFFER_W * this->elem_size]();
++    this->z_buffer_previos  = new uint8_t [this->LOCAL_BUFFER_H * this->LOCAL_BUFFER_W * this->elem_size]();
+ 
+     //Initialize FSM
+     this->state.set(IDLE);

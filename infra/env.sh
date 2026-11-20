@@ -24,7 +24,16 @@ export SHVLA_ROOT
 : "${SHVLA_DATA:=$HOME/.cache/softhier-vla}"
 export SHVLA_DATA
 
-: "${SOFTHIER_HOME:=$SHVLA_ROOT/third_party/gvsoc}"
+# GVSoC tree: this worktree's own third_party/gvsoc if it is initialised, else the shared patched tree
+# under $SHVLA_DATA/gvsoc (one tree for all worktrees; created by infra/softhier/setup.sh). Every run
+# goes through infra/softhier/require_sim.sh, which refuses a tree whose stamp check fails.
+if [ -z "${SOFTHIER_HOME:-}" ]; then
+    if [ -e "$SHVLA_ROOT/third_party/gvsoc/.git" ]; then
+        SOFTHIER_HOME="$SHVLA_ROOT/third_party/gvsoc"
+    else
+        SOFTHIER_HOME="$SHVLA_DATA/gvsoc"
+    fi
+fi
 export SOFTHIER_HOME
 
 # Empty on an x86_64 host (no chroot). An explicitly set value, even empty, is kept.

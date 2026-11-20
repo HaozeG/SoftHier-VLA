@@ -1,13 +1,13 @@
 # GVSoC patch series
 
-Ten patches on top of upstream GVSoC `soft_hier_release` at `d806a84c5785237547f504c2e34a4d9f230cb437`
+Twelve patches on top of upstream GVSoC `soft_hier_release` at `d806a84c5785237547f504c2e34a4d9f230cb437`
 ([permalink](https://github.com/gvsoc/gvsoc/tree/d806a84c5785237547f504c2e34a4d9f230cb437)). They replace a fork
 (decision "GVSoC fixes shipped as patch series, no fork", owner, 2026-11-11, design D2). The submodule
 `third_party/gvsoc` is pinned at the upstream base; `infra/softhier/setup.sh` applies the series.
 Findings F1..F19 are in the design's findings table (`docs/designs/smolvla-softhier-baseline.md`); the evidence
 for each is in `experiments/smolvla-e2e-baseline/LOG.md` and RESULTS.md.
 
-Files: the ten `NNNN-*.patch` files (`git format-patch --no-signature --zero-commit`, the commit messages are the
+Files: the twelve `NNNN-*.patch` files (`git format-patch --no-signature --zero-commit`, the commit messages are the
 rationale), `series` (apply order), `expected` (base commit, expected tree, SHA-256 of the series).
 
 | patch | finding | what | why | upstream-worthy |
@@ -22,6 +22,8 @@ rationale), `series` (apply order), `expected` (base commit, expected tree, SHA-
 | `0008-shvla-RedMulE-model-float_to_fp16-IEEE-...` (3.5 KB) | F3 (SN #3) | `float_to_fp16` rounds to nearest even | truncation | yes, with 0007 |
 | `0009-shvla-snitch-fp_ss-Iss-handle_event-...` (2.5 KB) | F1 (SN #1) | `Iss::handle_event` waits while `exec.is_stalled()` (via `gvsoc_core.patch`) | stale `flw`/`fsw` to HBM or remote TCDM; no timing effect on this workload | harmless; follows the owner's notes |
 | `0010-G3.3-gvsoc-instr_mem-width_log2-...` (1.2 KB) | F16 | drops `width_log2=-1` of `instr_mem` in `cluster_unit.py` (default 2) | undefined shift, no fetch bandwidth limit: whole chain -23.5 % vs published | yes |
+| `0011-shvla-RedMulE-model-zero-initialise-...` (3.2 KB) | stage 1 (2026-11-19) | `light_redmule.cpp`: X/W/Y/Z/access buffers value-initialised (`new uint8_t[n]()`) | each cluster's first RedMulE job multiplied uninitialised heap in the unfilled part of each buffer row: sparse wrong blocks on 8x8 SUMMA groups, half a GEMM wrong under `MALLOC_PERTURB_`; found with valgrind memcheck | yes |
+| `0012-shvla-FlooNoC-reductions-start-from-the-identity-...` (6.2 KB) | stage 1 (2026-11-20) | `soft_hier/gvsoc_pulp.patch` (FlooNoC `floonoc_router.cpp`, `floonoc.cpp`): a forking reduction fills the parent buffer with the identity first; fp16 subnormal conversion fixed | every router where a reduction forks added uninitialised heap once: FlatAttention with `flatten_scale_x > 1` off by a constant ((sx - 1) x `0xAAAA` under `MALLOC_PERTURB_`); data only | yes |
 
 Patches 0002, 0003, 0005, 0006, 0009 edit `soft_hier/gvsoc_core.patch` / `gvsoc_pulp.patch`, ordinary files of the gvsoc
 repository. GVSoC's own `make softhier_preparation` applies them to the nested `core` and `pulp` repositories, so
@@ -30,8 +32,9 @@ of the series.
 
 ## Expected result
 
-`expected` holds `BASE` (the upstream commit above), `TREE` = `def18fe6856947bab3009fa551cc43282c5ddbf1` (the tree
-of the old local dev commit `f99d5a2`, `git rev-parse f99d5a2^{tree}`) and `SERIES_SHA256`
+`expected` holds `BASE` (the upstream commit above), `TREE` = `058a39b0004c0dc844054099f26712243fce761e` (patches 0001-0010 give
+`def18fe6856947bab3009fa551cc43282c5ddbf1`, the tree of the old local dev commit `f99d5a2`; 0011 was added on
+2026-11-19 and 0012 on 2026-11-20, in the shared tree `$SHVLA_DATA/gvsoc`) and `SERIES_SHA256`
 (`python3 infra/softhier/stamp.py series-hash`: SHA-256 over `series` and each listed patch in order, each as
 name, NUL, bytes, NUL). Commit ids after `git am` differ from the dev branch's (committer identity and date are fixed
 by `apply_gvsoc_patches.sh`, so they are the same on every clone, but not equal to `f99d5a2`); the trees, and the
