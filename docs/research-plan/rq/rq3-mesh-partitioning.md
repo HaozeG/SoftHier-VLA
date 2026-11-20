@@ -2,7 +2,7 @@
 id: RQ3
 title: Dividing the mesh by model stage
 status: draft
-workload: libero-2cam
+workload: vlabench-3cam
 arch: stage1-256
 metric: end-to-end latency (ms); cluster utilization (%)
 depends_on: [RQ1, RQ2]
@@ -18,8 +18,8 @@ whole mesh?
 
 ## Why it matters
 
-This is the project's core topic, spatial mapping. The stages differ by about 23x in FLOP per weight
-byte (vision 1,244, prefix 183, expert 55 on `libero-2cam`), and PR1 leaves most clusters idle in
+This is the project's core topic, spatial mapping. The stages differ by about 22x in FLOP per weight
+byte (vision 1,244, prefix 253, expert 57 on `vlabench-3cam`), and PR1 leaves most clusters idle in
 vision and prefix. A region per stage is also the first step toward placing a controller (S0) next to
 the VLA on one chip.
 
@@ -28,9 +28,8 @@ the VLA on one chip.
 * `pr1.gemm_cluster_use`: vision and prefix matrix products use 1-10 of 16 clusters, `pr1-1cam`, PR1
   arch, measured.
 * `pr1.e2e_ms`: 120.7 ms, `pr1-1cam`, PR1 arch, measured.
-* `pr1.libero_e2e_ms`: 479.1 ms, `libero-2cam`, PR1 arch, estimate.
-* Stage totals and FLOP per weight byte, `libero-2cam`, inference, cross-checked
-  ([stage-totals.md](../../analysis/stage-totals.md)).
+* Stage totals and FLOP per weight byte, `vlabench-3cam`, inference, standalone model
+  ([stage1-spec.md §3.2](../../designs/stage1-spec.md#32-w1-vlabench-3cam-stage-1-target)).
 
 ## Method
 

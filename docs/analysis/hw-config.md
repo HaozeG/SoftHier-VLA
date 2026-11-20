@@ -47,5 +47,6 @@ PR1's numbers (all `arch: pr1` keys) were measured on PR1's arch with ideal HBM
   fails, the RQs fall back to the 16-cluster arch.
 * **Balance.** Thor: 258 TFLOP/s / 273 GB/s = 945 FLOP per byte. The 256-cluster SoftHier at the
   provisional 273 GB/s: 262 TFLOP/s / 273 GB/s = 960 FLOP per byte. Stage FLOP per weight byte for
-  `libero-2cam`: vision 1,244, prefix 183, expert 55 ([stage-totals.md](stage-totals.md)); vision
-  reaches 2,489 if the two cameras share one encoder call.
+  `vlabench-3cam` (inference, standalone model): vision 1,244, prefix 253, expert 57; vision reaches
+  3,733 if the three cameras share one encoder call (variant W1-b,
+  [stage1-spec.md](../designs/stage1-spec.md)).
