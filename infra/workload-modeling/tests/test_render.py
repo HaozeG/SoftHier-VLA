@@ -127,7 +127,9 @@ def test_h1_entries_provenance(c):
     assert len(h1) == 51
     for k, e in h1.items():
         assert (e.label, e.workload, e.arch, e.unit) == ("measured", "vlabench-3cam", "h1", "ns"), k
-        assert "HaozeG/gvsoc@" in e.source and "+ build " in e.source and "GVSoC tree " in e.source, k
+        # kernel build: the frozen worktree build ("+ build <hash>") or commit de53537 (small-M GEMM picks)
+        build = "+ build " in e.source or "HaozeG/gvsoc@de53537" in e.source
+        assert "HaozeG/gvsoc@" in e.source and build and "GVSoC tree " in e.source, k
 
 
 def test_w1b_page_states_lowering(c):

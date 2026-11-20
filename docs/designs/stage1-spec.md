@@ -373,6 +373,10 @@ A kernel time counts as a stage-1 `measured` value only if all of the following 
     timer, about 0.75 % on one GEMM shape. Sweep candidates may span builds; the recorded run of each
     picked setting is re-run on the final kernel build and simulator stamp (`final_runs.py`; the kernel
     build is the worktree diff against its commit, kept as `kernel_build.diff` with its hash in each row).
+    Exception: the nine M = 50 expert GEMM picks of `gemm_smallm_sweep.py` are recorded on kernel commit
+    `de53537`, the frozen build plus an optional absolute-tolerance GEMM check (`GEMM_CHECK_ABS_TOL`, for
+    splitK). Without that option the binary is the same (a frozen-build pick re-runs at 32,353 ns,
+    unchanged); the splitK picks use it, so their times may carry the ~1-2 % placement effect.
 
 ### 4.4 Composed estimate
 
@@ -380,8 +384,9 @@ The stage-1 composed estimate for W1 on H1 is the sum over operators of `count` 
 per call, as `render.kernel_sums` computes it. It is labelled **estimate** and states its assumptions:
 no overlap between kernels, no layout change between kernels, every kernel starting and ending in HBM.
 
-**Result (2026-11-20, estimate).** W1: **35.2 ms** per policy call (GEMM 66 %, attention 14 %, row
-operators 20 %); W1-b: 34.1 ms. Per operator and stage:
+**Result (2026-11-20, estimate).** W1: **29.0 ms** per policy call (GEMM 58 %, attention 17 %, row
+operators 24 %); W1-b: 27.9 ms. The first composition gave 35.2 ms and 34.1 ms; the small-M GEMM sweep
+(§5) cut the expert GEMMs from 13.6 to 7.4 ms. Per operator and stage:
 [`smolvla-op-graph.md`](../analysis/smolvla-op-graph.md) (W1) and
 [`smolvla-op-graph-w1b.md`](../analysis/smolvla-op-graph-w1b.md) (W1-b), generated from
 `constants.yaml` (`h1_kernels`) by `workload_modeling.build`. Every operator outside the host prepare
@@ -414,18 +419,28 @@ Decided by the owner (2026-11-19):
 
 Open questions from the H1 baseline (2026-11-20):
 
-*   **Expert GEMMs use few clusters.** The picked settings for the nine M = 50 expert shapes use 8 or
-    16 of 64 clusters (`splitN_s2g2`, `splitN_s2g4`; `action_out_proj` 50 x 32 x 720 uses 1). This is
-    a limit of the search, not a measured optimum: SummaGEMM is correct only for square SUMMA groups
-    (`SummaGEMM.h:165` steps X along M by `summa_group_x`, while `M_iter` and the Z offset use
-    `summa_group_y`), so a group of scale s pads M to s x m_tile; scale 4 or 8 pads 50 rows to at
-    least 128 (2.56x work), above the sweep's 2.5x cap; and wider split-N at scale 2 (`s2g8`,
-    `s2g16`) was not among the candidates measured. Measured trend: 50 x 4096 x 720 takes 59.6 us on
-    8 clusters and 32.4 us on 16. The expert GEMMs are 13.6 of W1's 35.2 ms. Candidate fix: a
-    non-square group (one cluster tall, N across the row, split-N over the rows), after correcting
-    line 165 and checking the store rotation for non-square groups.
+*   **Expert GEMMs: group shape and splitK (resolved 2026-11-20).** The first picks for the nine M = 50
+    expert shapes used 8 or 16 of 64 clusters (`splitN_s2g2`, `splitN_s2g4`), a limit of the search:
+    `gemm_sweep.py` allowed only square SUMMA groups and no splitK, so scale 4 or 8 padded 50 rows to at
+    least 128. Non-square groups are safe when M fits one group step (`M_iter = 1`): `SummaGEMM.h:165`
+    steps X along M by `summa_group_x` instead of `summa_group_y`, which matters only for `M_iter > 1`.
+    Upstream's `opt()` (soft_hier_je `gemm_auto.py`, used by its DeepSeek decode flow with M = 1) relies on
+    this: one-cluster-tall groups up to 8 wide, the rest of the mesh filled by splitK or splitN groups.
+    `gemm_smallm_sweep.py` measured such groups (one tile per group structure; full-mesh pass, 82
+    candidates): every expert shape got faster, 1.1x to 2.4x, with groups one or two clusters tall and 4
+    or 8 wide (splitK, or splitN over 16 to 32 groups); expert GEMMs 13.6 -> 7.4 ms. These picks are the
+    recorded values (§4.3 item 11). Measured limit of SummaGEMM splitK: the output is correct only when
+    the groups fill the mesh and each group takes at most 2 N steps (`N_pad / (scale_x n_tile) <= 2`);
+    33 of 33 such runs pass, the other 42 splitK runs fail the check. Probable cause, not verified in
+    the code: only group 0 stores and clears its Z buffers, so the other groups' two Z buffers carry
+    stale partial sums from a third N step on, and with idle clusters the mesh-wide NoC reduction mask
+    takes in clusters outside the groups.
 *   **Tile search is not exhaustive.** Per GEMM shape about 10 settings were run (9 to 12): the top of
     a rough cost model, K-tile variants of its best, the best of each scale and upstream `opt()`. The
-    pick is the fastest measured setting, not proven best. For M >= 192 every measured candidate uses
-    all 64 clusters at no padded work; for M = 50 the candidate set is small (see above).
+    pick is the fastest measured setting, not proven best. The model does not separate K tiles, so
+    candidates outside its top pick were run with whatever K tile it ranked first (the 64-cluster
+    `splitN_s2g16` of 50 x 4096 x 720 only at k_tile 32, where k_tile 256 was 1.8x faster on `s2g4`).
+    For M = 50 the small-M sweep used one fixed tile per group structure (largest k_tile within 6 % of
+    the least padded work); tiles inside a structure are not swept. Next step decided by the owner
+    (2026-11-20): a cost model for the analysis instead of wider sweeps.
 *   **FlatAttention async with `sx = 4, sy = 8`** gives wrong output (§4.3 item 10); cause not found.

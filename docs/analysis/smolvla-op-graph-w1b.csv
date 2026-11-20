@@ -50,16 +50,16 @@ prefix,0-15,residual_mlp,elementwise,241x960,16,3701760,22210560,0,,Snitch cores
 prefix,tail,rmsnorm_final,norm,241x960,1,925440,927360,1920,482.00,Snitch cores,RMSNorm,4697,output unused (only the KV cache is kept); PR1 runs it
 expert,"cross (1,3..15)",cross_k_proj,gemm,241x320x320,8,394854400,4106240,1638400,241.00,RedMulE (operands moved by iDMA),SummaGEMM,5671,prefix K/V projected once per call
 expert,"cross (1,3..15)",cross_v_proj,gemm,241x320x320,8,394854400,4106240,1638400,241.00,RedMulE (operands moved by iDMA),SummaGEMM,5671,prefix K/V projected once per call
-expert,embed,action_in_proj,gemm,50x720x32,10,23040000,1212800,460800,50.00,RedMulE (operands moved by iDMA),SummaGEMM,3356,
+expert,embed,action_in_proj,gemm,50x720x32,10,23040000,1212800,460800,50.00,RedMulE (operands moved by iDMA),SummaGEMM,2942,
 expert,embed,bias_action_in,elementwise,50x720,10,360000,1454400,14400,25.00,Snitch cores,Eltwise (bias),1461,
-expert,embed,time_mlp_in,gemm,50x720x1440,10,1036800000,22896000,20736000,50.00,RedMulE (operands moved by iDMA),SummaGEMM,18360,
+expert,embed,time_mlp_in,gemm,50x720x1440,10,1036800000,22896000,20736000,50.00,RedMulE (operands moved by iDMA),SummaGEMM,9160,
 expert,embed,bias_time_in,elementwise,50x720,10,360000,1454400,14400,25.00,Snitch cores,Eltwise (bias),1461,
 expert,embed,time_silu,acti,50x720,10,1440000,1440000,0,,Snitch cores,Activation (SiLU),1094,
-expert,embed,time_mlp_out,gemm,50x720x720,10,518400000,11808000,10368000,50.00,RedMulE (operands moved by iDMA),SummaGEMM,11504,
+expert,embed,time_mlp_out,gemm,50x720x720,10,518400000,11808000,10368000,50.00,RedMulE (operands moved by iDMA),SummaGEMM,6018,
 expert,embed,bias_time_out,elementwise,50x720,10,360000,1454400,14400,25.00,Snitch cores,Eltwise (bias),1461,
 expert,0-15,rmsnorm_attn,norm,50x720,160,23040000,23270400,230400,100.00,Snitch cores,RMSNorm,1607,
-expert,"self (0,2..14)",qkv_proj,gemm,50x1600x720,80,9216000000,202880000,184320000,50.00,RedMulE (operands moved by iDMA),SummaGEMM,16458,
-expert,"cross (1,3..15)",q_proj,gemm,50x960x720,80,5529600000,124032000,110592000,50.00,RedMulE (operands moved by iDMA),SummaGEMM,13594,
+expert,"self (0,2..14)",qkv_proj,gemm,50x1600x720,80,9216000000,202880000,184320000,50.00,RedMulE (operands moved by iDMA),SummaGEMM,10898,
+expert,"cross (1,3..15)",q_proj,gemm,50x960x720,80,5529600000,124032000,110592000,50.00,RedMulE (operands moved by iDMA),SummaGEMM,7132,
 expert,0-15,rope_q,elementwise,50x960,160,23040000,30720000,0,,Snitch cores,Eltwise (rope),1531,
 expert,"self (0,2..14)",rope_k,elementwise,50x320,80,3840000,5120000,0,,Snitch cores,Eltwise (rope),1147,
 expert,"self (0,2..14)",self_qk,attn,15x50x291x64,80,2234880000,22579200,0,,RedMulE,FlatAttention; masking not supported,12979,keys: prefix cache + own action tokens
@@ -68,14 +68,14 @@ expert,"self (0,2..14)",self_softmax,softmax,750x291,80,87300000,69840000,0,,Sni
 expert,"cross (1,3..15)",cross_qk,attn,15x50x241x64,80,1850880000,20019200,0,,RedMulE,FlatAttention; masking not supported,12059,keys: projected prefix cache
 expert,"cross (1,3..15)",cross_pv,attn,15x50x241x64,80,1850880000,20019200,0,,RedMulE,FlatAttention; masking not supported,,keys: projected prefix cache
 expert,"cross (1,3..15)",cross_softmax,softmax,750x241,80,72300000,57840000,0,,Snitch cores,"FlatAttention (softmax on Spatz, inside the kernel)",,
-expert,0-15,o_proj,gemm,50x720x960,160,11059200000,248064000,221184000,50.00,RedMulE (operands moved by iDMA),SummaGEMM,12590,
+expert,0-15,o_proj,gemm,50x720x960,160,11059200000,248064000,221184000,50.00,RedMulE (operands moved by iDMA),SummaGEMM,7121,
 expert,0-15,residual_attn,elementwise,50x720,160,5760000,34560000,0,,Snitch cores,Eltwise (add),1220,
 expert,0-15,rmsnorm_mlp,norm,50x720,160,23040000,23270400,230400,100.00,Snitch cores,RMSNorm,1607,
-expert,0-15,mlp_gateup,gemm,50x4096x720,160,47185920000,1020774400,943718400,50.00,RedMulE (operands moved by iDMA),SummaGEMM,32353,
+expert,0-15,mlp_gateup,gemm,50x4096x720,160,47185920000,1020774400,943718400,50.00,RedMulE (operands moved by iDMA),SummaGEMM,17081,
 expert,0-15,silu_mul,acti,50x2048,160,81920000,98304000,0,,Snitch cores,Activation (SiLU + gate),2455,
-expert,0-15,mlp_down,gemm,50x720x2048,160,23592960000,516147200,471859200,50.00,RedMulE (operands moved by iDMA),SummaGEMM,22211,
+expert,0-15,mlp_down,gemm,50x720x2048,160,23592960000,516147200,471859200,50.00,RedMulE (operands moved by iDMA),SummaGEMM,11131,
 expert,0-15,residual_mlp,elementwise,50x720,160,5760000,34560000,0,,Snitch cores,Eltwise (add),1220,
 expert,out,rmsnorm_final,norm,50x720,10,1440000,1454400,14400,100.00,Snitch cores,RMSNorm,1607,
-expert,out,action_out_proj,gemm,50x32x720,10,23040000,1212800,460800,50.00,RedMulE (operands moved by iDMA),SummaGEMM,7187,
+expert,out,action_out_proj,gemm,50x32x720,10,23040000,1212800,460800,50.00,RedMulE (operands moved by iDMA),SummaGEMM,3059,
 expert,out,bias_action_out,elementwise,50x32,10,16000,64640,640,25.00,Snitch cores,Eltwise (bias),1172,
 expert,out,euler_update,elementwise,50x32,10,32000,96000,0,,Snitch cores,Eltwise (axpy),1109,
