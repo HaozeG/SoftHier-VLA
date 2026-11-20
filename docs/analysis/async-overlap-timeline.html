@@ -80,7 +80,7 @@ code { font-family: var(--font-mono); font-size: .85em; }
   <section>
     <h2>What the controller sees</h2>
     <div class="fig"><svg id="ctrl" role="img" aria-label="Controller timelines for stop-and-go and asynchronous execution"></svg></div>
-    <p class="cap">30 Hz control (33.3 ms period, SmolVLA's async assumption), 50-action chunks, a new call every 25 ticks (an example). <b>Stop-and-go</b> (the paper's Fig. 9 view): the robot pauses for one call; at 30 Hz every scenario fits in one tick, so the pause shrinks from 29.0 to 21.3 ms in a 833 ms cycle (3.4 % → 2.5 % of the time). <b>Asynchronous execution</b> (RTC, SmolVLA async): the call hides under the queue; latency sets observation staleness (29.0 → 21.3 ms, still 1 tick at 10 and 30 Hz, 2 ticks at 50 Hz). In both modes the stale steps read a prefix cache that is one replan interval old (25 ticks = 833 ms here), not one latency old; the paper's coherence measurement (KV cosine 97.99 % / 96.91 %) is over that same interval, a chunk's execution.</p>
+    <p class="cap">20 Hz control (50 ms period, the test environment's rate; LIBERO runs at 20 Hz, VLABench at 10 Hz), 50-action chunks, a new call every 25 ticks (an example). <b>Stop-and-go</b> (the paper's Fig. 9 view): the robot pauses for one call; at 20 Hz every scenario fits in one tick, so the pause shrinks from 29.0 to 21.3 ms in a 1,250 ms cycle (2.3 % → 1.7 % of the time). In simulation the world also pauses during inference, so this cost does not appear in success rates. <b>Asynchronous execution</b> (RTC, SmolVLA async): the call hides under the queue; latency sets observation staleness (29.0 → 21.3 ms, 1 tick at 10, 20 and 30 Hz, 2 ticks at 50 Hz). In both modes the stale steps read a prefix cache that is one replan interval old (25 ticks = 1,250 ms here), not one latency old; the paper's coherence measurement (KV cosine 97.99 % / 96.91 %) is over that same interval, a chunk's execution.</p>
   </section>
 
   <section>
@@ -255,7 +255,7 @@ legend("legend1", [["obs","Observation"],["vision","Vision encoder (3 cameras)"]
 /* ---------- Figure: controller ---------- */
 (function ctrl() {
   const svg = document.getElementById("ctrl");
-  const P = 1000 / 30, M = 25, L = 170, W = 1000;
+  const P = 1000 / 20, M = 25, L = 170, W = 1000;
   const span = 2 * M * P + 120; // two replan cycles
   const PX = (W - L - 20) / span, x = t => L + t * PX;
   let y = 30;
@@ -284,7 +284,7 @@ legend("legend1", [["obs","Observation"],["vision","Vision encoder (3 cameras)"]
         const t0 = c * M * P;
         el("rect", {x: x(t0), y, width: M * P * PX, height: 18, fill: css("fresh"), opacity: .35, rx: 2}, svg);
         el("rect", {x: x(t0), y: y + 22, width: l * PX, height: 10, fill: css("prefix"), rx: 2}, svg);
-        el("text", {x: x(t0) + l * PX + 4, y: y + 31, "font-size": 9.5, fill: css("muted")}, svg, c === 0 ? `call on obs ${c}: observation staleness = l = ${l.toFixed(1)} ms (1 tick at 30 Hz)` : "");
+        el("text", {x: x(t0) + l * PX + 4, y: y + 31, "font-size": 9.5, fill: css("muted")}, svg, c === 0 ? `call on obs ${c}: observation staleness = l = ${l.toFixed(1)} ms (1 tick at 20 Hz)` : "");
       }
     }
     if (mode === "async") {

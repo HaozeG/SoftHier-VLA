@@ -67,14 +67,16 @@ One-tick rate: the highest control rate at which a call still fits in one contro
 
 ## The controller
 
-At 10 Hz (VLABench) and 30 Hz (SmolVLA's async assumption) every scenario fits in one control tick;
-at 50 Hz every one needs two. So neither method changes the number of stale actions at these rates.
+The test environment runs at about 20 Hz (LIBERO 20 Hz; VLABench 10 Hz). At 10, 20 and 30 Hz every
+scenario fits in one control tick; at 50 Hz every one needs two. So neither method changes the number
+of stale actions at these rates.
 
 - **Stop-and-go** (the paper's Fig. 9 view, robot stops during inference): the pause shrinks from 29.0
-  to 21.3 ms in a cycle of 25 executed actions (833 ms at 30 Hz), 3.4 % -> 2.5 % of the time.
+  to 21.3 ms in a cycle of 25 executed actions (1,250 ms at 20 Hz), 2.3 % -> 1.7 % of the time. In
+  simulation the world pauses during inference, so this does not show in success rates.
 - **Asynchronous execution**: latency is observation staleness (29.0 -> 21.3 ms), hidden under the
   action queue.
-- **Age of the stale KV** is one replan interval (m ticks; 25 ticks = 833 ms in the example), not one
+- **Age of the stale KV** is one replan interval (m ticks; 25 ticks = 1,250 ms at 20 Hz in the example), not one
   latency. The paper's KV similarity (97.99 % / 96.91 %) is measured over the same interval, a chunk's
   execution.
 - SmolVLA puts the robot state in the VLM prefix and its self-attention layers also read the prefix
