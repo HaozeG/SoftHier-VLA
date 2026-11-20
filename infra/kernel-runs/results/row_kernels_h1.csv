@@ -1,0 +1,27 @@
+name,kernel,workloads,ops,config,time_ns,bad,max_ulp,status,run_dir
+rmsnorm_241x960,norm,W1 W1-b,prefix rmsnorm_attn/mlp/final,m_size=241 n_size=960,4697,0,20,ok,/home/haoze/.cache/softhier-vla/stage1-h1/rmsnorm/rmsnorm_241x960
+eltwise_add_1024x768,elt,W1,vision residual_attn/mlp,op=add m_size=1024 n_size=768,9697,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_add_1024x768
+eltwise_add_3072x768,elt,W1-b,vision residual_attn/mlp,op=add m_size=3072 n_size=768,34938,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_add_3072x768
+eltwise_add_241x960,elt,W1 W1-b,prefix residual_attn/mlp,op=add m_size=241 n_size=960,3701,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_add_241x960
+eltwise_add_50x720,elt,W1 W1-b,expert residual_attn/mlp,op=add m_size=50 n_size=720,1220,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_add_50x720
+eltwise_axpy_50x32,elt,W1 W1-b,expert euler_update,op=axpy m_size=50 n_size=32,1109,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_axpy_50x32
+eltwise_bias_1024x768,elt,W1,vision bias_patch/q/k/v/o/down,op=bias m_size=1024 n_size=768,8852,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_bias_1024x768
+eltwise_bias_1024x3072,elt,W1,vision bias_up,op=bias m_size=1024 n_size=3072,22326,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_bias_1024x3072
+eltwise_bias_3072x768,elt,W1-b,vision bias_patch/q/k/v/o/down,op=bias m_size=3072 n_size=768,24918,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_bias_3072x768
+eltwise_bias_3072x3072,elt,W1-b,vision bias_up,op=bias m_size=3072 n_size=3072,57975,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_bias_3072x3072
+eltwise_bias_50x32,elt,W1 W1-b,expert bias_action_out,op=bias m_size=50 n_size=32,1172,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_bias_50x32
+eltwise_bias_50x720,elt,W1 W1-b,expert bias_action_in/time_in/time_out,op=bias m_size=50 n_size=720,1461,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_bias_50x720
+eltwise_pixel_shuffle_3072x768,elt,W1 W1-b,connector pixel_shuffle (3 cameras; config m=192 n=12288),op=pixel_shuffle m_size=192 n_size=12288,16348,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_pixel_shuffle_3072x768
+eltwise_rope_241x320,elt,W1 W1-b,prefix rope_k,op=rope m_size=241 n_size=320 head_dim=64,2656,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_rope_241x320
+eltwise_rope_241x960,elt,W1 W1-b,prefix rope_q,op=rope m_size=241 n_size=960 head_dim=64,3926,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_rope_241x960
+eltwise_rope_50x320,elt,W1 W1-b,expert rope_k,op=rope m_size=50 n_size=320 head_dim=64,1147,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_rope_50x320
+eltwise_rope_50x960,elt,W1 W1-b,expert rope_q,op=rope m_size=50 n_size=960 head_dim=64,1531,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_rope_50x960
+eltwise_scale_192x960,elt,W1 W1-b,connector embed_scale,op=scale m_size=192 n_size=960,2285,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/eltwise/eltwise_scale_192x960
+gelu_1024x3072,acti,W1,vision gelu,algo=gelu m_size=1024 n_size=3072 gate_enable=0 bias_enable=0,23567,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/activation/gelu_1024x3072
+gelu_3072x3072,acti,W1-b,vision gelu,algo=gelu m_size=3072 n_size=3072 gate_enable=0 bias_enable=0,66251,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/activation/gelu_3072x3072
+silu_50x720,acti,W1 W1-b,expert time_silu,algo=silu m_size=50 n_size=720 gate_enable=0 bias_enable=0,1094,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/activation/silu_50x720
+silu_gate_241x2560,acti,W1 W1-b,prefix silu_mul,algo=silu m_size=241 n_size=2560 gate_enable=1 bias_enable=0,8729,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/activation/silu_gate_241x2560
+silu_gate_50x2048,acti,W1 W1-b,expert silu_mul,algo=silu m_size=50 n_size=2048 gate_enable=1 bias_enable=0,2455,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/activation/silu_gate_50x2048
+layernorm_1024x768,lnorm,W1,vision ln1/ln2/ln_post,m_size=1024 n_size=768,10930,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/layernorm/layernorm_1024x768
+layernorm_3072x768,lnorm,W1-b,vision ln1/ln2/ln_post,m_size=3072 n_size=768,26862,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/layernorm/layernorm_3072x768
+rmsnorm_50x720,norm,W1 W1-b,expert rmsnorm_attn/mlp/final,m_size=50 n_size=720,1607,0,12,ok,/home/haoze/.cache/softhier-vla/stage1-h1/rmsnorm/rmsnorm_50x720
