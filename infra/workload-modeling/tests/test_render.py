@@ -25,7 +25,7 @@ def md(c):
 
 def test_every_row_has_unit_and_kernel(c):
     for r in m.annotate(w1_rows(c)):
-        assert r.unit_today and r.hand_kernel, r.op
+        assert r.pr1_unit and r.hand_kernel, r.op
 
 
 def test_kernel_mapping_matches_kernel_repo(c):
@@ -34,7 +34,7 @@ def test_kernel_mapping_matches_kernel_repo(c):
     assert rows["ln1"].hand_kernel == "LayerNorm"
     assert rows["silu_mul"].hand_kernel.startswith("Activation")
     assert rows["mlp_gateup"].hand_kernel == "SummaGEMM"
-    assert rows["state_proj"].unit_today.startswith("host")
+    assert rows["state_proj"].pr1_unit.startswith("host")
 
 
 def test_md_totals_equal_stage_totals(c, md):
@@ -51,6 +51,15 @@ def test_md_has_one_table_row_per_op(c, md):
     rows = w1_rows(c)
     for r in rows:
         assert f"| `{r.op}` | {r.layers} |" in md, r.op
+
+
+def test_results_at_a_glance_matches_kernel_sums(c, md):
+    ks = render.kernel_sums(c, W1, w1_rows(c))
+    top = md.split("## Results at a glance", 1)[1].split("## What these numbers assume", 1)[0]
+    assert f"**{ks['total_ms']} ms per policy call, MFU {ks['total']['mfu']} %**" in top
+    for k in ks["stages"]:
+        assert f"| {k['stage']} | {k['ms']} | {k['share']} | {k['gflop']} | {k['mfu']} |" in top
+    assert sum(float(k["share"]) for k in ks["stages"]) == pytest.approx(100, abs=2)
 
 
 def test_html_keeps_every_table(md):

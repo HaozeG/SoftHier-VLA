@@ -53,8 +53,9 @@ class OpRow:
     flop: float
     memory_traffic_bytes: float
     weights_read_bytes: float
-    unit_today: str = ""         # filled in Part 2
-    hand_kernel: str = ""        # filled in Part 2
+    pr1_unit: str = ""           # unit that ran the operator in PR1's compiled path (filled by annotate)
+    hand_kernel: str = ""        # stage-1 hand-written kernel that does the operator (filled by annotate)
+    hand_kernel_units: str = ""  # units that kernel uses for this operator (filled by annotate)
     note: str = ""
 
     @property
@@ -402,13 +403,13 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
 # Where each operator runs in PR1's compiled path (softhier-mlir b11cd5f) and which hand-written kernel of the
 # kernel repo covers it: ~/softhier@52859c3 implementation/sw/, plus GELU and LayerNorm added on branch
 # gelu-layernorm-kernels (HaozeG/gvsoc@580ac85). Code references: docs/analysis/compiler-walkthrough.md.
-CORES = "Snitch cores"
+CORES = "Snitch cores (scalar; Spatz off in PR1)"
 HOST = "host (PR1 prepare step)"
 HOST_OPS = {"lang_embed_scale", "state_proj", "bias_state", "time_mlp_in_time"}
 KERNEL_BY_OP = {
-    "softmax": "FlatAttention (softmax on Spatz, inside the kernel)",
-    "self_softmax": "FlatAttention (softmax on Spatz, inside the kernel)",
-    "cross_softmax": "FlatAttention (softmax on Spatz, inside the kernel)",
+    "softmax": "FlatAttention (part of the QK^T call)",
+    "self_softmax": "FlatAttention (part of the QK^T call)",
+    "cross_softmax": "FlatAttention (part of the QK^T call)",
     "rmsnorm_attn": "RMSNorm", "rmsnorm_mlp": "RMSNorm", "rmsnorm_final": "RMSNorm",
     "silu_mul": "Activation (SiLU + gate)",
     "time_silu": "Activation (SiLU)",
@@ -504,32 +505,45 @@ def hand_kernel_ns(c, workload_id: str, row: OpRow) -> float | None:
     return float(e.value)
 
 
-def unit_and_kernel(row: OpRow) -> tuple[str, str]:
+SPATZ = "Spatz on 4 cores, data by iDMA"
+
+
+def unit_and_kernel(row: OpRow) -> tuple[str, str, str]:
+    """(unit in PR1's compiled path, stage-1 hand-written kernel, units that kernel uses for this operator).
+
+    Kernel units: the busy unit tracks (redmule, idma, pe<n>/spatz) in the H1 kernel traces
+    (~/.cache/softhier-vla/stage1-h1/traces/); NoC broadcast and the transpose engine have no track and come
+    from the kernel source (SummaGEMM, FlatAttention). PR1 units: compiler-walkthrough.md and arch.pr1 (no Spatz)."""
     if row.op in HOST_OPS:
-        return HOST, "none"
+        return HOST, "none", ""
     if row.cls == "gemm":
-        return "RedMulE (operands moved by iDMA)", "SummaGEMM"
+        return "RedMulE (operands moved by iDMA)", "SummaGEMM", "RedMulE; operands by iDMA and NoC (SUMMA broadcast)"
     if row.cls == "attn":
         mask = "" if row.stage == "vision" else "; masking not supported"
-        return "RedMulE", f"FlatAttention{mask}"
+        return "RedMulE", f"FlatAttention{mask}", "RedMulE (QK^T, P.V), Spatz (softmax); data by iDMA"
     if row.op == "transpose_k":
-        return "Snitch cores and iDMA", "FlatAttention (K transposed on chip by the transpose engine)"
+        return "Snitch cores and iDMA", "FlatAttention (part of the QK^T call)", "transpose engine, in L1"
     kind = eltwise_kind(row.op)
     if kind == "pixel_shuffle":
-        return "Snitch cores and iDMA", "Eltwise (pixel_shuffle, DMA only)"
+        return "Snitch cores and iDMA", "Eltwise (pixel_shuffle)", "iDMA only (one 2D copy per output row)"
     if kind:
-        return CORES, f"Eltwise ({kind})"
+        return CORES, f"Eltwise ({kind})", SPATZ
     if row.cls == "data":
-        return "Snitch cores and iDMA", "none"
-    return CORES, KERNEL_BY_OP.get(row.op, "none")
+        return "Snitch cores and iDMA", "none", ""
+    if row.cls == "softmax":
+        return CORES, KERNEL_BY_OP.get(row.op, "none"), "Spatz (vfredmax, vfexp), inside FlatAttention"
+    kernel = KERNEL_BY_OP.get(row.op, "none")
+    if kernel == "RMSNorm":
+        return CORES, kernel, "Spatz on 1 core (upstream kernel), data by iDMA"
+    return CORES, kernel, SPATZ if kernel != "none" else ""
 
 
 def annotate(rows: list[OpRow]) -> list[OpRow]:
-    """Fill unit_today and hand_kernel."""
+    """Fill pr1_unit, hand_kernel and hand_kernel_units."""
     out = []
     for r in rows:
-        unit, kernel = unit_and_kernel(r)
-        out.append(replace(r, unit_today=unit, hand_kernel=kernel))
+        unit, kernel, kunits = unit_and_kernel(r)
+        out.append(replace(r, pr1_unit=unit, hand_kernel=kernel, hand_kernel_units=kunits))
     return out
 
 

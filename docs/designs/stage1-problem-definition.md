@@ -412,7 +412,7 @@ SoftHier library does. The wiki's per-part parameter table
 | `memory_traffic_bytes`   | weights + inputs + outputs, each counted once per instance as defined below, fp16                          |
 | `weights_read_bytes`   | weight bytes per call as defined below                                                                      |
 | `flop_per_weight_byte` | `flop / weights_read_bytes`; empty for operators without weights                                                  |
-| `unit_today`     | unit in PR1's compiled path (§8 table)                                                                      |
+| `pr1_unit`     | unit in PR1's compiled path (§8 table)                                                                      |
 | `hand_kernel`    | kernel-repo kernel that covers it, or none (§8 table)                                                       |
 
 **How bytes scale with `count`.** This rule fixes the expert's intensity, which would
@@ -856,7 +856,7 @@ one pull request to `main`. Commits use the repo's `[step] area: message` style.
         using the dimension sources, formulas and count rule of §3; `Lowering` and
         `pr1_lowering(prefix_rows)` as in §3.
     *   `stage_totals(rows) -> dict[str, StageTotals]`.
-    *   Part 1 fills every column except `unit_today` and `hand_kernel`.
+    *   Part 1 fills every column except `pr1_unit` and `hand_kernel`.
 
 ##### 10. `infra/workload-modeling/workload_modeling/crosscheck.py` (Create)
 
@@ -973,7 +973,7 @@ one pull request to `main`. Commits use the repo's `[step] area: message` style.
 ##### 25. `infra/workload-modeling/workload_modeling/smolvla_ops.py` (Modify)
 
 *   **Type / Scope**: Python module.
-*   **Proposed Changes**: fill `unit_today` and `hand_kernel` from the §8 table.
+*   **Proposed Changes**: fill `pr1_unit` and `hand_kernel` from the §8 table.
     Collapse identical layers.
 
 ##### 26. `infra/workload-modeling/workload_modeling/render.py`, `md_to_html.py`, `templates/op_graph.md.j2` (Create) and `build.py` (Modify)

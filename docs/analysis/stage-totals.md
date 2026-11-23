@@ -10,7 +10,7 @@ Conventions ([conventions.md](conventions.md)): fp16 (2 B per element). Weights 
 
 Checkpoint `lerobot/smolvla_base@5e8d12a6`; 3 camera(s) at 512x512, 48 language tokens, 1 state token.
 
-| stage | tokens | GFLOP | of which matrix | FLOP share % | memory traffic, MB | weights read, MB | FLOP per weight byte |
+| stage | tokens | GFLOP | matrix GFLOP | share of FLOP, % | memory traffic, MB | weights read, MB | FLOP per weight byte |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | vision | 3 x 1024 | 645.385 | 641.427 | 76.5 | 5,765.7 | 518.6 | 1,244 |
 | connector | 192 | 4.530 | 4.530 | 0.5 | 38.9 | 23.6 | 192 |
@@ -24,7 +24,7 @@ Expert per flow step: 11.458 GFLOP, 199.7 MB of weights (includes the cross-atte
 
 Checkpoint `lerobot/smolvla_base@5e8d12a6`; 1 camera(s) at 256x256, 48 language tokens, 1 state token.
 
-| stage | tokens | GFLOP | of which matrix | FLOP share % | memory traffic, MB | weights read, MB | FLOP per weight byte |
+| stage | tokens | GFLOP | matrix GFLOP | share of FLOP, % | memory traffic, MB | weights read, MB | FLOP per weight byte |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | vision | 1 x 256 | 46.393 | 46.204 | 27.2 | 495.7 | 171.7 | 270 |
 | connector | 16 | 0.378 | 0.377 | 0.2 | 24.9 | 23.6 | 16 |

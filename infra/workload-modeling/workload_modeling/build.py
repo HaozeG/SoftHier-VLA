@@ -95,7 +95,7 @@ def render_md(c, rows: list[dict]) -> str:
             f"Checkpoint `{wl.repo}@{wl.revision[:8]}`; {wl.cameras} camera(s) at {wl.image_size}x{wl.image_size}, "
             f"{wl.language_tokens} language tokens, {wl.state_tokens} state token.",
             "",
-            "| stage | tokens | GFLOP | of which matrix | FLOP share % | memory traffic, MB | weights read, MB | FLOP per weight byte |",
+            "| stage | tokens | GFLOP | matrix GFLOP | share of FLOP, % | memory traffic, MB | weights read, MB | FLOP per weight byte |",
             "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
         for r in rs:

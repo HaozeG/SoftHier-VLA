@@ -48,8 +48,9 @@ are ignored.
 | --- | --- |
 | `shape` | one instance: (M, N, K) for matrix products; (heads, Sq, Skv, head dim) for attention; (rows, cols) otherwise |
 | `count` | instances per call: layers x flow steps x cameras that apply |
-| `unit_today` | unit that runs the operator in PR1's compiled path ([compiler-walkthrough.md](compiler-walkthrough.md)) |
-| `hand_kernel` | kernel-repo hand-written kernel that covers it, or none |
+| `pr1_unit` | unit that runs the operator in PR1's compiled path ([compiler-walkthrough.md](compiler-walkthrough.md)) |
+| `hand_kernel` | stage-1 hand-written kernel that does it, or none |
+| `hand_kernel_units` | units that kernel uses for this operator (RedMulE, Spatz, iDMA, ...) |
 | `flop` | all instances |
 | `weights_read_bytes` | shown as "weights read": weight bytes of one instance x `count` |
 | `memory_traffic_bytes` | shown as "memory traffic": (inputs + outputs + weights) of one instance x `count`, each moved once (no fusion, no re-reads from tiling) |

@@ -54,6 +54,14 @@ def _us(ns: float | None) -> str:
 GROUPS = (("GEMM", ("gemm",)), ("attention", ("attn", "softmax")), ("row operators", ROW_CLASSES))
 
 
+def _grouped_included(included: list[m.OpRow]) -> str:
+    """'`softmax`, `pv` (timed in `qk`)': rows whose work runs inside another row's kernel call, by host row."""
+    by: dict[str, list[str]] = {}
+    for r in included:
+        by.setdefault(m.INCLUDED_IN[(r.stage, r.op)], []).append(f"`{r.op}`")
+    return "; ".join(f"{', '.join(ops)} (timed in `{host}`)" for host, ops in by.items())
+
+
 def kernel_sums(c, workload_id: str, rows: list[m.OpRow]) -> dict:
     """Composed per-stage time: sum over rows of count x measured ns per call of the row's kernel.
 
@@ -82,13 +90,19 @@ def kernel_sums(c, workload_id: str, rows: list[m.OpRow]) -> dict:
         stages.append({
             "stage": st, **{g: f"{v:,.1f}" for g, v in grp.items()}, "total": f"{sum(grp.values()):,.1f}",
             "total_us": sum(grp.values()), "gflop": f"{flop / 1e9:,.1f}", "mfu": mfu(flop, sum(grp.values())),
-            "included": ", ".join(f"`{r.op}` (in `{m.INCLUDED_IN[(r.stage, r.op)]}`)" for r in included) or "none",
+            "included": _grouped_included(included) or "none",
             "uncovered": ", ".join(f"`{r.op}`" + (" (host)" if r.op in m.HOST_OPS else "") for r in uncovered) or "none",
+            "ms": f"{sum(grp.values()) / 1e3:,.2f}",
         })
     grand = sum(tot.values())
+    all_uncovered = [r for r in rows if m.hand_kernel_ns(c, workload_id, r) is None
+                     and (r.stage, r.op) not in m.INCLUDED_IN]
+    total_uncovered = ", ".join(f"`{r.op}` ({r.stage})" for r in all_uncovered)
+    for k in stages:
+        k["share"] = f"{100 * k['total_us'] / grand:.0f}" if grand else "0"
     return {"stages": stages, "total": {**{g: f"{v:,.1f}" for g, v in tot.items()}, "total": f"{grand:,.1f}",
                                         "gflop": f"{flop_tot / 1e9:,.1f}", "mfu": mfu(flop_tot, grand)},
-            "total_ms": f"{grand / 1e3:,.2f}",
+            "total_ms": f"{grand / 1e3:,.2f}", "total_uncovered": total_uncovered,
             "share": {g: f"{100 * v / grand:.0f}" if grand else "0" for g, v in tot.items()},
             "mfu_group": {g: mfu(gflop[g], tot[g]) for g, _ in GROUPS},
             "peak_tflops": f"{peak / 1e12:.1f}"}
@@ -162,7 +176,7 @@ def context(c, workload_id: str, lowering: m.Lowering | None = None, variant: st
     view = [{
         "stage": r.stage, "op": r.op, "layers": r.layers, "cls": r.cls, "shape": _shape(r), "count": r.count,
         "gflop": _g(r.flop), "traffic_mb": _mb(r.memory_traffic_bytes), "weights_mb": _mb(r.weights_read_bytes), "ai": _ai(r.flop_per_weight_byte),
-        "unit_today": r.unit_today, "hand_kernel": r.hand_kernel, "kus": (f"in `{m.INCLUDED_IN[(r.stage, r.op)]}`" if (r.stage, r.op) in m.INCLUDED_IN
+        "pr1_unit": r.pr1_unit, "hand_kernel": r.hand_kernel, "kunits": r.hand_kernel_units, "kus": (f"timed in `{m.INCLUDED_IN[(r.stage, r.op)]}`" if (r.stage, r.op) in m.INCLUDED_IN
                 else _us(m.hand_kernel_ns(c, workload_id, r))),
     } for r in rows]
     n_vis = m.vision_tokens(wl, d)
@@ -197,11 +211,11 @@ def render_csv(c, workload_id: str, lowering: m.Lowering | None = None) -> str:
     f = io.StringIO()
     w = csv.writer(f, lineterminator="\n")
     w.writerow(["stage", "layers", "op", "class", "shape", "count", "flop", "memory_traffic_bytes", "weights_read_bytes",
-                "flop_per_weight_byte", "unit_today", "hand_kernel", "hand_kernel_ns_per_call", "note"])
+                "flop_per_weight_byte", "pr1_unit", "hand_kernel", "hand_kernel_units", "kernel_ns_per_call", "note"])
     for r in rows:
         ai = r.flop_per_weight_byte
         w.writerow([r.stage, r.layers, r.op, r.cls, "x".join(map(str, r.shape)), r.count, f"{r.flop:.0f}",
                     f"{r.memory_traffic_bytes:.0f}", f"{r.weights_read_bytes:.0f}", "" if ai is None else f"{ai:.2f}",
-                    r.unit_today, r.hand_kernel, "" if (ns := m.hand_kernel_ns(c, workload_id, r)) is None else f"{ns:.0f}",
+                    r.pr1_unit, r.hand_kernel, r.hand_kernel_units, "" if (ns := m.hand_kernel_ns(c, workload_id, r)) is None else f"{ns:.0f}",
                     r.note])
     return f.getvalue()
