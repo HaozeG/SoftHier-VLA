@@ -1,4 +1,4 @@
-workload,stage,flop,matmul_flop,bytes_unique,bytes_weight,flop_per_wbyte
+workload,stage,flop,matmul_flop,memory_traffic_bytes,weights_read_bytes,flop_per_weight_byte
 vlabench-3cam,vision,645385420800,641426522112,5765672448,518598144,1244.48
 vlabench-3cam,connector,4530032640,4529848320,38854656,23592960,192.01
 vlabench-3cam,prefix,79552454000,79380602880,675209344,314791680,252.71

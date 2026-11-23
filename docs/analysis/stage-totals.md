@@ -4,7 +4,7 @@
 
 Per-stage compute and memory needs of one SmolVLA policy call, from the standalone model (`infra/workload-modeling/`). The model follows the reference computation (lerobot SmolVLA code) at true token counts; its matrix-product FLOP agree with PR1's compiled programs within 0.011 % once PR1's padding and rewrites are applied ([crosscheck.md](crosscheck.md)). Label: inference (model output), cross-checked.
 
-Conventions ([conventions.md](conventions.md)): fp16 (2 B per element). Weights read (CSV `bytes_weight`): each layer's weights once per call and the expert's weights once per flow step. Memory traffic (CSV `bytes_unique`): weights read plus each operator's inputs and outputs, each moved once (no fusion, no re-reads from tiling); FLOP per weight byte = FLOP / weights read. Non-matrix FLOP use per-element conventions.
+Conventions ([conventions.md](conventions.md)): fp16 (2 B per element). Weights read (CSV `weights_read_bytes`): each layer's weights once per call and the expert's weights once per flow step. Memory traffic (CSV `memory_traffic_bytes`): weights read plus each operator's inputs and outputs, each moved once (no fusion, no re-reads from tiling); FLOP per weight byte = FLOP / weights read. Non-matrix FLOP use per-element conventions.
 
 ## `vlabench-3cam` (primary)
 

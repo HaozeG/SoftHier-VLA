@@ -149,19 +149,19 @@ def context(c, workload_id: str, lowering: m.Lowering | None = None, variant: st
     all_flop = sum(t.flop for t in tot.values())
     stages = {
         k: {"gflop": _g(t.flop), "mm_gflop": _g(t.matmul_flop), "share": f"{100 * t.flop / all_flop:.1f}",
-            "umb": _mb(t.bytes_unique), "wmb": _mb(t.bytes_weight), "ai": _ai(t.flop_per_wbyte)}
+            "traffic_mb": _mb(t.memory_traffic_bytes), "weights_mb": _mb(t.weights_read_bytes), "ai": _ai(t.flop_per_weight_byte)}
         for k, t in tot.items()
     }
-    tw = sum(t.bytes_weight for t in tot.values())
+    tw = sum(t.weights_read_bytes for t in tot.values())
     total = {"gflop": _g(all_flop), "mm_gflop": _g(sum(t.matmul_flop for t in tot.values())),
-             "umb": _mb(sum(t.bytes_unique for t in tot.values())), "wmb": _mb(tw), "ai": _ai(all_flop / tw)}
+             "traffic_mb": _mb(sum(t.memory_traffic_bytes for t in tot.values())), "weights_mb": _mb(tw), "ai": _ai(all_flop / tw)}
     classes = []
     for cl in CLASSES:
         f = sum(r.flop for r in rows if r.cls == cl)
         classes.append({"name": cl, "gflop": _g(f), "share": f"{100 * f / all_flop:.2f}"})
     view = [{
         "stage": r.stage, "op": r.op, "layers": r.layers, "cls": r.cls, "shape": _shape(r), "count": r.count,
-        "gflop": _g(r.flop), "umb": _mb(r.bytes_unique), "wmb": _mb(r.bytes_weight), "ai": _ai(r.flop_per_wbyte),
+        "gflop": _g(r.flop), "traffic_mb": _mb(r.memory_traffic_bytes), "weights_mb": _mb(r.weights_read_bytes), "ai": _ai(r.flop_per_weight_byte),
         "unit_today": r.unit_today, "hand_kernel": r.hand_kernel, "kus": (f"in `{m.INCLUDED_IN[(r.stage, r.op)]}`" if (r.stage, r.op) in m.INCLUDED_IN
                 else _us(m.hand_kernel_ns(c, workload_id, r))),
     } for r in rows]
@@ -196,12 +196,12 @@ def render_csv(c, workload_id: str, lowering: m.Lowering | None = None) -> str:
     rows = m.annotate(m.build(c, workload_id, lowering or m.kernel_set(workload_id).lowering))
     f = io.StringIO()
     w = csv.writer(f, lineterminator="\n")
-    w.writerow(["stage", "layers", "op", "class", "shape", "count", "flop", "bytes_unique", "bytes_weight",
-                "flop_per_wbyte", "unit_today", "hand_kernel", "hand_kernel_ns_per_call", "note"])
+    w.writerow(["stage", "layers", "op", "class", "shape", "count", "flop", "memory_traffic_bytes", "weights_read_bytes",
+                "flop_per_weight_byte", "unit_today", "hand_kernel", "hand_kernel_ns_per_call", "note"])
     for r in rows:
-        ai = r.flop_per_wbyte
+        ai = r.flop_per_weight_byte
         w.writerow([r.stage, r.layers, r.op, r.cls, "x".join(map(str, r.shape)), r.count, f"{r.flop:.0f}",
-                    f"{r.bytes_unique:.0f}", f"{r.bytes_weight:.0f}", "" if ai is None else f"{ai:.2f}",
+                    f"{r.memory_traffic_bytes:.0f}", f"{r.weights_read_bytes:.0f}", "" if ai is None else f"{ai:.2f}",
                     r.unit_today, r.hand_kernel, "" if (ns := m.hand_kernel_ns(c, workload_id, r)) is None else f"{ns:.0f}",
                     r.note])
     return f.getvalue()

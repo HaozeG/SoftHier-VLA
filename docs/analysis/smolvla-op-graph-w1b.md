@@ -39,8 +39,8 @@ flowchart LR
 | **total** | 836.944 | 832.483 | 100.0 | 8,761.34 | 2,478.75 | 338 |
 
 Memory traffic: bytes moved if every operator reads its inputs and weights from memory once and writes its output
-once (no fusion, no re-reads from tiling; CSV column `bytes_unique`). Weights read: the weight part of that
-traffic (`bytes_weight`; each layer's weights once per call, the expert's once per flow step). FLOP per weight byte
+once (no fusion, no re-reads from tiling; CSV column `memory_traffic_bytes`). Weights read: the weight part of that
+traffic (`weights_read_bytes`; each layer's weights once per call, the expert's once per flow step). FLOP per weight byte
 = GFLOP / weights read.
 
 FLOP share by class:

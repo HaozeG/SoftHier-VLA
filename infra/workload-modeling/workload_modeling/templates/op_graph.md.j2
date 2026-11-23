@@ -35,13 +35,13 @@ flowchart LR
 | stage | GFLOP | of which matrix | FLOP share % | memory traffic, MB | weights read, MB | FLOP per weight byte |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 {% for name in stages -%}
-| {{ name }} | {{ s[name].gflop }} | {{ s[name].mm_gflop }} | {{ s[name].share }} | {{ s[name].umb }} | {{ s[name].wmb }} | {{ s[name].ai }} |
+| {{ name }} | {{ s[name].gflop }} | {{ s[name].mm_gflop }} | {{ s[name].share }} | {{ s[name].traffic_mb }} | {{ s[name].weights_mb }} | {{ s[name].ai }} |
 {% endfor -%}
-| **total** | {{ total.gflop }} | {{ total.mm_gflop }} | 100.0 | {{ total.umb }} | {{ total.wmb }} | {{ total.ai }} |
+| **total** | {{ total.gflop }} | {{ total.mm_gflop }} | 100.0 | {{ total.traffic_mb }} | {{ total.weights_mb }} | {{ total.ai }} |
 
 Memory traffic: bytes moved if every operator reads its inputs and weights from memory once and writes its output
-once (no fusion, no re-reads from tiling; CSV column `bytes_unique`). Weights read: the weight part of that
-traffic (`bytes_weight`; each layer's weights once per call, the expert's once per flow step). FLOP per weight byte
+once (no fusion, no re-reads from tiling; CSV column `memory_traffic_bytes`). Weights read: the weight part of that
+traffic (`weights_read_bytes`; each layer's weights once per call, the expert's once per flow step). FLOP per weight byte
 = GFLOP / weights read.
 
 FLOP share by class:
@@ -59,7 +59,7 @@ FLOP share by class:
 | op | layers | class | shape | count | GFLOP | memory traffic, MB | weights read, MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |
 {% for r in rows if r.stage == name -%}
-| `{{ r.op }}` | {{ r.layers }} | {{ r.cls }} | {{ r.shape }} | {{ r.count }} | {{ r.gflop }} | {{ r.umb }} | {{ r.wmb }} | {{ r.ai }} | {{ r.unit_today }} | {{ r.hand_kernel }} | {{ r.kus }} |
+| `{{ r.op }}` | {{ r.layers }} | {{ r.cls }} | {{ r.shape }} | {{ r.count }} | {{ r.gflop }} | {{ r.traffic_mb }} | {{ r.weights_mb }} | {{ r.ai }} | {{ r.unit_today }} | {{ r.hand_kernel }} | {{ r.kus }} |
 {% endfor %}
 {% endfor %}
 ## Composed estimate from hand-written kernels

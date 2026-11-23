@@ -49,7 +49,7 @@ def stage_rows(c) -> list[dict]:
             out.append({
                 "workload": wid, "stage": s,
                 "flop": t.flop, "matmul_flop": t.matmul_flop, "flop_share_pct": 100 * t.flop / all_flop,
-                "bytes_unique": t.bytes_unique, "bytes_weight": t.bytes_weight, "flop_per_wbyte": t.flop_per_wbyte,
+                "memory_traffic_bytes": t.memory_traffic_bytes, "weights_read_bytes": t.weights_read_bytes, "flop_per_weight_byte": t.flop_per_weight_byte,
                 "_tokens": {"vision": f"{wl.cameras} x {m.vision_tokens(wl, d)}", "connector": f"{wl.cameras * m.vision_tokens(wl, d) // d.shuffle ** 2}",
                             "prefix": f"{m.prefix_tokens(wl, d)}", "expert": f"{d.chunk} x {d.steps} steps"}[s],
             })
@@ -58,12 +58,12 @@ def stage_rows(c) -> list[dict]:
 
 def render_csv(rows: list[dict]) -> str:
     f = io.StringIO()
-    cols = ["workload", "stage", "flop", "matmul_flop", "bytes_unique", "bytes_weight", "flop_per_wbyte"]
+    cols = ["workload", "stage", "flop", "matmul_flop", "memory_traffic_bytes", "weights_read_bytes", "flop_per_weight_byte"]
     w = csv.writer(f, lineterminator="\n")
     w.writerow(cols)
     for r in rows:
-        w.writerow([r["workload"], r["stage"], f"{r['flop']:.0f}", f"{r['matmul_flop']:.0f}", f"{r['bytes_unique']:.0f}",
-                    f"{r['bytes_weight']:.0f}", "" if r["flop_per_wbyte"] is None else f"{r['flop_per_wbyte']:.2f}"])
+        w.writerow([r["workload"], r["stage"], f"{r['flop']:.0f}", f"{r['matmul_flop']:.0f}", f"{r['memory_traffic_bytes']:.0f}",
+                    f"{r['weights_read_bytes']:.0f}", "" if r["flop_per_weight_byte"] is None else f"{r['flop_per_weight_byte']:.2f}"])
     return f.getvalue()
 
 
@@ -78,9 +78,9 @@ def render_md(c, rows: list[dict]) -> str:
         "token counts; its matrix-product FLOP agree with PR1's compiled programs within 0.011 % once PR1's padding "
         "and rewrites are applied ([crosscheck.md](crosscheck.md)). Label: inference (model output), cross-checked.",
         "",
-        "Conventions ([conventions.md](conventions.md)): fp16 (2 B per element). Weights read (CSV `bytes_weight`): "
+        "Conventions ([conventions.md](conventions.md)): fp16 (2 B per element). Weights read (CSV `weights_read_bytes`): "
         "each layer's weights once per call and the expert's weights once per flow step. Memory traffic (CSV "
-        "`bytes_unique`): weights read plus each operator's inputs and outputs, each moved once (no fusion, no "
+        "`memory_traffic_bytes`): weights read plus each operator's inputs and outputs, each moved once (no fusion, no "
         "re-reads from tiling); FLOP per weight byte = FLOP / weights read. Non-matrix FLOP use "
         "per-element conventions.",
         "",
@@ -100,15 +100,15 @@ def render_md(c, rows: list[dict]) -> str:
         ]
         for r in rs:
             lines.append(f"| {r['stage']} | {r['_tokens']} | {_g(r['flop'])} | {_g(r['matmul_flop'])} | "
-                         f"{r['flop_share_pct']:.1f} | {_mb(r['bytes_unique'])} | {_mb(r['bytes_weight'])} | "
-                         f"{_i(r['flop_per_wbyte'])} |")
+                         f"{r['flop_share_pct']:.1f} | {_mb(r['memory_traffic_bytes'])} | {_mb(r['weights_read_bytes'])} | "
+                         f"{_i(r['flop_per_weight_byte'])} |")
         tf = sum(r["flop"] for r in rs)
-        tw = sum(r["bytes_weight"] for r in rs)
+        tw = sum(r["weights_read_bytes"] for r in rs)
         lines += [f"| **total** | | {_g(tf)} | {_g(sum(r['matmul_flop'] for r in rs))} | 100.0 | "
-                  f"{_mb(sum(r['bytes_unique'] for r in rs))} | {_mb(tw)} | {_i(tf / tw)} |", ""]
+                  f"{_mb(sum(r['memory_traffic_bytes'] for r in rs))} | {_mb(tw)} | {_i(tf / tw)} |", ""]
         e = next(r for r in rs if r["stage"] == "expert")
         steps = m.load_dims(wl).steps
-        lines += [f"Expert per flow step: {_g(e['flop'] / steps)} GFLOP, {_mb(e['bytes_weight'] / steps)} MB of weights "
+        lines += [f"Expert per flow step: {_g(e['flop'] / steps)} GFLOP, {_mb(e['weights_read_bytes'] / steps)} MB of weights "
                   f"(includes the cross-attention K/V projection, which the reference code repeats every step).", ""]
     thor = c.value("thor.fp16_dense") * 1e12 / (c.value("thor.dram_bw") * 1e9)
     lines += [

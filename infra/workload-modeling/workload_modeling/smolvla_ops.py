@@ -8,10 +8,10 @@ Byte columns and the count rule (docs/analysis/conventions.md):
   - one row per operator group; `shape` is one instance; `count` = instances per call
     (layers x flow steps x cameras that apply; heads are folded into the shape, because they share
     one weight matrix; Lowering.batch_cameras folds cameras into the shape too);
-  - bytes_weight = weight bytes of one instance x count. Each layer has its own weights; the expert's
+  - weights_read_bytes = weight bytes of one instance x count. Each layer has its own weights; the expert's
     weights do not fit on chip, so they are read again in every flow step;
-  - bytes_unique = (inputs + outputs + weights) of one instance x count;
-  - flop_per_wbyte = flop / bytes_weight, None for operators without weights.
+  - memory_traffic_bytes = (inputs + outputs + weights) of one instance x count;
+  - flop_per_weight_byte = flop / weights_read_bytes, None for operators without weights.
 """
 
 from __future__ import annotations
@@ -51,15 +51,15 @@ class OpRow:
     shape: tuple[int, ...]       # (M, N, K) for gemm; (h, Sq, Skv, d) for attn; (rows, cols) otherwise
     count: int
     flop: float
-    bytes_unique: float
-    bytes_weight: float
+    memory_traffic_bytes: float
+    weights_read_bytes: float
     unit_today: str = ""         # filled in Part 2
     hand_kernel: str = ""        # filled in Part 2
     note: str = ""
 
     @property
-    def flop_per_wbyte(self) -> float | None:
-        return self.flop / self.bytes_weight if self.bytes_weight else None
+    def flop_per_weight_byte(self) -> float | None:
+        return self.flop / self.weights_read_bytes if self.weights_read_bytes else None
 
     @property
     def is_matmul(self) -> bool:
@@ -70,12 +70,12 @@ class OpRow:
 class StageTotals:
     flop: float
     matmul_flop: float
-    bytes_unique: float
-    bytes_weight: float
+    memory_traffic_bytes: float
+    weights_read_bytes: float
 
     @property
-    def flop_per_wbyte(self) -> float | None:
-        return self.flop / self.bytes_weight if self.bytes_weight else None
+    def flop_per_weight_byte(self) -> float | None:
+        return self.flop / self.weights_read_bytes if self.weights_read_bytes else None
 
 
 @dataclass(frozen=True)
@@ -540,8 +540,8 @@ def stage_totals(rows: list[OpRow]) -> dict[str, StageTotals]:
         out[s] = StageTotals(
             flop=sum(r.flop for r in rs),
             matmul_flop=sum(r.flop for r in rs if r.is_matmul),
-            bytes_unique=sum(r.bytes_unique for r in rs),
-            bytes_weight=sum(r.bytes_weight for r in rs),
+            memory_traffic_bytes=sum(r.memory_traffic_bytes for r in rs),
+            weights_read_bytes=sum(r.weights_read_bytes for r in rs),
         )
     return out
 

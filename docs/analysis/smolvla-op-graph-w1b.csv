@@ -1,4 +1,4 @@
-stage,layers,op,class,shape,count,flop,bytes_unique,bytes_weight,flop_per_wbyte,unit_today,hand_kernel,hand_kernel_ns_per_call,note
+stage,layers,op,class,shape,count,flop,memory_traffic_bytes,weights_read_bytes,flop_per_weight_byte,unit_today,hand_kernel,hand_kernel_ns_per_call,note
 vision,embed,patch_embed,gemm,3072x768x768,1,3623878656,10616832,1179648,3072.00,RedMulE (operands moved by iDMA),SummaGEMM,51957,
 vision,embed,bias_patch,elementwise,3072x768,1,2359296,9438720,1536,1536.00,Snitch cores,Eltwise (bias),24918,
 vision,embed,pos_embed_add,elementwise,3072x768,1,2359296,11010048,1572864,1.50,Snitch cores,Eltwise (add),34938,

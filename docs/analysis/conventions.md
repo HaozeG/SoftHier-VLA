@@ -51,9 +51,9 @@ are ignored.
 | `unit_today` | unit that runs the operator in PR1's compiled path ([compiler-walkthrough.md](compiler-walkthrough.md)) |
 | `hand_kernel` | kernel-repo hand-written kernel that covers it, or none |
 | `flop` | all instances |
-| `bytes_weight` | shown as "weights read": weight bytes of one instance x `count` |
-| `bytes_unique` | shown as "memory traffic": (inputs + outputs + weights) of one instance x `count`, each moved once (no fusion, no re-reads from tiling) |
-| FLOP per weight byte | `flop / bytes_weight`; empty for operators without weights |
+| `weights_read_bytes` | shown as "weights read": weight bytes of one instance x `count` |
+| `memory_traffic_bytes` | shown as "memory traffic": (inputs + outputs + weights) of one instance x `count`, each moved once (no fusion, no re-reads from tiling) |
+| FLOP per weight byte | `flop / weights_read_bytes`; empty for operators without weights |
 
 **How bytes scale with `count`:**
 

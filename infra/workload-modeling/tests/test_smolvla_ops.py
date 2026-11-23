@@ -54,15 +54,15 @@ def test_worked_example_expert_gateup(c):
     assert row.shape == (50, 4096, 720)
     assert row.count == 160
     assert row.flop == 47_185_920_000
-    assert row.bytes_weight == 2 * 720 * 4096 * 160
-    assert row.flop_per_wbyte == 50
+    assert row.weights_read_bytes == 2 * 720 * 4096 * 160
+    assert row.flop_per_weight_byte == 50
 
 
 def test_camera_weight_reads(c):
     """Reference: vision weights read once per camera; batch_cameras: once per call. FLOP unchanged."""
     per_cam = m.stage_totals(m.build(c, "libero-2cam"))["vision"]
     batched = m.stage_totals(m.build(c, "libero-2cam", m.Lowering(batch_cameras=True)))["vision"]
-    assert per_cam.bytes_weight == 2 * batched.bytes_weight
+    assert per_cam.weights_read_bytes == 2 * batched.weights_read_bytes
     assert per_cam.flop == batched.flop
 
 
@@ -101,7 +101,7 @@ def test_weight_bytes_equal_header_parameters(c):
     rows = m.build(c, "libero-2cam", m.Lowering(batch_cameras=True))  # one encoder pass for the vision part
 
     def wb(stage, ops=None, exclude=()):
-        return sum(r.bytes_weight for r in rows
+        return sum(r.weights_read_bytes for r in rows
                    if r.stage == stage and (ops is None or r.op in ops) and r.op not in exclude)
 
     assert wb("vision") == 2 * params["vision"]

@@ -409,42 +409,42 @@ SoftHier library does. The wiki's per-part parameter table
 | `shape`          | (M, N, K) for matrix products; (h, Sq, Skv, d) for attention; (rows, cols) otherwise                        |
 | `count`          | instances per call = layers x flow steps x cameras that apply                                               |
 | `flop`           | per call, all instances                                                                                     |
-| `bytes_unique`   | weights + inputs + outputs, each counted once per instance as defined below, fp16                          |
-| `bytes_weight`   | weight bytes per call as defined below                                                                      |
-| `flop_per_wbyte` | `flop / bytes_weight`; empty for operators without weights                                                  |
+| `memory_traffic_bytes`   | weights + inputs + outputs, each counted once per instance as defined below, fp16                          |
+| `weights_read_bytes`   | weight bytes per call as defined below                                                                      |
+| `flop_per_weight_byte` | `flop / weights_read_bytes`; empty for operators without weights                                                  |
 | `unit_today`     | unit in PR1's compiled path (§8 table)                                                                      |
 | `hand_kernel`    | kernel-repo kernel that covers it, or none (§8 table)                                                       |
 
 **How bytes scale with `count`.** This rule fixes the expert's intensity, which would
 otherwise be off by about 10x:
 
-*   *Layers:* each layer has its own weights, so `bytes_weight` scales with the number
+*   *Layers:* each layer has its own weights, so `weights_read_bytes` scales with the number
     of layers.
 *   *Heads:* they share one weight matrix and are folded into the shape, so
-    `bytes_weight` does not scale with them.
+    `weights_read_bytes` does not scale with them.
 *   *Cameras:* the reference code runs the vision encoder once per camera, so vision
-    `bytes_weight` scales with cameras. `Lowering(batch_cameras=True)` batches them and
+    `weights_read_bytes` scales with cameras. `Lowering(batch_cameras=True)` batches them and
     reads the weights once (owner decision: follow the reference by default).
 *   *Flow steps:* the expert's weights do not fit on chip, so they are read again in
-    every step. `bytes_weight` scales with flow steps. The page states this assumption.
-*   `bytes_unique` counts inputs, outputs and weights per instance, times `count`.
+    every step. `weights_read_bytes` scales with flow steps. The page states this assumption.
+*   `memory_traffic_bytes` counts inputs, outputs and weights per instance, times `count`.
 
 **FLOP and byte formulas per class** (fp16, 2 B per element; `h` = heads, `hkv` = KV
 heads, `d` = head dim, `Sq`/`Skv` = query/key length):
 
-| Class                        | FLOP                                          | `bytes_weight`        | `bytes_unique`                                                               |
+| Class                        | FLOP                                          | `weights_read_bytes`        | `memory_traffic_bytes`                                                               |
 | ---------------------------- | --------------------------------------------- | --------------------- | ---------------------------------------------------------------------------- |
-| gemm (M x K) . (K x N)       | 2 M N K                                       | 2 K N                 | 2 (M K + M N) + `bytes_weight`                                               |
+| gemm (M x K) . (K x N)       | 2 M N K                                       | 2 K N                 | 2 (M K + M N) + `weights_read_bytes`                                               |
 | attn: QK^T                   | 2 h Sq Skv d                                  | 0                     | 2 (h Sq d + hkv Skv d) (score matrix not counted: intermediate)             |
 | attn: P.V                    | 2 h Sq Skv d                                  | 0                     | 2 (hkv Skv d + h Sq d)                                                       |
 | softmax (rows x cols)        | 5 per element (max, subtract, exp, sum, divide) | 0                   | 2 x 2 rows cols                                                              |
-| norm: LayerNorm (rows x n)   | 8 per element                                 | 2 x 2 n (scale, bias) | 2 x 2 rows n + `bytes_weight`                                                |
-| norm: RMSNorm (rows x n)     | 4 per element                                 | 2 n (scale)           | 2 x 2 rows n + `bytes_weight`                                                |
+| norm: LayerNorm (rows x n)   | 8 per element                                 | 2 x 2 n (scale, bias) | 2 x 2 rows n + `weights_read_bytes`                                                |
+| norm: RMSNorm (rows x n)     | 4 per element                                 | 2 n (scale)           | 2 x 2 rows n + `weights_read_bytes`                                                |
 | acti: GELU (tanh form)       | 8 per element                                 | 0                     | 2 x 2 elements                                                               |
 | acti: SiLU x up (expert MLP) | 5 per element                                 | 0                     | 2 x 3 elements                                                               |
 | elementwise: RoPE            | 3 per element                                 | 0                     | 2 x 2 elements                                                               |
 | elementwise: residual add    | 1 per element                                 | 0                     | 2 x 3 elements                                                               |
-| elementwise: bias add        | 1 per element                                 | 2 N                   | 2 x 2 elements + `bytes_weight`                                              |
+| elementwise: bias add        | 1 per element                                 | 2 N                   | 2 x 2 elements + `weights_read_bytes`                                              |
 
 Bias adds are separate rows, as in PR1's programs, so matrix-product FLOP compare
 directly with RedMulE work. `docs/analysis/conventions.md` holds the full table (also
@@ -461,15 +461,15 @@ SoftHier comes from core issue rate, not from FLOP, which RQ1 measures.
 *   Per instance: FLOP = 2 x 50 x 720 x 4096 = 294.9 MFLOP, and weight bytes =
     2 x 720 x 4096 = 5.90 MB.
 *   Count: 16 layers x 10 steps = 160 instances (PROFILE lists 160).
-*   Totals: `flop` = 47.2 GFLOP and `bytes_weight` = 5.90 MB x 16 x 10 = 943 MB.
-*   `flop_per_wbyte` = 50, which equals M, as expected for an M-row product. If weight
+*   Totals: `flop` = 47.2 GFLOP and `weights_read_bytes` = 5.90 MB x 16 x 10 = 943 MB.
+*   `flop_per_weight_byte` = 50, which equals M, as expected for an M-row product. If weight
     bytes did not scale with steps, the figure would read 500.
 
 The expert width 720 and MLP size 2048 come from the header. The example's numbers are
 checked in the tests.
 
 **`stage_totals(rows)`** returns, per model stage: FLOP, matrix-product FLOP,
-`bytes_unique`, `bytes_weight` and FLOP per weight byte. Part 1 needs only these.
+`memory_traffic_bytes`, `weights_read_bytes` and FLOP per weight byte. Part 1 needs only these.
 
 **Reference computation and `Lowering`.** `build` follows the reference code (lerobot
 SmolVLA) at true token counts. A `Lowering` records a compiled program's shape choices
@@ -901,7 +901,7 @@ one pull request to `main`. Commits use the repo's `[step] area: message` style.
         `smolvla_base`), and per-part counts match the wiki's table;
     *   every config-derived shape matches its header tensor;
     *   the worked example: expert gate/up `flop` = 47.19 GFLOP and
-        `flop_per_wbyte` = 50, exact;
+        `flop_per_weight_byte` = 50, exact;
     *   per-stage padded matrix-product FLOP equals `docs/analysis/crosscheck.json`
         within 0.01 % (regression guard).
 
