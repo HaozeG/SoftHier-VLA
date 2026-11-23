@@ -64,6 +64,6 @@ Status values: draft | active | answered | dropped.
 4. [Operator graph](../analysis/smolvla-op-graph.md) (HTML for meetings: `uv run python -m workload_modeling.build` in
    `infra/workload-modeling/`, then open `infra/workload-modeling/build/smolvla-op-graph.html`) and
    [compiler walk-through](../analysis/compiler-walkthrough.md).
-5. Wiki status log: `softhier_vla_wiki/memories/status/`.
+5. Progress by step, with the design and result pages of each: [top-level README](../../README.md#progress-and-design-documents).
 
 Design: [`docs/designs/stage1-problem-definition.md`](../designs/stage1-problem-definition.md).

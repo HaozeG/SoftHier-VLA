@@ -3,7 +3,7 @@
 *   **Author:** Haoze (with Claude)
 *   **Status:** Proposed (revision 2, after EGM review)
 *   **Date:** 2026-11-12
-*   **Predecessor:** [`concepts_brief.md`](../../concepts_brief.md) (brainstorm, one Goldfish round)
+*   **Predecessor:** `concepts_brief.md` (brainstorm, one Goldfish round; removed from the tree, last at `803a228`)
 
 --------------------------------------------------------------------------------
 
@@ -757,7 +757,7 @@ Settled by the wiki decision `wiki://wiki-design/decisions/2026-11-12-status-and
 
 ## Additional Resources
 
-*   `concepts_brief.md`: brainstorm brief with owner decisions.
+*   `concepts_brief.md` (removed; `git show 803a228:concepts_brief.md`): brainstorm brief with owner decisions.
 *   `docs/designs/smolvla-softhier-baseline.md`: PR1 design, findings F1-F19.
 *   `experiments/smolvla-e2e-baseline/PROFILE.md` and `profile/parse_profile.py`,
     `profile/hw_spec.csv` on the experiment branch.
