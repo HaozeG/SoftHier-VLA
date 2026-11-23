@@ -2,7 +2,7 @@
 id: RQn
 title: One line, the question's subject
 status: draft        # draft | active | answered | dropped
-workload: libero-2cam
+workload: vlabench-3cam
 arch: stage1-16      # stage1-16 | stage1-256
 metric: what is measured, with unit
 depends_on: []       # list of RQ ids

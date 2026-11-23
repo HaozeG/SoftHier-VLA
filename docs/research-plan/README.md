@@ -15,7 +15,7 @@ most stages are limited by memory bandwidth or by software overheads, not by com
 many-core chips keep data in distributed local memories and can split their cluster mesh between
 tasks. Whether this suits embodied AI is open. SoftHier-VLA asks how such a chip should be built and
 how work should be mapped onto it in space (which clusters) and time (when), at the same peak FP16
-compute as Thor. Stage 1 answers this for one model, SmolVLA, on one workload (`libero-2cam`). It
+compute as Thor. Stage 1 answers this for one model, SmolVLA, on one workload (`vlabench-3cam`, 3 cameras in the VLABench observation format). It
 measures where time goes (row operations on the cores, the bandwidth-bound action expert, under-used
 clusters) and states four questions with starting points. Later stages extend the analysis to several
 models and to scheduling a VLA and a controller on one chip.
@@ -32,15 +32,15 @@ No RQ needs to be answered in stage 1.
 
 ## RQ index
 
-All RQs target `libero-2cam`. "16-cluster" = the kernel-repo arch as configured; "256-cluster" = the
+All RQs target `vlabench-3cam`. "16-cluster" = the kernel-repo arch as configured; "256-cluster" = the
 same arch scaled to Thor's peak ([hw-config.md](../analysis/hw-config.md)). Starting points are from
 PR1 (`arch: pr1`) unless marked; measured values on the stage-1 arches come from the measurement work.
 
 | ID | Title | Metric | Arch | Starting points (key: value, workload, label) | Status |
 | --- | --- | --- | --- | --- | --- |
-| [RQ1](rq/rq1-core-ops-on-spatz.md) | Core-executed operations and Spatz | share of latency in core-executed ops; latency per stage | 16-cluster | `pr1.core_op_share` 64.5 %, pr1-1cam, measured; `pr1.libero_rowop_share` ~60 %, libero-2cam, estimate | draft |
-| [RQ2](rq/rq2-expert-streaming.md) | Expert time per flow step against bandwidth and on-chip residency | ms per flow step; achieved GB/s | 256-cluster | `pr1.expert_step_ms` 7.761 ms, pr1-1cam, measured; expert 55 FLOP per weight byte, libero-2cam, inference (model) | draft |
-| [RQ3](rq/rq3-mesh-partitioning.md) | Dividing the mesh by model stage | end-to-end latency; cluster utilization | 256-cluster (16 for contrast) | `pr1.gemm_cluster_use` 1-10 of 16, pr1-1cam, measured; `pr1.libero_e2e_ms` 479.1 ms, libero-2cam, estimate | draft |
+| [RQ1](rq/rq1-core-ops-on-spatz.md) | Core-executed operations and Spatz | share of latency in core-executed ops; latency per stage | 16-cluster | `pr1.core_op_share` 64.5 %, pr1-1cam, measured | draft |
+| [RQ2](rq/rq2-expert-streaming.md) | Expert time per flow step against bandwidth and on-chip residency | ms per flow step; achieved GB/s | 256-cluster | `pr1.expert_step_ms` 7.761 ms, pr1-1cam, measured; expert 57 FLOP per weight byte, vlabench-3cam, inference (model) | draft |
+| [RQ3](rq/rq3-mesh-partitioning.md) | Dividing the mesh by model stage | end-to-end latency; cluster utilization | 256-cluster (16 for contrast) | `pr1.gemm_cluster_use` 1-10 of 16, pr1-1cam, measured | draft |
 | [RQ4](rq/rq4-mfu-vs-thor.md) | Per-stage MFU at iso-peak with Thor | achieved FLOP/s over peak FP16, per stage | 256-cluster | `pr1.mfu` 1.2 %, pr1-1cam, measured; Thor per-stage figures converted to FP16, inference | draft |
 
 Status values: draft | active | answered | dropped.
@@ -50,7 +50,7 @@ Status values: draft | active | answered | dropped.
 1. **Stage 1 (now):** infrastructure (PR1, done) and the needs of one model, SmolVLA: this plan, the
    constants, the stage totals, the hardware table; then the operator table and the compiler
    walk-through.
-2. **Measurement work:** hand-written kernels on `libero-2cam` shapes on the stage-1 arch, a
+2. **Measurement work:** hand-written kernels on `vlabench-3cam` shapes on the stage-1 arch, a
    bandwidth-limited HBM model, a build check of the 256-cluster arch; fusion estimates.
 3. **Several models:** π0/π0.5 and GR00T builders in the same model; static mapping per model.
 4. **Dynamic scheduling:** a VLA and an S0 controller on one chip, under different latency and rate
@@ -64,6 +64,6 @@ Status values: draft | active | answered | dropped.
 4. [Operator graph](../analysis/smolvla-op-graph.md) (HTML for meetings: `uv run python -m workload_modeling.build` in
    `infra/workload-modeling/`, then open `infra/workload-modeling/build/smolvla-op-graph.html`) and
    [compiler walk-through](../analysis/compiler-walkthrough.md).
-5. Wiki status log: `softhier_vla_wiki/memories/status/`.
+5. Progress by step, with the design and result pages of each: [top-level README](../../README.md#progress-and-design-documents).
 
 Design: [`docs/designs/stage1-problem-definition.md`](../designs/stage1-problem-definition.md).

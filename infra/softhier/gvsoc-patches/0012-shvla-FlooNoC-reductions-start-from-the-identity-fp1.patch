@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 08:21:31 +0100
+Subject: [PATCH] [shvla] FlooNoC reductions start from the identity; fp16
+ subnormal conversion
+
+Router::collective_generate forks a reduction (collective types 2..7) into kid requests and
+process_collective_operations folds each kid's data into the parent's. The parent's data was never
+set to the identity: at the source router it is the iDMA read buffer (uninitialised heap), at a
+forking kid a copy of it. Every forking router therefore added that buffer once. Seen as
+FlatAttention with flatten_scale_x > 1: every output element off by the same constant,
+(sx - 1) x 0xAAAA (-0.052) under MALLOC_PERTURB_=85; sx = 1 configurations were correct.
+The parent buffer is now filled with 0 (add, max uint16), -32768 (max int16) or -inf (max fp16)
+before its kids are generated.
+
+float_to_fp16 shifted fp16 subnormals by (1 - e) instead of (14 - e), spilling 13 bits into the
+exponent and sign; fp16_to_float read fp16 subnormals as float denormals (about 0). Both fixed.
+Data only; no timing change. Carried in soft_hier/gvsoc_pulp.patch and in the patched pulp working
+tree (pulp/pulp/floonoc/floonoc.cpp, floonoc_router.cpp).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ soft_hier/gvsoc_pulp.patch | 35 +++++++++++++++++++++++++++--------
+ 1 file changed, 27 insertions(+), 8 deletions(-)
+
+diff --git a/soft_hier/gvsoc_pulp.patch b/soft_hier/gvsoc_pulp.patch
+index d8ee4dc..b3e2135 100644
+--- a/soft_hier/gvsoc_pulp.patch
++++ b/soft_hier/gvsoc_pulp.patch
+@@ -1,5 +1,5 @@
+ diff --git a/pulp/floonoc/floonoc.cpp b/pulp/floonoc/floonoc.cpp
+-index 668a863..5146e08 100644
++index 668a863..fff5ea7 100644
+ --- a/pulp/floonoc/floonoc.cpp
+ +++ b/pulp/floonoc/floonoc.cpp
+ @@ -36,6 +36,16 @@ FlooNoc::FlooNoc(vp::ComponentConf &config)
+@@ -56,7 +56,7 @@ index 668a863..5146e08 100644
+  }
+  
+  
+-@@ -196,3 +221,115 @@ extern "C" vp::Component *gv_new(vp::ComponentConf &config)
++@@ -196,3 +221,122 @@ extern "C" vp::Component *gv_new(vp::ComponentConf &config)
+  {
+      return new FlooNoc(config);
+  }
+@@ -88,7 +88,9 @@ index 668a863..5146e08 100644
+ +
+ +    if (exponent <= 0) {
+ +        if (exponent < -10) return sign;   // too small
+-+        mantissa = (floatBits.parts.mantissa | 0x800000) >> (1 - exponent);
+++        // [shvla] fp16 subnormal: 24-bit significand >> (14 - exponent) leaves the 10-bit mantissa. Upstream shifted
+++        // by (1 - exponent), so the extra 13 bits spilled into the exponent and sign of the result.
+++        mantissa = (floatBits.parts.mantissa | 0x800000) >> (14 - exponent);
+ +        return sign | mantissa;
+ +    } else if (exponent >= 0x1F) {
+ +        return sign | 0x7C00;  // overflow to infinity
+@@ -101,6 +103,11 @@ index 668a863..5146e08 100644
+ +    FloatBits floatBits;
+ +    floatBits.parts.sign = (value >> 15) & 0x1;
+ +    int32_t exponent = (value >> 10) & 0x1F;
+++    // [shvla] fp16 subnormals (exponent 0, mantissa != 0) are m * 2^-24; upstream read them as float denormals (~0).
+++    if (exponent == 0 && (value & 0x3FF)) {
+++        float m = (float)(value & 0x3FF) * 5.9604644775390625e-08f;
+++        return (value & 0x8000) ? -m : m;
+++    }
+ +    floatBits.parts.exponent = (exponent == 0) ? 0 : exponent + 127 - 15;
+ +    floatBits.parts.mantissa = (value & 0x3FF) << 13;
+ +    return floatBits.f;
+@@ -418,7 +425,7 @@ index 4124c25..08e15ad 100644
+  
+      // Just enqueue it and trigger the FSM which will check if it must be processed now
+ diff --git a/pulp/floonoc/floonoc_router.cpp b/pulp/floonoc/floonoc_router.cpp
+-index 50cb4ac..ea9756f 100644
++index 50cb4ac..ecc572b 100644
+ --- a/pulp/floonoc/floonoc_router.cpp
+ +++ b/pulp/floonoc/floonoc_router.cpp
+ @@ -21,6 +21,7 @@
+@@ -567,7 +574,7 @@ index 50cb4ac..ea9756f 100644
+      {
+          int queue = this->get_req_queue(pos_x, pos_y);
+  
+-@@ -225,7 +303,174 @@ void Router::send_to_target(vp::IoReq *req, int pos_x, int pos_y)
++@@ -225,7 +303,186 @@ void Router::send_to_target(vp::IoReq *req, int pos_x, int pos_y)
+      }
+  }
+  
+@@ -635,7 +642,7 @@ index 50cb4ac..ea9756f 100644
+ +    if (momentum == FlooNoc::MOMENTUM_ZERO) return "Zero";
+ +    return "Unknow";
+ +}
+-+
++ 
+ +void Router::collective_analyze(vp::IoReq * req, std::queue<int> * queue, int router_x, int router_y)
+ +{
+ +    int src_x = req->get_int(FlooNoc::REQ_SRC_X) - 1;
+@@ -677,7 +684,7 @@ index 50cb4ac..ea9756f 100644
+ +        if (check_target(cur_x,cur_y,src_x,src_y,row_m,col_m)) queue->push(FlooNoc::MOMENTUM_ZERO);
+ +        if (check_momentum(FlooNoc::MOMENTUM_UP,   cur_x,cur_y,src_x,src_y,dim_x,dim_y,row_m,col_m)) queue->push(FlooNoc::MOMENTUM_UP);
+ +    }
+- 
+++
+ +    if (req->get_int(FlooNoc::REQ_MOMENTUM) == FlooNoc::MOMENTUM_DOWN)
+ +    {
+ +        if (check_target(cur_x,cur_y,src_x,src_y,row_m,col_m)) queue->push(FlooNoc::MOMENTUM_ZERO);
+@@ -688,6 +695,18 @@ index 50cb4ac..ea9756f 100644
+ +void Router::collective_generate(vp::IoReq * req, std::queue<int> * queue, int router_x, int router_y)
+ +{
+ +    int num_req = queue->size();
+++    // [shvla] A reduction (types 2..7) folds every kid into the parent's data (process_collective_operations), so
+++    // the parent must start from the identity. It held the iDMA read buffer (uninitialised) or, for a kid that forks
+++    // again, a copy of it: each forking router added that garbage once to the result.
+++    int coll_type = req->get_int(FlooNoc::REQ_COLL_TYPE);
+++    if (coll_type >= 2 && coll_type <= 7)
+++    {
+++        uint16_t identity = 0;                          // ADD (2, 3, 4) and MAX UINT16 (5)
+++        if (coll_type == 6) identity = 0x8000;          // MAX INT16: -32768
+++        if (coll_type == 7) identity = 0xFC00;          // MAX FP16: -inf
+++        uint16_t *d = (uint16_t *)req->get_data();
+++        for (uint32_t i = 0; i < req->get_size() / sizeof(uint16_t); ++i) d[i] = identity;
+++    }
+ +    for (int i = 0; i < num_req; ++i)
+ +    {
+ +        int momentum = queue->front();
+@@ -742,7 +761,7 @@ index 50cb4ac..ea9756f 100644
+  
+  void Router::grant(vp::IoReq *req)
+  {
+-@@ -241,23 +486,34 @@ void Router::grant(vp::IoReq *req)
++@@ -241,23 +498,34 @@ void Router::grant(vp::IoReq *req)
+  
+  void Router::get_next_router_pos(int dest_x, int dest_y, int &next_x, int &next_y)
+  {

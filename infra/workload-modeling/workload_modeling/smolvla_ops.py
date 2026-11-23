@@ -8,10 +8,10 @@ Byte columns and the count rule (docs/analysis/conventions.md):
   - one row per operator group; `shape` is one instance; `count` = instances per call
     (layers x flow steps x cameras that apply; heads are folded into the shape, because they share
     one weight matrix; Lowering.batch_cameras folds cameras into the shape too);
-  - bytes_weight = weight bytes of one instance x count. Each layer has its own weights; the expert's
+  - weights_read_bytes = weight bytes of one instance x count. Each layer has its own weights; the expert's
     weights do not fit on chip, so they are read again in every flow step;
-  - bytes_unique = (inputs + outputs + weights) of one instance x count;
-  - flop_per_wbyte = flop / bytes_weight, None for operators without weights.
+  - memory_traffic_bytes = (inputs + outputs + weights) of one instance x count;
+  - flop_per_weight_byte = flop / weights_read_bytes, None for operators without weights.
 """
 
 from __future__ import annotations
@@ -51,15 +51,16 @@ class OpRow:
     shape: tuple[int, ...]       # (M, N, K) for gemm; (h, Sq, Skv, d) for attn; (rows, cols) otherwise
     count: int
     flop: float
-    bytes_unique: float
-    bytes_weight: float
-    unit_today: str = ""         # filled in Part 2
-    hand_kernel: str = ""        # filled in Part 2
+    memory_traffic_bytes: float
+    weights_read_bytes: float
+    pr1_unit: str = ""           # unit that ran the operator in PR1's compiled path (filled by annotate)
+    hand_kernel: str = ""        # stage-1 hand-written kernel that does the operator (filled by annotate)
+    hand_kernel_units: str = ""  # units that kernel uses for this operator (filled by annotate)
     note: str = ""
 
     @property
-    def flop_per_wbyte(self) -> float | None:
-        return self.flop / self.bytes_weight if self.bytes_weight else None
+    def flop_per_weight_byte(self) -> float | None:
+        return self.flop / self.weights_read_bytes if self.weights_read_bytes else None
 
     @property
     def is_matmul(self) -> bool:
@@ -70,12 +71,12 @@ class OpRow:
 class StageTotals:
     flop: float
     matmul_flop: float
-    bytes_unique: float
-    bytes_weight: float
+    memory_traffic_bytes: float
+    weights_read_bytes: float
 
     @property
-    def flop_per_wbyte(self) -> float | None:
-        return self.flop / self.bytes_weight if self.bytes_weight else None
+    def flop_per_weight_byte(self) -> float | None:
+        return self.flop / self.weights_read_bytes if self.weights_read_bytes else None
 
 
 @dataclass(frozen=True)
@@ -402,37 +403,19 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
 # Where each operator runs in PR1's compiled path (softhier-mlir b11cd5f) and which hand-written kernel of the
 # kernel repo covers it: ~/softhier@52859c3 implementation/sw/, plus GELU and LayerNorm added on branch
 # gelu-layernorm-kernels (HaozeG/gvsoc@580ac85). Code references: docs/analysis/compiler-walkthrough.md.
-CORES = "Snitch cores"
+CORES = "Snitch cores (scalar; Spatz off in PR1)"
 HOST = "host (PR1 prepare step)"
 HOST_OPS = {"lang_embed_scale", "state_proj", "bias_state", "time_mlp_in_time"}
 KERNEL_BY_OP = {
-    "softmax": "FlatAttention (softmax on Spatz, inside the kernel)",
-    "self_softmax": "FlatAttention (softmax on Spatz, inside the kernel)",
-    "cross_softmax": "FlatAttention (softmax on Spatz, inside the kernel)",
+    "softmax": "FlatAttention (part of the QK^T call)",
+    "self_softmax": "FlatAttention (part of the QK^T call)",
+    "cross_softmax": "FlatAttention (part of the QK^T call)",
     "rmsnorm_attn": "RMSNorm", "rmsnorm_mlp": "RMSNorm", "rmsnorm_final": "RMSNorm",
     "silu_mul": "Activation (SiLU + gate)",
     "time_silu": "Activation (SiLU)",
     "gelu": "Activation (GELU, tanh form)",
     "ln1": "LayerNorm", "ln2": "LayerNorm", "ln_post": "LayerNorm",
 }
-
-# (stage, op) -> constants entry with the kernel simulated alone at one instance (ns per call).
-HAND_KERNEL_TIME = {
-    ("vision", "ln1"): "hand_kernels.vision.layernorm_1024x768",
-    ("vision", "ln2"): "hand_kernels.vision.layernorm_1024x768",
-    ("vision", "ln_post"): "hand_kernels.vision.layernorm_1024x768",
-    ("vision", "gelu"): "hand_kernels.vision.gelu_1024x3072",
-    ("prefix", "rmsnorm_attn"): "hand_kernels.prefix.rmsnorm_177x960",
-    ("prefix", "rmsnorm_mlp"): "hand_kernels.prefix.rmsnorm_177x960",
-    ("prefix", "rmsnorm_final"): "hand_kernels.prefix.rmsnorm_177x960",
-    ("prefix", "silu_mul"): "hand_kernels.prefix.silu_gate_177x2560",
-    ("expert", "rmsnorm_attn"): "hand_kernels.expert.rmsnorm_50x720",
-    ("expert", "rmsnorm_mlp"): "hand_kernels.expert.rmsnorm_50x720",
-    ("expert", "rmsnorm_final"): "hand_kernels.expert.rmsnorm_50x720",
-    ("expert", "silu_mul"): "hand_kernels.expert.silu_gate_50x2048",
-    ("expert", "time_silu"): "hand_kernels.expert.silu_50x720",
-}
-
 
 # Rows whose work runs inside another row's kernel call: FlatAttention does QK^T, softmax and P.V in one
 # call (time on the qk row) and transposes K on chip with the transpose engine.
@@ -462,24 +445,57 @@ def eltwise_kind(op: str) -> str | None:
     return None
 
 
-def hand_kernel_key(row: OpRow) -> str | None:
-    """constants key of the row's simulated kernel: hand_kernels.<stage>.<kernel>_<row shape>."""
-    if (row.stage, row.op) in HAND_KERNEL_TIME:
-        return HAND_KERNEL_TIME[(row.stage, row.op)]
+# Row operators by kernel name in the constants key (h1_kernels).
+ROW_KERNEL = {
+    "ln1": "layernorm", "ln2": "layernorm", "ln_post": "layernorm", "gelu": "gelu",
+    "rmsnorm_attn": "rmsnorm", "rmsnorm_mlp": "rmsnorm", "rmsnorm_final": "rmsnorm",
+    "silu_mul": "silu_gate", "time_silu": "silu",
+}
+
+
+@dataclass(frozen=True)
+class KernelSet:
+    """Where a workload's hand-kernel times live: constants group and the arch section they ran on."""
+    group: str
+    arch: str
+    lowering: Lowering
+
+
+# Stage-1 lowering (docs/designs/stage1-spec.md §3.3): reference computation plus cross K/V once per call.
+STAGE1_LOWERING = Lowering(kv_proj_per_step=False)
+STAGE1_LOWERING_W1B = Lowering(kv_proj_per_step=False, batch_cameras=True)
+KERNEL_SETS = {
+    "vlabench-3cam": KernelSet("h1_kernels", "h1", STAGE1_LOWERING),  # H1 (stage-1 spec §4)
+}
+
+
+def kernel_set(workload_id: str) -> KernelSet:
+    """Kernel times of a workload; KeyError for workloads without simulated kernels (pr1-1cam, libero-2cam, ...)."""
+    if workload_id not in KERNEL_SETS:
+        raise KeyError(f"no hand-kernel times for workload {workload_id!r}; kernel sets: {sorted(KERNEL_SETS)}")
+    return KERNEL_SETS[workload_id]
+
+
+def hand_kernel_key(row: OpRow, group: str = "h1_kernels") -> str | None:
+    """constants key of the row's simulated kernel: <group>.<stage>.<kernel>_<row shape>."""
     if row.op in HOST_OPS or (row.stage, row.op) in INCLUDED_IN:
         return None
     shape = "x".join(map(str, row.shape))
     if row.cls == "gemm":
-        return f"hand_kernels.{row.stage}.gemm_{shape}"
+        return f"{group}.{row.stage}.gemm_{shape}"
     if row.op in ATTN_CALL_OPS:
-        return f"hand_kernels.{row.stage}.flatattention_{shape}"
+        return f"{group}.{row.stage}.flatattention_{shape}"
+    if row.op in ROW_KERNEL:
+        return f"{group}.{row.stage}.{ROW_KERNEL[row.op]}_{shape}"
     kind = eltwise_kind(row.op)
-    return f"hand_kernels.{row.stage}.eltwise_{kind}_{shape}" if kind else None
+    return f"{group}.{row.stage}.eltwise_{kind}_{shape}" if kind else None
 
 
 def hand_kernel_ns(c, workload_id: str, row: OpRow) -> float | None:
     """Measured ns per call of the row's hand kernel, if one was simulated at this workload and shape."""
-    key = hand_kernel_key(row)
+    if workload_id not in KERNEL_SETS:
+        return None
+    key = hand_kernel_key(row, kernel_set(workload_id).group)
     if key is None or key not in c.entries:
         return None
     e = c.get(key)
@@ -489,32 +505,45 @@ def hand_kernel_ns(c, workload_id: str, row: OpRow) -> float | None:
     return float(e.value)
 
 
-def unit_and_kernel(row: OpRow) -> tuple[str, str]:
+SPATZ = "Spatz on 4 cores, data by iDMA"
+
+
+def unit_and_kernel(row: OpRow) -> tuple[str, str, str]:
+    """(unit in PR1's compiled path, stage-1 hand-written kernel, units that kernel uses for this operator).
+
+    Kernel units: the busy unit tracks (redmule, idma, pe<n>/spatz) in the H1 kernel traces
+    (~/.cache/softhier-vla/stage1-h1/traces/); NoC broadcast and the transpose engine have no track and come
+    from the kernel source (SummaGEMM, FlatAttention). PR1 units: compiler-walkthrough.md and arch.pr1 (no Spatz)."""
     if row.op in HOST_OPS:
-        return HOST, "none"
+        return HOST, "none", ""
     if row.cls == "gemm":
-        return "RedMulE (operands moved by iDMA)", "SummaGEMM"
+        return "RedMulE (operands moved by iDMA)", "SummaGEMM", "RedMulE; operands by iDMA and NoC (SUMMA broadcast)"
     if row.cls == "attn":
         mask = "" if row.stage == "vision" else "; masking not supported"
-        return "RedMulE", f"FlatAttention{mask}"
+        return "RedMulE", f"FlatAttention{mask}", "RedMulE (QK^T, P.V), Spatz (softmax); data by iDMA"
     if row.op == "transpose_k":
-        return "Snitch cores and iDMA", "FlatAttention (K transposed on chip by the transpose engine)"
+        return "Snitch cores and iDMA", "FlatAttention (part of the QK^T call)", "transpose engine, in L1"
     kind = eltwise_kind(row.op)
     if kind == "pixel_shuffle":
-        return "Snitch cores and iDMA", "Eltwise (pixel_shuffle, DMA only)"
+        return "Snitch cores and iDMA", "Eltwise (pixel_shuffle)", "iDMA only (one 2D copy per output row)"
     if kind:
-        return CORES, f"Eltwise ({kind})"
+        return CORES, f"Eltwise ({kind})", SPATZ
     if row.cls == "data":
-        return "Snitch cores and iDMA", "none"
-    return CORES, KERNEL_BY_OP.get(row.op, "none")
+        return "Snitch cores and iDMA", "none", ""
+    if row.cls == "softmax":
+        return CORES, KERNEL_BY_OP.get(row.op, "none"), "Spatz (vfredmax, vfexp), inside FlatAttention"
+    kernel = KERNEL_BY_OP.get(row.op, "none")
+    if kernel == "RMSNorm":
+        return CORES, kernel, "Spatz on 1 core (upstream kernel), data by iDMA"
+    return CORES, kernel, SPATZ if kernel != "none" else ""
 
 
 def annotate(rows: list[OpRow]) -> list[OpRow]:
-    """Fill unit_today and hand_kernel."""
+    """Fill pr1_unit, hand_kernel and hand_kernel_units."""
     out = []
     for r in rows:
-        unit, kernel = unit_and_kernel(r)
-        out.append(replace(r, unit_today=unit, hand_kernel=kernel))
+        unit, kernel, kunits = unit_and_kernel(r)
+        out.append(replace(r, pr1_unit=unit, hand_kernel=kernel, hand_kernel_units=kunits))
     return out
 
 
@@ -525,8 +554,8 @@ def stage_totals(rows: list[OpRow]) -> dict[str, StageTotals]:
         out[s] = StageTotals(
             flop=sum(r.flop for r in rs),
             matmul_flop=sum(r.flop for r in rs if r.is_matmul),
-            bytes_unique=sum(r.bytes_unique for r in rs),
-            bytes_weight=sum(r.bytes_weight for r in rs),
+            memory_traffic_bytes=sum(r.memory_traffic_bytes for r in rs),
+            weights_read_bytes=sum(r.weights_read_bytes for r in rs),
         )
     return out
 

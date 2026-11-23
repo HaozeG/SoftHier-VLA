@@ -2,7 +2,7 @@
 id: RQ4
 title: Per-stage MFU at iso-peak with Thor
 status: draft
-workload: libero-2cam
+workload: vlabench-3cam
 arch: stage1-256
 metric: per-stage MFU (achieved FLOP/s over peak FP16)
 depends_on: [RQ1, RQ2]

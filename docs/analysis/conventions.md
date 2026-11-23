@@ -8,7 +8,8 @@ or state their workload, arch and label.
 
 | ID | Checkpoint | Cameras | Image | Tokens (vision per camera / prefix) | Role |
 | --- | --- | --- | --- | --- | --- |
-| `libero-2cam` | `lerobot/smolvla_libero@a24f1f38` | 2 | 512x512 | 1024 / 177 | primary |
+| `vlabench-3cam` | `lerobot/smolvla_base@5e8d12a6` | 3 | 512x512 | 1024 / 241 | primary: stage-1 target W1 ([stage1-spec.md](../designs/stage1-spec.md)) |
+| `libero-2cam` | `lerobot/smolvla_libero@a24f1f38` | 2 | 512x512 | 1024 / 177 | PR1 cross-check reference only ([crosscheck.md](crosscheck.md)); primary before stage 1 |
 | `pr1-1cam` | `lerobot/smolvla_base@5e8d12a6` | 1 | 256x256 | 256 / 65 | PR1's measured configuration |
 | `release-3cam` | `lerobot/smolvla_base@5e8d12a6` | 3 | 512x512 | 1024 / 241 | released config; no RQ uses it |
 
@@ -47,12 +48,13 @@ are ignored.
 | --- | --- |
 | `shape` | one instance: (M, N, K) for matrix products; (heads, Sq, Skv, head dim) for attention; (rows, cols) otherwise |
 | `count` | instances per call: layers x flow steps x cameras that apply |
-| `unit_today` | unit that runs the operator in PR1's compiled path ([compiler-walkthrough.md](compiler-walkthrough.md)) |
-| `hand_kernel` | kernel-repo hand-written kernel that covers it, or none |
+| `pr1_unit` | unit that runs the operator in PR1's compiled path ([compiler-walkthrough.md](compiler-walkthrough.md)) |
+| `hand_kernel` | stage-1 hand-written kernel that does it, or none |
+| `hand_kernel_units` | units that kernel uses for this operator (RedMulE, Spatz, iDMA, ...) |
 | `flop` | all instances |
-| `bytes_weight` | weight bytes of one instance x `count` |
-| `bytes_unique` | (inputs + outputs + weights) of one instance x `count` |
-| FLOP per weight byte | `flop / bytes_weight`; empty for operators without weights |
+| `weights_read_bytes` | shown as "weights read": weight bytes of one instance x `count` |
+| `memory_traffic_bytes` | shown as "memory traffic": (inputs + outputs + weights) of one instance x `count`, each moved once (no fusion, no re-reads from tiling) |
+| FLOP per weight byte | `flop / weights_read_bytes`; empty for operators without weights |
 
 **How bytes scale with `count`:**
 
