@@ -11,18 +11,25 @@ def c():
     return constants.load()
 
 
+W1 = "vlabench-3cam"
+
+
+def w1_rows(c):
+    return m.build(c, W1, m.kernel_set(W1).lowering)
+
+
 @pytest.fixture(scope="module")
 def md(c):
-    return render.render_md(c, "libero-2cam")
+    return render.render_md(c, W1)
 
 
 def test_every_row_has_unit_and_kernel(c):
-    for r in m.annotate(m.build(c, "libero-2cam")):
+    for r in m.annotate(w1_rows(c)):
         assert r.unit_today and r.hand_kernel, r.op
 
 
 def test_kernel_mapping_matches_kernel_repo(c):
-    rows = {r.op: r for r in m.annotate(m.build(c, "libero-2cam"))}
+    rows = {r.op: r for r in m.annotate(w1_rows(c))}
     assert rows["gelu"].hand_kernel.startswith("Activation (GELU")   # branch gelu-layernorm-kernels
     assert rows["ln1"].hand_kernel == "LayerNorm"
     assert rows["silu_mul"].hand_kernel.startswith("Activation")
@@ -31,7 +38,7 @@ def test_kernel_mapping_matches_kernel_repo(c):
 
 
 def test_md_totals_equal_stage_totals(c, md):
-    tot = m.stage_totals(m.build(c, "libero-2cam"))
+    tot = m.stage_totals(w1_rows(c))
     section = md.split("## Totals", 1)[1]
     for s, t in tot.items():
         row = re.search(rf"^\| {s} \| ([\d,.]+) \| ([\d,.]+) \|", section, re.MULTILINE)
@@ -41,7 +48,7 @@ def test_md_totals_equal_stage_totals(c, md):
 
 
 def test_md_has_one_table_row_per_op(c, md):
-    rows = m.build(c, "libero-2cam")
+    rows = w1_rows(c)
     for r in rows:
         assert f"| `{r.op}` | {r.layers} |" in md, r.op
 
@@ -67,11 +74,11 @@ def test_only_external_url_is_pinned_mermaid(md):
 
 
 def test_csv_has_all_rows(c):
-    text = render.render_csv(c, "libero-2cam")
-    assert len(text.strip().splitlines()) == len(m.build(c, "libero-2cam")) + 1
+    text = render.render_csv(c, W1)
+    assert len(text.strip().splitlines()) == len(w1_rows(c)) + 1
 
 
-@pytest.mark.parametrize("wl,low", [("libero-2cam", None), ("vlabench-3cam", m.STAGE1_LOWERING),
+@pytest.mark.parametrize("wl,low", [("vlabench-3cam", m.STAGE1_LOWERING),
                                     ("vlabench-3cam", m.STAGE1_LOWERING_W1B)])
 def test_hand_kernel_times_and_stage_sums(c, wl, low):
     rows = m.annotate(m.build(c, wl, low))
@@ -92,22 +99,27 @@ def test_hand_kernel_times_and_stage_sums(c, wl, low):
     want_v = sum(r.count * ns[(r.stage, r.op)] for r in rows
                  if r.stage == "vision" and r.cls == "gemm") / 1e3
     assert vision["GEMM"] == f"{want_v:,.1f}"
-    # Times are per workload; another workload gets none.
-    assert not any(m.hand_kernel_ns(c, "pr1-1cam", r) for r in m.annotate(m.build(c, "pr1-1cam")))
+    # Times are per workload; workloads without a kernel set get none, and cannot be rendered.
+    for other in ("pr1-1cam", "libero-2cam"):
+        assert not any(m.hand_kernel_ns(c, other, r) for r in m.annotate(m.build(c, other)))
+        with pytest.raises(KeyError):
+            m.kernel_set(other)
 
 
 def test_eltwise_and_attention_mapping(c):
-    rows = {(r.stage, r.op): r for r in m.annotate(m.build(c, "libero-2cam"))}
+    rows = {(r.stage, r.op): r for r in m.annotate(w1_rows(c))}
     assert rows[("vision", "bias_q")].hand_kernel == "Eltwise (bias)"
     assert rows[("prefix", "rope_q")].hand_kernel == "Eltwise (rope)"
     assert rows[("expert", "euler_update")].hand_kernel == "Eltwise (axpy)"
     assert rows[("connector", "pixel_shuffle")].hand_kernel.startswith("Eltwise (pixel_shuffle")
     assert rows[("vision", "transpose_k")].hand_kernel.startswith("FlatAttention")
-    assert m.hand_kernel_key(rows[("expert", "self_qk")]) == "hand_kernels.expert.flatattention_15x50x227x64"
+    qk = rows[("expert", "self_qk")]
+    assert m.hand_kernel_key(qk) == f"h1_kernels.expert.flatattention_{'x'.join(map(str, qk.shape))}"
+    assert m.hand_kernel_key(qk) in c.entries
     assert m.hand_kernel_key(rows[("expert", "self_pv")]) is None          # inside the self_qk call
 
 
-@pytest.mark.parametrize("group,n", [("hand_kernels", 18), ("h1_kernels", 21)])
+@pytest.mark.parametrize("group,n", [("h1_kernels", 21)])
 def test_gemm_times_monotonic_in_shape(c, group, n):
     """A GEMM contained in a larger one (every dimension <=) is not slower: catches a starved tile sweep."""
     t = {}

@@ -20,20 +20,6 @@ Checkpoint `lerobot/smolvla_base@5e8d12a6`; 3 camera(s) at 512x512, 48 language 
 
 Expert per flow step: 11.458 GFLOP, 199.7 MB of weights (includes the cross-attention K/V projection, which the reference code repeats every step).
 
-## `libero-2cam`
-
-Checkpoint `lerobot/smolvla_libero@a24f1f38`; 2 camera(s) at 512x512, 48 language tokens, 1 state token.
-
-| stage | tokens | GFLOP | of which matrix | FLOP share % | memory traffic, MB | weights read, MB | FLOP per weight byte |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| vision | 2 x 1024 | 430.257 | 427.618 | 71.5 | 3,843.8 | 345.7 | 1,244 |
-| connector | 128 | 3.020 | 3.020 | 0.5 | 33.8 | 23.6 | 128 |
-| prefix | 177 | 57.717 | 57.604 | 9.6 | 568.7 | 314.8 | 183 |
-| expert | 50 x 10 steps | 110.482 | 110.190 | 18.4 | 2,644.3 | 1,997.0 | 55 |
-| **total** | | 601.476 | 598.432 | 100.0 | 7,090.5 | 2,681.1 | 224 |
-
-Expert per flow step: 11.048 GFLOP, 199.7 MB of weights (includes the cross-attention K/V projection, which the reference code repeats every step).
-
 ## `pr1-1cam`
 
 Checkpoint `lerobot/smolvla_base@5e8d12a6`; 1 camera(s) at 256x256, 48 language tokens, 1 state token.

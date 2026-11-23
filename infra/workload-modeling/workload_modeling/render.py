@@ -94,7 +94,7 @@ def kernel_sums(c, workload_id: str, rows: list[m.OpRow]) -> dict:
             "peak_tflops": f"{peak / 1e12:.1f}"}
 
 
-def hardware(c, arch: str = "stage1") -> dict:
+def hardware(c, arch: str) -> dict:
     """Arch parameters the hand-kernel times were measured on, plus totals computed from them."""
     raw = lambda k: c.get(f"arch.{arch}.{k}").value
     v = lambda k: (lambda x: int(x) if x == int(x) else x)(c.value(f"arch.{arch}.{k}"))
@@ -114,27 +114,6 @@ def hardware(c, arch: str = "stage1") -> dict:
 
 # Text of the composed-estimate section per kernel group (what was run, on which arch, how it was checked).
 KERNEL_PAGES = {
-    "hand_kernels": {
-        "intro": "kernel repo `HaozeG/gvsoc@580ac85` (branch gelu-layernorm-kernels), kernel-repo arch (16 clusters, "
-                 "RedMulE 32 x 16 and Spatz on 4 cores per cluster), DRAMSys HBM. Not a stage-1 reference "
-                 "(docs/designs/stage1-spec.md §1)",
-        "arch_text": "the kernel repo's arch file (`constants.yaml` section `arch.stage1`)",
-        "kernels": [
-            ("SummaGEMM", "every matrix product", "no (upstream preload: placeholder data)",
-             "M, N, K padded up to 4 x tile; tiles: fastest of a sweep per shape"),
-            ("FlatAttention", "QK^T, softmax, P.V", "no (upstream preload: placeholder data)",
-             "no masking (prefix and expert need one: approximation); GQA folds query heads; blocks: fastest of a "
-             "sweep; sequence lengths padded up to a block multiple"),
-            ("LayerNorm, Activation, Eltwise", "norms, activations, elementwise, pixel shuffle",
-             "yes, bit-exact against a replay golden", "one row per cluster at a time"),
-            ("RMSNorm", "RMSNorm", "no (upstream kernel, placeholder data)", "upstream settings"),
-        ],
-        "checks": "SummaGEMM and FlatAttention outputs are not checked. As a check that a picked setting did its whole "
-                  "problem, its DRAMSys traffic was compared with the minimum the padded problem must move (operands "
-                  "read once, output written once): every pick moves 1.0 to 3.2 times that minimum. A smaller GEMM "
-                  "shape is never slower than a larger one that contains it.",
-        "platform": "It is on the kernel-repo arch with DRAMSys HBM, not PR1's arch with ideal HBM.",
-    },
     "h1_kernels": {
         "intro": "kernel repo `HaozeG/gvsoc@aa57690` (branch gelu-layernorm-kernels, the frozen stage-1 build), "
                  "H1 (64 clusters, RedMulE 32 x 32, Spatz on 4 cores per cluster), GVSoC with the SoftHier-VLA patch "

@@ -23,8 +23,10 @@ Stage 1 has two workloads and one hardware configuration:
 | **H1** stage-1 arch: 8 x 8 clusters, RedMulE 32 x 32 | The configuration every stage-1 kernel time is measured on. | §2.1 |
 
 PR1, its arch and its results (`pr1.*`, `arch.pr1.*`, `docs/analysis/crosscheck.*`) are not changed by
-this specification. The `workload-modeling` package is kept as it is for now. Its `libero-2cam`
-results (the 79.2 ms composed estimate) stay in the repo, but they are not a stage-1 reference.
+this specification. The `libero-2cam` composed estimate from the kernel-repo arch (79.2 ms) was not a
+stage-1 reference and has been removed from the repo: its operator-graph page and its `hand_kernels.*`
+times in `constants.yaml` (last present at `dcd221d`). The `libero-2cam` workload entry stays, only as
+the reference for PR1's cross-check.
 
 --------------------------------------------------------------------------------
 
@@ -88,7 +90,7 @@ aligned with Thor for now**: stage 1 builds the baseline first. The earlier 16 x
 
 | Arch | Where it appears | Setting |
 | --- | --- | --- |
-| Kernel-repo arch | the existing `hand_kernels.*` times; `arch.stage1` in `constants.yaml` | 4 x 4 clusters, RedMulE 32 x 16, 384 KiB TCDM, Spatz on 4 of 5 cores, 8 HBM channels (4 west, 4 south), DRAMSys; 16.4 TFLOP/s (`~/softhier@52859c3 implementation/config/arch/arch.py`) |
+| Kernel-repo arch | `arch.stage1` in `constants.yaml` (its `hand_kernels.*` times were removed, last at `dcd221d`) | 4 x 4 clusters, RedMulE 32 x 16, 384 KiB TCDM, Spatz on 4 of 5 cores, 8 HBM channels (4 west, 4 south), DRAMSys; 16.4 TFLOP/s (`~/softhier@52859c3 implementation/config/arch/arch.py`) |
 | PR1 arch | W0 only, as the setting of PR1's run | 4 x 4 clusters, RedMulE 128 x 32, 3 cores, Spatz off, 1 MiB TCDM, ideal HBM; 131.1 TFLOP/s |
 
 Numbers from these arches are never mixed with H1 numbers without saying so.
@@ -204,7 +206,7 @@ operators (`lang_embed_scale`, `state_proj`, `bias_state`) are out of scope.
 | RMSNorm | VLM and expert rmsnorm | 2 | 1 |
 
 **All 39 shapes, plus the W1-b shapes, need runs on H1.** The last column counts shapes identical to
-a `libero-2cam` entry in `constants.yaml` (`hand_kernels.*`): the per-camera vision shapes and the
+a `libero-2cam` entry in `constants.yaml` (`hand_kernels.*`, removed since; see `dcd221d`): the per-camera vision shapes and the
 expert shapes with M = 50. Those were taken on the kernel-repo arch (4 x 4, RedMulE 32 x 16, §2.3),
 not on H1, so they are reference values only. On H1 the tile and block sweeps are redone: an 8 x 8
 mesh changes the SUMMA and FlatAttention group scale, and RedMulE 32 x 32 changes the best tiles.

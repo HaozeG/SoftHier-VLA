@@ -14,7 +14,7 @@ Run from this directory after `uv sync`:
 
 | Command | What it does | Network |
 | --- | --- | --- |
-| `uv run python -m workload_modeling.build` | validates `constants.yaml`; writes `docs/analysis/stage-totals.md` and `.csv`; the operator-graph pages `docs/analysis/smolvla-op-graph{,-w1b,-libero-2cam}.md` and `.csv` (W1, W1-b, libero-2cam), and `build/smolvla-op-graph*.html` (git-ignored; the Mermaid diagram needs the network, tables read offline) | no |
+| `uv run python -m workload_modeling.build` | validates `constants.yaml`; writes `docs/analysis/stage-totals.md` and `.csv`; the operator-graph pages `docs/analysis/smolvla-op-graph{,-w1b}.md` and `.csv` (W1, W1-b), and `build/smolvla-op-graph*.html` (git-ignored; the Mermaid diagram needs the network, tables read offline) | no |
 | `uv run pytest` | unit tests, including the cross-check regression guard | no |
 | `uv run python -m workload_modeling.fixtures refresh [--local]` | re-downloads `config.json` and safetensors headers for the pinned revisions into `tests/fixtures/` (`--local`: from the Hugging Face cache) | yes (unless `--local`) |
 | `uv run python -m workload_modeling.crosscheck --parse-profile … --pr1 … --libero … --experiment-commit …` | compares the model with PR1's compiled programs; writes `docs/analysis/crosscheck.md` and `.json`; exits 1 above 1 % | no, but needs PR1's kept programs |

@@ -416,24 +416,6 @@ KERNEL_BY_OP = {
     "ln1": "LayerNorm", "ln2": "LayerNorm", "ln_post": "LayerNorm",
 }
 
-# (stage, op) -> constants entry with the kernel simulated alone at one instance (ns per call).
-HAND_KERNEL_TIME = {
-    ("vision", "ln1"): "hand_kernels.vision.layernorm_1024x768",
-    ("vision", "ln2"): "hand_kernels.vision.layernorm_1024x768",
-    ("vision", "ln_post"): "hand_kernels.vision.layernorm_1024x768",
-    ("vision", "gelu"): "hand_kernels.vision.gelu_1024x3072",
-    ("prefix", "rmsnorm_attn"): "hand_kernels.prefix.rmsnorm_177x960",
-    ("prefix", "rmsnorm_mlp"): "hand_kernels.prefix.rmsnorm_177x960",
-    ("prefix", "rmsnorm_final"): "hand_kernels.prefix.rmsnorm_177x960",
-    ("prefix", "silu_mul"): "hand_kernels.prefix.silu_gate_177x2560",
-    ("expert", "rmsnorm_attn"): "hand_kernels.expert.rmsnorm_50x720",
-    ("expert", "rmsnorm_mlp"): "hand_kernels.expert.rmsnorm_50x720",
-    ("expert", "rmsnorm_final"): "hand_kernels.expert.rmsnorm_50x720",
-    ("expert", "silu_mul"): "hand_kernels.expert.silu_gate_50x2048",
-    ("expert", "time_silu"): "hand_kernels.expert.silu_50x720",
-}
-
-
 # Rows whose work runs inside another row's kernel call: FlatAttention does QK^T, softmax and P.V in one
 # call (time on the qk row) and transposes K on chip with the transpose engine.
 INCLUDED_IN = {
@@ -462,7 +444,7 @@ def eltwise_kind(op: str) -> str | None:
     return None
 
 
-# Row operators by kernel name in the constants key (h1_kernels; hand_kernels uses HAND_KERNEL_TIME).
+# Row operators by kernel name in the constants key (h1_kernels).
 ROW_KERNEL = {
     "ln1": "layernorm", "ln2": "layernorm", "ln_post": "layernorm", "gelu": "gelu",
     "rmsnorm_attn": "rmsnorm", "rmsnorm_mlp": "rmsnorm", "rmsnorm_final": "rmsnorm",
@@ -482,19 +464,19 @@ class KernelSet:
 STAGE1_LOWERING = Lowering(kv_proj_per_step=False)
 STAGE1_LOWERING_W1B = Lowering(kv_proj_per_step=False, batch_cameras=True)
 KERNEL_SETS = {
-    "libero-2cam": KernelSet("hand_kernels", "stage1", Lowering()),   # kernel-repo arch, before stage 1
     "vlabench-3cam": KernelSet("h1_kernels", "h1", STAGE1_LOWERING),  # H1 (stage-1 spec §4)
 }
 
 
 def kernel_set(workload_id: str) -> KernelSet:
-    return KERNEL_SETS.get(workload_id, KERNEL_SETS["libero-2cam"])
+    """Kernel times of a workload; KeyError for workloads without simulated kernels (pr1-1cam, libero-2cam, ...)."""
+    if workload_id not in KERNEL_SETS:
+        raise KeyError(f"no hand-kernel times for workload {workload_id!r}; kernel sets: {sorted(KERNEL_SETS)}")
+    return KERNEL_SETS[workload_id]
 
 
-def hand_kernel_key(row: OpRow, group: str = "hand_kernels") -> str | None:
+def hand_kernel_key(row: OpRow, group: str = "h1_kernels") -> str | None:
     """constants key of the row's simulated kernel: <group>.<stage>.<kernel>_<row shape>."""
-    if group == "hand_kernels" and (row.stage, row.op) in HAND_KERNEL_TIME:
-        return HAND_KERNEL_TIME[(row.stage, row.op)]
     if row.op in HOST_OPS or (row.stage, row.op) in INCLUDED_IN:
         return None
     shape = "x".join(map(str, row.shape))
@@ -502,7 +484,7 @@ def hand_kernel_key(row: OpRow, group: str = "hand_kernels") -> str | None:
         return f"{group}.{row.stage}.gemm_{shape}"
     if row.op in ATTN_CALL_OPS:
         return f"{group}.{row.stage}.flatattention_{shape}"
-    if group != "hand_kernels" and row.op in ROW_KERNEL:
+    if row.op in ROW_KERNEL:
         return f"{group}.{row.stage}.{ROW_KERNEL[row.op]}_{shape}"
     kind = eltwise_kind(row.op)
     return f"{group}.{row.stage}.eltwise_{kind}_{shape}" if kind else None
@@ -510,6 +492,8 @@ def hand_kernel_key(row: OpRow, group: str = "hand_kernels") -> str | None:
 
 def hand_kernel_ns(c, workload_id: str, row: OpRow) -> float | None:
     """Measured ns per call of the row's hand kernel, if one was simulated at this workload and shape."""
+    if workload_id not in KERNEL_SETS:
+        return None
     key = hand_kernel_key(row, kernel_set(workload_id).group)
     if key is None or key not in c.entries:
         return None
