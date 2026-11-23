@@ -32,12 +32,17 @@ flowchart LR
 
 ## Totals
 
-| stage | GFLOP | of which matrix | FLOP share % | unique MB | weight MB | FLOP per weight byte |
+| stage | GFLOP | of which matrix | FLOP share % | memory traffic, MB | weights read, MB | FLOP per weight byte |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 {% for name in stages -%}
 | {{ name }} | {{ s[name].gflop }} | {{ s[name].mm_gflop }} | {{ s[name].share }} | {{ s[name].umb }} | {{ s[name].wmb }} | {{ s[name].ai }} |
 {% endfor -%}
 | **total** | {{ total.gflop }} | {{ total.mm_gflop }} | 100.0 | {{ total.umb }} | {{ total.wmb }} | {{ total.ai }} |
+
+Memory traffic: bytes moved if every operator reads its inputs and weights from memory once and writes its output
+once (no fusion, no re-reads from tiling; CSV column `bytes_unique`). Weights read: the weight part of that
+traffic (`bytes_weight`; each layer's weights once per call, the expert's once per flow step). FLOP per weight byte
+= GFLOP / weights read.
 
 FLOP share by class:
 
@@ -51,7 +56,7 @@ FLOP share by class:
 
 {{ notes[name] }}
 
-| op | layers | class | shape | count | GFLOP | unique MB | weight MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
+| op | layers | class | shape | count | GFLOP | memory traffic, MB | weights read, MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |
 {% for r in rows if r.stage == name -%}
 | `{{ r.op }}` | {{ r.layers }} | {{ r.cls }} | {{ r.shape }} | {{ r.count }} | {{ r.gflop }} | {{ r.umb }} | {{ r.wmb }} | {{ r.ai }} | {{ r.unit_today }} | {{ r.hand_kernel }} | {{ r.kus }} |
@@ -91,15 +96,20 @@ token-major rows, FlatAttention reads head-major Q, K, V), and every kernel star
 with code placement alone (GELU: 68.1 to 70.5 us for the same loop at a 12-byte offset, mechanism not
 identified).
 
-| stage | GEMM, us | attention, us | row operators, us | total, us | inside another call | not covered |
-| --- | ---: | ---: | ---: | ---: | --- | --- |
+| stage | GEMM, us | attention, us | row operators, us | total, us | GFLOP | MFU, % | inside another call | not covered |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 {% for k in ksum.stages -%}
-| {{ k.stage }} | {{ k["GEMM"] }} | {{ k["attention"] }} | {{ k["row operators"] }} | {{ k.total }} | {{ k.included }} | {{ k.uncovered }} |
+| {{ k.stage }} | {{ k["GEMM"] }} | {{ k["attention"] }} | {{ k["row operators"] }} | {{ k.total }} | {{ k.gflop }} | {{ k.mfu }} | {{ k.included }} | {{ k.uncovered }} |
 {% endfor -%}
-| **all** | {{ ksum.total["GEMM"] }} | {{ ksum.total["attention"] }} | {{ ksum.total["row operators"] }} | **{{ ksum.total.total }}** | | |
+| **all** | {{ ksum.total["GEMM"] }} | {{ ksum.total["attention"] }} | {{ ksum.total["row operators"] }} | **{{ ksum.total.total }}** | {{ ksum.total.gflop }} | **{{ ksum.total.mfu }}** | | |
 
 Total: {{ ksum.total_ms }} ms per inference call (estimate); shares: GEMM {{ ksum.share["GEMM"] }} %, attention
 {{ ksum.share["attention"] }} %, row operators {{ ksum.share["row operators"] }} %.
+
+MFU (estimate) = nominal FLOP / (composed time x {{ ksum.peak_tflops }} TFLOP/s, the matrix-unit peak above). FLOP are
+the model's unpadded counts of the covered operators (padding and the work of host rows not counted); row
+operators count their per-element conventions against the same matrix peak, so their MFU is near zero by
+construction. Per class: GEMM {{ ksum.mfu_group["GEMM"] }} %, attention {{ ksum.mfu_group["attention"] }} %, row operators {{ ksum.mfu_group["row operators"] }} %.
 
 ## Limitations
 

@@ -58,27 +58,40 @@ def kernel_sums(c, workload_id: str, rows: list[m.OpRow]) -> dict:
     """Composed per-stage time: sum over rows of count x measured ns per call of the row's kernel.
 
     Rows whose work runs inside another row's kernel call (m.INCLUDED_IN) add nothing; host rows and rows
-    without a simulated kernel are listed as not covered."""
+    without a simulated kernel are listed as not covered.
+
+    MFU (estimate): nominal FLOP of the covered rows (included rows count, their work runs in the call that
+    contains them; host rows do not) over composed time x the arch's matrix-unit peak (c.peak_total)."""
+    peak = c.peak_total(m.kernel_set(workload_id).arch)
     stages, tot = [], {g: 0.0 for g, _ in GROUPS}
+    flop_tot, gflop = 0.0, {g: 0.0 for g, _ in GROUPS}
+    mfu = lambda f, us: f"{100 * f / (us * 1e-6 * peak):.1f}" if us else "-"
     for st in m.STAGES:
         rs = [r for r in rows if r.stage == st]
         ns = {r.op: m.hand_kernel_ns(c, workload_id, r) for r in rs}
+        covered = [r for r in rs if ns[r.op] is not None or (r.stage, r.op) in m.INCLUDED_IN]
         grp = {}
         for g, classes in GROUPS:
             grp[g] = sum(r.count * ns[r.op] for r in rs if r.cls in classes and ns[r.op] is not None) / 1e3
             tot[g] += grp[g]
+            gflop[g] += sum(r.flop for r in covered if r.cls in classes)
+        flop = sum(r.flop for r in covered)
+        flop_tot += flop
         included = [r for r in rs if (r.stage, r.op) in m.INCLUDED_IN]
         uncovered = [r for r in rs if ns[r.op] is None and (r.stage, r.op) not in m.INCLUDED_IN]
         stages.append({
             "stage": st, **{g: f"{v:,.1f}" for g, v in grp.items()}, "total": f"{sum(grp.values()):,.1f}",
-            "total_us": sum(grp.values()),
+            "total_us": sum(grp.values()), "gflop": f"{flop / 1e9:,.1f}", "mfu": mfu(flop, sum(grp.values())),
             "included": ", ".join(f"`{r.op}` (in `{m.INCLUDED_IN[(r.stage, r.op)]}`)" for r in included) or "none",
             "uncovered": ", ".join(f"`{r.op}`" + (" (host)" if r.op in m.HOST_OPS else "") for r in uncovered) or "none",
         })
     grand = sum(tot.values())
-    return {"stages": stages, "total": {**{g: f"{v:,.1f}" for g, v in tot.items()}, "total": f"{grand:,.1f}"},
+    return {"stages": stages, "total": {**{g: f"{v:,.1f}" for g, v in tot.items()}, "total": f"{grand:,.1f}",
+                                        "gflop": f"{flop_tot / 1e9:,.1f}", "mfu": mfu(flop_tot, grand)},
             "total_ms": f"{grand / 1e3:,.2f}",
-            "share": {g: f"{100 * v / grand:.0f}" if grand else "0" for g, v in tot.items()}}
+            "share": {g: f"{100 * v / grand:.0f}" if grand else "0" for g, v in tot.items()},
+            "mfu_group": {g: mfu(gflop[g], tot[g]) for g, _ in GROUPS},
+            "peak_tflops": f"{peak / 1e12:.1f}"}
 
 
 def hardware(c, arch: str = "stage1") -> dict:

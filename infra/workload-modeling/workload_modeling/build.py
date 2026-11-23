@@ -78,9 +78,10 @@ def render_md(c, rows: list[dict]) -> str:
         "token counts; its matrix-product FLOP agree with PR1's compiled programs within 0.011 % once PR1's padding "
         "and rewrites are applied ([crosscheck.md](crosscheck.md)). Label: inference (model output), cross-checked.",
         "",
-        "Conventions ([conventions.md](conventions.md)): fp16 (2 B per element); `bytes_weight` re-reads each "
-        "layer's weights once per call and the expert's weights once per flow step; `bytes_unique` adds each "
-        "operator's inputs and outputs; FLOP per weight byte = FLOP / `bytes_weight`. Non-matrix FLOP use "
+        "Conventions ([conventions.md](conventions.md)): fp16 (2 B per element). Weights read (CSV `bytes_weight`): "
+        "each layer's weights once per call and the expert's weights once per flow step. Memory traffic (CSV "
+        "`bytes_unique`): weights read plus each operator's inputs and outputs, each moved once (no fusion, no "
+        "re-reads from tiling); FLOP per weight byte = FLOP / weights read. Non-matrix FLOP use "
         "per-element conventions.",
         "",
     ]
@@ -94,7 +95,7 @@ def render_md(c, rows: list[dict]) -> str:
             f"Checkpoint `{wl.repo}@{wl.revision[:8]}`; {wl.cameras} camera(s) at {wl.image_size}x{wl.image_size}, "
             f"{wl.language_tokens} language tokens, {wl.state_tokens} state token.",
             "",
-            "| stage | tokens | GFLOP | of which matrix | FLOP share % | unique MB | weight MB | FLOP per weight byte |",
+            "| stage | tokens | GFLOP | of which matrix | FLOP share % | memory traffic, MB | weights read, MB | FLOP per weight byte |",
             "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
         for r in rs:

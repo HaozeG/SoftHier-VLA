@@ -30,13 +30,18 @@ flowchart LR
 
 ## Totals
 
-| stage | GFLOP | of which matrix | FLOP share % | unique MB | weight MB | FLOP per weight byte |
+| stage | GFLOP | of which matrix | FLOP share % | memory traffic, MB | weights read, MB | FLOP per weight byte |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | vision | 645.385 | 641.427 | 77.1 | 5,765.67 | 518.60 | 1,244 |
 | connector | 4.530 | 4.530 | 0.5 | 38.85 | 23.59 | 192 |
 | prefix | 79.552 | 79.381 | 9.5 | 675.21 | 314.79 | 253 |
 | expert | 107.476 | 107.146 | 12.8 | 2,627.34 | 1,967.50 | 55 |
 | **total** | 836.944 | 832.483 | 100.0 | 9,107.08 | 2,824.48 | 296 |
+
+Memory traffic: bytes moved if every operator reads its inputs and weights from memory once and writes its output
+once (no fusion, no re-reads from tiling; CSV column `bytes_unique`). Weights read: the weight part of that
+traffic (`bytes_weight`; each layer's weights once per call, the expert's once per flow step). FLOP per weight byte
+= GFLOP / weights read.
 
 FLOP share by class:
 
@@ -55,7 +60,7 @@ FLOP share by class:
 
 SigLIP encoder, run once per camera (reference code); attention per camera and head.
 
-| op | layers | class | shape | count | GFLOP | unique MB | weight MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
+| op | layers | class | shape | count | GFLOP | memory traffic, MB | weights read, MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |
 | `patch_embed` | embed | gemm | M 1024, N 768, K 768 | 3 | 3.624 | 12.98 | 3.54 | 1,024 | RedMulE (operands moved by iDMA) | SummaGEMM | 20.48 |
 | `bias_patch` | embed | elementwise | 1024 x 768 | 3 | 0.002 | 9.44 | 0.00 | 512 | Snitch cores | Eltwise (bias) | 8.85 |
@@ -88,7 +93,7 @@ SigLIP encoder, run once per camera (reference code); attention per camera and h
 
 Pixel shuffle (scale factor 4: 16 patches into one token) and one linear projection to the VLM width.
 
-| op | layers | class | shape | count | GFLOP | unique MB | weight MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
+| op | layers | class | shape | count | GFLOP | memory traffic, MB | weights read, MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |
 | `pixel_shuffle` | - | data | 3072 x 768 | 1 | 0.000 | 9.44 | 0.00 |  | Snitch cores and iDMA | Eltwise (pixel_shuffle, DMA only) | 16.35 |
 | `connector_proj` | - | gemm | M 192, N 960, K 12288 | 1 | 4.530 | 28.68 | 23.59 | 192 | RedMulE (operands moved by iDMA) | SummaGEMM | 147.16 |
@@ -99,7 +104,7 @@ Pixel shuffle (scale factor 4: 16 patches into one token) and one linear project
 
 Image, language and state tokens through the kept VLM layers, once per call; the per-layer keys and values are kept as the KV cache the expert reads.
 
-| op | layers | class | shape | count | GFLOP | unique MB | weight MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
+| op | layers | class | shape | count | GFLOP | memory traffic, MB | weights read, MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |
 | `lang_embed_scale` | embed | elementwise | 48 x 960 | 1 | 0.000 | 0.28 | 0.09 | 0 | host (PR1 prepare step) | none |  |
 | `state_proj` | embed | gemm | M 1, N 960, K 32 | 1 | 0.000 | 0.06 | 0.06 | 1 | host (PR1 prepare step) | none |  |
@@ -128,7 +133,7 @@ Image, language and state tokens through the kept VLM layers, once per call; the
 
 Flow-matching transformer run once per flow step. Even layers: self-attention over the prefix cache and the action tokens; odd layers: cross-attention to the projected prefix cache. The reference code repeats the cross-attention K/V projection in every step.
 
-| op | layers | class | shape | count | GFLOP | unique MB | weight MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
+| op | layers | class | shape | count | GFLOP | memory traffic, MB | weights read, MB | FLOP per weight byte | unit today | hand-written kernel | kernel us per call |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |
 | `cross_k_proj` | cross (1,3..15) | gemm | M 241, N 320, K 320 | 8 | 0.395 | 4.11 | 1.64 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | 5.67 |
 | `cross_v_proj` | cross (1,3..15) | gemm | M 241, N 320, K 320 | 8 | 0.395 | 4.11 | 1.64 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | 5.67 |
@@ -199,16 +204,21 @@ It is on H1 with DRAMSys HBM, not PR1's arch with ideal HBM. Per-call times move
 with code placement alone (GELU: 68.1 to 70.5 us for the same loop at a 12-byte offset, mechanism not
 identified).
 
-| stage | GEMM, us | attention, us | row operators, us | total, us | inside another call | not covered |
-| --- | ---: | ---: | ---: | ---: | --- | --- |
-| vision | 7,196.5 | 2,673.1 | 4,819.1 | 14,688.6 | `transpose_k` (in `qk`), `softmax` (in `qk`), `pv` (in `qk`) | none |
-| connector | 147.2 | 0.0 | 18.6 | 165.8 | none | none |
-| prefix | 2,218.0 | 274.1 | 518.4 | 3,010.4 | `softmax` (in `qk`), `pv` (in `qk`) | `lang_embed_scale` (host), `state_proj` (host), `bias_state` (host) |
-| expert | 7,398.2 | 2,003.0 | 1,727.8 | 11,129.1 | `self_pv` (in `self_qk`), `self_softmax` (in `self_qk`), `cross_pv` (in `cross_qk`), `cross_softmax` (in `cross_qk`) | none |
-| **all** | 16,959.8 | 4,950.2 | 7,083.9 | **28,993.9** | | |
+| stage | GEMM, us | attention, us | row operators, us | total, us | GFLOP | MFU, % | inside another call | not covered |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| vision | 7,196.5 | 2,673.1 | 4,819.1 | 14,688.6 | 645.4 | 33.5 | `transpose_k` (in `qk`), `softmax` (in `qk`), `pv` (in `qk`) | none |
+| connector | 147.2 | 0.0 | 18.6 | 165.8 | 4.5 | 20.8 | none | none |
+| prefix | 2,218.0 | 274.1 | 518.4 | 3,010.4 | 79.6 | 20.2 | `softmax` (in `qk`), `pv` (in `qk`) | `lang_embed_scale` (host), `state_proj` (host), `bias_state` (host) |
+| expert | 7,398.2 | 2,003.0 | 1,727.8 | 11,129.1 | 107.5 | 7.4 | `self_pv` (in `self_qk`), `self_softmax` (in `self_qk`), `cross_pv` (in `cross_qk`), `cross_softmax` (in `cross_qk`) | none |
+| **all** | 16,959.8 | 4,950.2 | 7,083.9 | **28,993.9** | 836.9 | **22.0** | | |
 
 Total: 28.99 ms per inference call (estimate); shares: GEMM 58 %, attention
 17 %, row operators 24 %.
+
+MFU (estimate) = nominal FLOP / (composed time x 131.1 TFLOP/s, the matrix-unit peak above). FLOP are
+the model's unpadded counts of the covered operators (padding and the work of host rows not counted); row
+operators count their per-element conventions against the same matrix peak, so their MFU is near zero by
+construction. Per class: GEMM 31.7 %, attention 20.1 %, row operators 0.2 %.
 
 ## Limitations
 
