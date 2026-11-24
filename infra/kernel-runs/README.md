@@ -70,6 +70,8 @@ repo.
 | `final_runs.py` | re-runs every picked GEMM setting (fastest over both GEMM sweeps) and row kernel -> `results/final_h1.csv` |
 | `trace_picks.py` | Perfetto traces of the picked settings -> `results/traces_h1.csv` |
 | `reproduce.py list\|run\|export` | re-runs the 51 recorded settings (`configs/h1/`) and compares with the recorded times; `export` (owner) refreshes `configs/h1/` |
+| `trace_summary.py` | per-cluster RedMulE / iDMA / Spatz busy fractions in the kernel window of each trace -> `results/trace_summary_h1.json` (read by the kernel mapping page) |
+| `serve_traces.py [--port 9001]` | serves `infra/workload-modeling/build/kernel-explorer.html` with the traces and run folders on 127.0.0.1, so the page can open traces in Perfetto |
 | `to_constants.py [--print]` | writes the `h1_kernels` section of `infra/workload-modeling/constants.yaml` |
 | `hbm_channel_count.py` | requests per HBM channel from an `hbm_ctrl` trace |
 
