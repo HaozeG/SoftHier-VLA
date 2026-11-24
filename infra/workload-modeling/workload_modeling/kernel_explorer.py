@@ -600,11 +600,11 @@ def render_md(ex: Explorer) -> str:
           "modelled for GEMM only: FlatAttention's RedMulE call shapes have not been read yet, so attention keeps "
           "block fill = 1. The interpretation that each CE interleaves ce_pipe + 1 outputs to hide the FMA "
           "latency is an inference; the timing rule itself is the simulator's code.", ""]
+    missing = [k for k in ks if k["trace_status"] != "selected"]
     L += ["", "Trace column: *selected* = a trace of the selected setting exists; *other* = only traces of "
-          "non-selected candidates (the page says which); *none* = no trace. Reasons:", ""]
-    for k in ks:
-        if k["trace_status"] != "selected":
-            L.append(f"* `{k['name']}`: {k['trace_note']}.")
+          "non-selected candidates (the page says which); *none* = no trace."
+          + (" Reasons:" if missing else " Every matrix kernel has a trace of its selected setting."), ""]
+    L += [f"* `{k['name']}`: {k['trace_note']}." for k in missing]
     wf = [(k["name"], w) for k in ks for w in k["wrong_faster"]]
     L += ["", "Runs that failed the output check but were faster than the selected setting (excluded by the pick "
           "rule; worth a look before trusting the pick):", ""]

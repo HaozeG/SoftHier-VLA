@@ -5,12 +5,14 @@ are retried, ok rows are skipped.
 Trace folders: $SHVLA_DATA/stage1-h1/traces/<kernel>/<name>/; status in results/traces_h1.csv."""
 import csv, os, subprocess, sys
 from pathlib import Path
-import gemm_sweep as G, row_kernels as R
+import gemm_sweep as G, gemm_smallm_sweep as SM, row_kernels as R
 HERE = Path(__file__).resolve().parent
 OUT = Path(os.environ.get("SHVLA_DATA", Path.home() / ".cache/softhier-vla")) / "stage1-h1/traces"
 CSV = HERE / "results/traces_h1.csv"
 jobs = []
-rows = list(csv.DictReader(open(G.CSV)))
+# GEMM picks: fastest checked run per shape over both sweeps (gemm_sweep and the small-M gemm_smallm_sweep), the rule
+# final_runs / constants and the kernel explorer use
+rows = list(csv.DictReader(open(G.CSV))) + list(csv.DictReader(open(SM.CSV)))
 for shape in sorted({r["shape"] for r in rows}):
     ok = [r for r in rows if r["shape"] == shape and r["status"] == "ok"]
     b = min(ok, key=lambda r: int(r["time_ns"]))
