@@ -26,6 +26,9 @@ python3 infra/kernel-runs/reproduce.py run --max-ns 5000   # spot check, a few m
 python3 infra/kernel-runs/reproduce.py run                 # all 51 runs, serial; exits 1 unless all are identical
 ```
 
+*   Reproduced 2026-11-24: 51/51 identical (ns, output checks passed), kernel submodule at `de53537`, GVSoC tree
+    `977e08c` (patches 0001-0013; the recorded values were taken on `058a39b`, patches 0001-0012). The simulator tree
+    was one already prepared by `setup.sh` on the owner's host, not a fresh install.
 *   `reproduce.py` re-runs the recorded settings committed in `configs/h1/` (`recorded.csv`: run name, kernel,
     recorded ns, kernel build, `constants.yaml` keys) and compares the simulated time exactly; the simulation is
     deterministic. Run folders: `$SHVLA_DATA/stage1-h1/repro/<name>/`. `list` shows the runs; `--only`,
