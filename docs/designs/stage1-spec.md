@@ -355,12 +355,15 @@ A kernel time counts as a stage-1 `measured` value only if all of the following 
     converted to a Perfetto trace (`make pfto`). The trace JSON and the raw log are kept per shape
     under `~/.cache/softhier-vla/stage1-h1/<kernel>/<shape>/`, outside git because of their size.
     The constants entry names that path. Sweep candidates keep their time only, no trace. Tracing
-    must not change the timer value: checked on the first H1 run. Open simulator issue (2026-11-19):
-    with any trace enabled (RedMulE, `hbm_ctrl`), a run with an 8x8 SUMMA group livelocks or advances
-    only very slowly, so shapes whose picked setting uses an 8x8 group have no trace until it is fixed.
-    A 4x4 SUMMA group (241x2560x960, split-N scale 4) also failed: 81 us simulated in 15 min for a
-    27.6 us kernel. For the 26 row kernels and nine GEMM shapes that were traced, the traced timer
-    equals the untraced one.
+    must not change the timer value: checked on the first H1 run. For the 26 row kernels and nine GEMM
+    shapes traced before 2026-11-24, the traced timer equals the untraced one. Simulator issue (found
+    2026-11-19, fixed 2026-11-24 by GVSoC patch 0013): with any trace flag a run with a 4x4 or 8x8
+    SUMMA group advanced only very slowly (241x2560x960, split-N scale 4: 81 us simulated in 15 min for
+    a 27.6 us kernel), first recorded as a livelock. Cause: a trace flag runs GVSoC's debug build, where
+    each memory access enqueued a power-trace event into a sorted queue, quadratic in the number of
+    active clusters. With 0013 that shape traces in 78 s and 1024x768x768 (8x8) in 71 s, timers unchanged
+    and traced = untraced. Shapes whose picked setting uses a 4x4 or 8x8 group have no trace until
+    `trace_picks.py` is re-run.
 10. **NoC reductions (patch 0012, 2026-11-20).** GVSoC's collective reduction (FlooNoC,
     `collective_generate`) folded each kid request into a parent buffer that never started at the
     identity, so every router where a reduction forks added uninitialised heap once. Found with

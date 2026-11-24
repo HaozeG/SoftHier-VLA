@@ -59,8 +59,8 @@ cp "$IMPL/sw/$APP/preload.elf" "$IMPL"/sw/"$APP"/include/*.h "$OUT/"
 
 PLD=$OUT/preload.elf
 cd "$SH"
-# Measurement run: gvsoc directly, no trace flags. `make run` adds --trace=/chip/cluster_0/redmule, and with any
-# trace enabled an 8x8 SUMMA group livelocks (open simulator issue, stage1-spec §4.3); stdin from /dev/null.
+# Measurement run: gvsoc directly, no trace flags (`make run` adds --trace=/chip/cluster_0/redmule, and any trace
+# flag switches gapy to the debug build, which is slower); stdin from /dev/null.
 timeout "$SHVLA_SIM_TIMEOUT" ./install/bin/gvsoc --target=pulp.chips.flex_cluster.flex_cluster \
   --binary sw_build/softhier.elf run --preload "$PLD" < /dev/null > "$OUT/run.log" 2>&1 \
   || { echo "run failed or timed out, see $OUT/run.log" >&2; exit 1; }

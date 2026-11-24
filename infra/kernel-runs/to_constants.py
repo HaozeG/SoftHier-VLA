@@ -106,7 +106,7 @@ def main():
                     else " (bit-exact against the replay golden)")
                 tr_prefix = name
         tr = trace_of(tr_prefix)
-        note += f"; {tr}" if tr else "; no trace (tracing livelocks this setting, stage1-spec §4.3 item 9)"
+        note += f"; {tr}" if tr else "; no trace recorded (stage1-spec §4.3 item 9)"
         note += f"; {wl}: {ops}"
         b = final[fname]["build"] if kern not in ("flatattention",) else build
         krepo = f"{KREPO_COMMIT2})" if b == BUILD2 else f"{KREPO_COMMIT} + build {b[:8]})"

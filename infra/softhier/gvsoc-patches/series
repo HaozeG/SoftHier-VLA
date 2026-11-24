@@ -10,3 +10,4 @@
 0010-G3.3-gvsoc-instr_mem-width_log2-default-fetch-bandwi.patch
 0011-shvla-RedMulE-model-zero-initialise-X-W-Y-Z-buffers-.patch
 0012-shvla-FlooNoC-reductions-start-from-the-identity-fp1.patch
+0013-shvla-power-trace-VCD-resync-event-only-when-a-power.patch

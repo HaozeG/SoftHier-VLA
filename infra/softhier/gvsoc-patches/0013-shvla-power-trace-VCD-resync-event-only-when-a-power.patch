@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haoze <90812991+HaozeG@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 10:39:31 +0100
+Subject: [PATCH] [shvla] power trace: VCD resync event only when a power VCD
+ trace is on (traced runs of 4x4/8x8 groups)
+
+Symptom (stage 1, 2026-11-19 to 2026-11-24): any --trace flag (redmule, idma, spatz, cluster_registers,
+hbm_ctrl) made runs with 4x4 or 8x8 SUMMA groups crawl: 241x2560x960 split-N scale 4 reached 81 us simulated
+in 15 min (27.6 us kernel), 8x8 picks never finished. It was recorded as a "livelock"; it is not one:
+simulated time and the kernel timer are unchanged, only wall clock explodes.
+
+Cause: a trace flag makes gapy run gvsoc_launcher_debug (VP_TRACE_ACTIVE). There every memory access with an
+energy quantum calls PowerTrace::inc_dynamic_energy -> dump_vcd_trace, which enqueues the power trace's
+resync event one cycle ahead. ClockEngine::enqueue inserts into a sorted singly linked delayed queue and walks
+every event with cycle <= now + 1, i.e. mostly the other banks' resync events. With all 64 clusters moving
+data the walk is O(n) per access, O(n^2) per cycle. gdb samples of a traced 8x8 run: 20 of 22 in
+ClockEngine::enqueue called from PowerSource::account_energy_quantum (flex_cluster Memory::req).
+
+Fix (via soft_hier/gvsoc_core.patch, core engine/src/power/power_trace.cpp): enqueue the resync event only
+when one of the power trace's VCD signals (trace, dyn_trace, static_trace) has event dumping on. The event only
+re-dumps the VCD value; energy accounting uses timestamps and is unchanged. Optimized builds never reach it.
+
+Measured (DRAMSys HBM, arch_h1.py, kernel build 9482644b): untraced and traced timers equal and unchanged
+against the recorded values: 241x320x320 8x8 5671 ns (redmule-only trace 122 s -> 12 s wall),
+241x2560x960 4x4 27594 ns (timed out at 15 min -> 78 s for build + untraced + traced + Perfetto),
+1024x768x768 8x8 20479 ns (71 s, first trace of an 8x8 pick); RedMulE trace lines of 241x320x320 identical
+before and after.
+---
+ soft_hier/gvsoc_core.patch | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/soft_hier/gvsoc_core.patch b/soft_hier/gvsoc_core.patch
+index 8ed25b1..d098c8c 100644
+--- a/soft_hier/gvsoc_core.patch
++++ b/soft_hier/gvsoc_core.patch
+@@ -176,6 +176,24 @@ index 7f56b6a6..25cf1182 100644
+  
+  double vp::PowerEngine::get_average_power(double &dynamic_power, double &static_power)
+  {
++diff --git a/engine/src/power/power_trace.cpp b/engine/src/power/power_trace.cpp
++index 700b0703..b0b62ad8 100644
++--- a/engine/src/power/power_trace.cpp
+++++ b/engine/src/power/power_trace.cpp
++@@ -150,7 +150,12 @@
++ 
++     // If there was a contribution from energy quantum, schedule an event in the next cycle so that we dump again 
++     // the trace since teh quantum implicitely disappears and overal power is modified
++-    if (!this->trace_event->is_enqueued() && quantum_power > 0)
+++    // Only needed when one of the VCD power traces is dumped: otherwise every energy quantum (one per
+++    // memory access) enqueues an event, and the sorted insertion into the clock engine's delayed queue
+++    // becomes quadratic in the number of active power sources (debug build, i.e. any --trace).
+++    bool vcd_active = this->trace.get_event_active() || this->dyn_trace.get_event_active()
+++        || this->static_trace.get_event_active();
+++    if (vcd_active && !this->trace_event->is_enqueued() && quantum_power > 0)
++     {
++         this->top->event_enqueue(this->trace_event, 1);
++     }
+ diff --git a/engine/src/time/time_engine.cpp b/engine/src/time/time_engine.cpp
+ index 7b40a98f..f12ba08f 100644
+ --- a/engine/src/time/time_engine.cpp
