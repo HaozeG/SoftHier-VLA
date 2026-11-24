@@ -134,45 +134,75 @@ MFU here counts only matrix-kernel FLOP; the operator-graph page also counts the
 
 ## Matrix kernels
 
-MFU = f_pad x f_occ x f_rest. f_pad = true / padded FLOP = f_pad,shape x f_pad,array; f_occ = active clusters / 64; f_rest = the rest, the matrix units' share of time inside the active clusters. Bound: which of the two lower limits, true FLOP at peak or the operator's unique bytes at 1,024 GB/s, is larger. Time in µs per call; total = over both pages' uses is not summed, see the operator-graph pages for call totals.
+MFU = f_pad x f_occ x f_rest. f_pad = true / padded FLOP = shape padding x RedMulE block fill (below); f_occ = active clusters / 64; f_rest = the rest, the matrix units' share of time inside the active clusters. Bound: which of the two lower limits, true FLOP at peak or the operator's unique bytes at 1,024 GB/s, is larger. Time in µs per call; total = over both pages' uses is not summed, see the operator-graph pages for call totals.
 
-| kernel | used by | selected setting | technique | active | time | MFU, % | f_pad (shape x array) | f_occ | f_rest | bound | roofline time | swept (ok) | valid space | trace |
+| kernel | used by | selected setting | technique | active | time | MFU, % | f_pad | f_occ | f_rest | bound | roofline time | swept (ok) | valid space | trace |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- |
-| `flatattention_12x1024x1024x64` | W1 vision.qk, W1-b vision.qk | `async_s8x4_b1024x1024` | async | 64 | 74.25 | 33.7 | 1.00 (1.00 x 1.00) | 1.00 | 0.34 | compute | 25.06 | 10 (9) | 238 | none |
-| `flatattention_15x50x241x64` | W1 expert.cross_qk, W1-b expert.cross_qk | `coll_s8x1_b192x256` | collective | 40 | 12.06 | 3.0 | 0.74 (0.74 x 1.00) | 0.62 | 0.06 | compute | 0.36 | 10 (10) | 24 | selected |
-| `flatattention_15x50x291x64` | W1 expert.self_qk, W1-b expert.self_qk | `coll_s8x1_b192x512` | collective | 40 | 12.98 | 3.3 | 0.44 (0.44 x 1.00) | 0.62 | 0.12 | compute | 0.43 | 10 (10) | 28 | selected |
-| `flatattention_15x241x241x64` | W1 prefix.qk, W1-b prefix.qk | `coll_s2x4_b768x256` | collective | 40 | 17.13 | 10.1 | 0.89 (0.89 x 1.00) | 0.62 | 0.18 | compute | 1.73 | 10 (10) | 130 | selected |
-| `gemm_50x32x720` | W1 expert.action_out_proj, W1-b expert.action_out_proj | `splitK_x1y2g32_t32x32x32` | splitK, non-square groups | 64 | 3.06 | 0.6 | 0.27 (0.55 x 0.50) | 1.00 | 0.02 | HBM | 0.12 | 11 (7) | 72 | other |
-| `gemm_50x720x32` | W1 expert.action_in_proj, W1-b expert.action_in_proj | `splitN_x4y2g4_t32x64x32` | splitN, non-square groups | 32 | 2.94 | 0.6 | 0.55 (0.55 x 1.00) | 0.50 | 0.02 | HBM | 0.12 | 20 (20) | 171 | other |
-| `gemm_50x720x720` | W1 expert.time_mlp_out, W1-b expert.time_mlp_out | `splitK_x4y2g8_t32x192x96` | splitK, non-square groups | 64 | 6.02 | 6.6 | 0.69 (0.69 x 1.00) | 1.00 | 0.10 | HBM | 1.15 | 45 (29) | 2,460 | other |
-| `gemm_50x720x960` | W1 expert.o_proj, W1-b expert.o_proj | `splitK_x4y2g8_t32x192x128` | splitK, non-square groups | 64 | 7.12 | 7.4 | 0.69 (0.69 x 1.00) | 1.00 | 0.11 | HBM | 1.51 | 26 (21) | 2,566 | other |
-| `gemm_50x720x1440` | W1 expert.time_mlp_in, W1-b expert.time_mlp_in | `splitK_x4y2g8_t32x192x192` | splitK, non-square groups | 64 | 9.16 | 8.6 | 0.69 (0.69 x 1.00) | 1.00 | 0.13 | HBM | 2.24 | 21 (19) | 2,847 | other |
-| `gemm_50x720x2048` | W1 expert.mlp_down, W1-b expert.mlp_down | `splitK_x4y1g16_t64x192x128` | splitK, non-square groups | 64 | 11.13 | 10.1 | 0.73 (0.73 x 1.00) | 1.00 | 0.14 | HBM | 3.15 | 20 (18) | 2,968 | other |
-| `gemm_50x960x720` | W1 expert.q_proj, W1-b expert.q_proj | `splitK_x8y2g4_t32x128x192` | splitK, non-square groups | 64 | 7.13 | 7.4 | 0.69 (0.69 x 1.00) | 1.00 | 0.11 | HBM | 1.51 | 19 (16) | 2,637 | other |
-| `gemm_50x1600x720` | W1 expert.qkv_proj, W1-b expert.qkv_proj | `splitN_x4y1g16_t64x32x256` | splitN, non-square groups | 64 | 10.90 | 8.1 | 0.29 (0.57 x 0.50) | 1.00 | 0.28 | HBM | 2.48 | 22 (17) | 2,953 | other |
-| `gemm_50x4096x720` | W1 expert.mlp_gateup, W1-b expert.mlp_gateup | `splitN_x2y1g32_t64x64x256` | splitN, non-square groups | 64 | 17.08 | 13.2 | 0.73 (0.73 x 1.00) | 1.00 | 0.18 | HBM | 6.23 | 23 (18) | 4,000 | other |
-| `gemm_192x960x12288` | W1 connector.connector_proj, W1-b connector.connector_proj | `Nosplit_s8g1_t32x128x256` | Nosplit | 64 | 147.16 | 23.5 | 0.70 (0.70 x 1.00) | 1.00 | 0.33 | compute | 34.56 | 10 (10) | 3,572 | none |
-| `gemm_241x320x320` | W1 expert.cross_k_proj, W1 expert.cross_v_proj, W1-b expert.cross_k_proj, W1-b expert.cross_v_proj | `Nosplit_s8g1_t32x64x160` | Nosplit | 64 | 5.67 | 6.6 | 0.59 (0.59 x 1.00) | 1.00 | 0.11 | HBM | 0.50 | 10 (10) | 1,700 | none |
-| `gemm_241x320x960` | W1 prefix.k_proj, W1 prefix.v_proj, W1-b prefix.k_proj, W1-b prefix.v_proj | `Nosplit_s8g1_t32x64x192` | Nosplit | 64 | 11.47 | 9.8 | 0.59 (0.59 x 1.00) | 1.00 | 0.17 | HBM | 1.20 | 11 (11) | 1,962 | none |
-| `gemm_241x960x960` | W1 prefix.o_proj, W1 prefix.q_proj, W1-b prefix.o_proj, W1-b prefix.q_proj | `Nosplit_s8g1_t32x128x192` | Nosplit | 64 | 14.77 | 23.0 | 0.88 (0.88 x 1.00) | 1.00 | 0.26 | compute | 3.39 | 11 (11) | 3,754 | none |
-| `gemm_241x960x2560` | W1 prefix.mlp_down, W1-b prefix.mlp_down | `Nosplit_s8g1_t32x128x256` | Nosplit | 64 | 30.96 | 29.2 | 0.88 (0.88 x 1.00) | 1.00 | 0.33 | compute | 9.04 | 10 (10) | 3,799 | none |
-| `gemm_241x2560x960` | W1 prefix.mlp_gate, W1 prefix.mlp_up, W1-b prefix.mlp_gate, W1-b prefix.mlp_up | `splitN_s4g4_t64x160x192` | splitN, square groups | 64 | 27.59 | 32.8 | 0.78 (0.94 x 0.83) | 1.00 | 0.42 | compute | 9.04 | 11 (11) | 4,742 | none |
-| `gemm_1024x768x768` | W1 vision.k_proj, W1 vision.o_proj, W1 vision.patch_embed, W1 vision.q_proj, W1 vision.v_proj | `Nosplit_s8g1_t128x96x128` | Nosplit | 64 | 20.48 | 45.0 | 0.75 (1.00 x 0.75) | 1.00 | 0.60 | compute | 9.22 | 11 (11) | 4,406 | none |
-| `gemm_1024x768x3072` | W1 vision.mlp_down | `Nosplit_s8g1_t128x96x256` | Nosplit | 64 | 59.84 | 61.6 | 0.75 (1.00 x 0.75) | 1.00 | 0.82 | compute | 36.86 | 12 (12) | 4,425 | none |
-| `gemm_1024x3072x768` | W1 vision.mlp_up | `Nosplit_s8g1_t128x192x192` | Nosplit | 64 | 56.44 | 65.3 | 1.00 (1.00 x 1.00) | 1.00 | 0.65 | compute | 36.86 | 11 (11) | 6,094 | none |
-| `gemm_3072x768x768` | W1-b vision.k_proj, W1-b vision.o_proj, W1-b vision.patch_embed, W1-b vision.q_proj, W1-b vision.v_proj | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 51.96 | 53.2 | 0.75 (1.00 x 0.75) | 1.00 | 0.71 | compute | 27.65 | 12 (12) | 4,544 | none |
-| `gemm_3072x768x3072` | W1-b vision.mlp_down | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 167.29 | 66.1 | 0.75 (1.00 x 0.75) | 1.00 | 0.88 | compute | 110.59 | 12 (12) | 4,552 | none |
-| `gemm_3072x3072x768` | W1-b vision.mlp_up | `Nosplit_s8g1_t192x192x128` | Nosplit | 64 | 150.76 | 73.4 | 1.00 (1.00 x 1.00) | 1.00 | 0.73 | compute | 110.59 | 11 (11) | 6,132 | none |
+| `flatattention_12x1024x1024x64` | W1 vision.qk, W1-b vision.qk | `async_s8x4_b1024x1024` | async | 64 | 74.25 | 33.7 | 1.00 | 1.00 | 0.34 | compute | 25.06 | 10 (9) | 238 | none |
+| `flatattention_15x50x241x64` | W1 expert.cross_qk, W1-b expert.cross_qk | `coll_s8x1_b192x256` | collective | 40 | 12.06 | 3.0 | 0.74 | 0.62 | 0.06 | compute | 0.36 | 10 (10) | 24 | selected |
+| `flatattention_15x50x291x64` | W1 expert.self_qk, W1-b expert.self_qk | `coll_s8x1_b192x512` | collective | 40 | 12.98 | 3.3 | 0.44 | 0.62 | 0.12 | compute | 0.43 | 10 (10) | 28 | selected |
+| `flatattention_15x241x241x64` | W1 prefix.qk, W1-b prefix.qk | `coll_s2x4_b768x256` | collective | 40 | 17.13 | 10.1 | 0.89 | 0.62 | 0.18 | compute | 1.73 | 10 (10) | 130 | selected |
+| `gemm_50x32x720` | W1 expert.action_out_proj, W1-b expert.action_out_proj | `splitK_x1y2g32_t32x32x32` | splitK, non-square groups | 64 | 3.06 | 0.6 | 0.27 | 1.00 | 0.02 | HBM | 0.12 | 11 (7) | 72 | other |
+| `gemm_50x720x32` | W1 expert.action_in_proj, W1-b expert.action_in_proj | `splitN_x4y2g4_t32x64x32` | splitN, non-square groups | 32 | 2.94 | 0.6 | 0.55 | 0.50 | 0.02 | HBM | 0.12 | 20 (20) | 171 | other |
+| `gemm_50x720x720` | W1 expert.time_mlp_out, W1-b expert.time_mlp_out | `splitK_x4y2g8_t32x192x96` | splitK, non-square groups | 64 | 6.02 | 6.6 | 0.69 | 1.00 | 0.10 | HBM | 1.15 | 45 (29) | 2,460 | other |
+| `gemm_50x720x960` | W1 expert.o_proj, W1-b expert.o_proj | `splitK_x4y2g8_t32x192x128` | splitK, non-square groups | 64 | 7.12 | 7.4 | 0.69 | 1.00 | 0.11 | HBM | 1.51 | 26 (21) | 2,566 | other |
+| `gemm_50x720x1440` | W1 expert.time_mlp_in, W1-b expert.time_mlp_in | `splitK_x4y2g8_t32x192x192` | splitK, non-square groups | 64 | 9.16 | 8.6 | 0.69 | 1.00 | 0.13 | HBM | 2.24 | 21 (19) | 2,847 | other |
+| `gemm_50x720x2048` | W1 expert.mlp_down, W1-b expert.mlp_down | `splitK_x4y1g16_t64x192x128` | splitK, non-square groups | 64 | 11.13 | 10.1 | 0.73 | 1.00 | 0.14 | HBM | 3.15 | 20 (18) | 2,968 | other |
+| `gemm_50x960x720` | W1 expert.q_proj, W1-b expert.q_proj | `splitK_x8y2g4_t32x128x192` | splitK, non-square groups | 64 | 7.13 | 7.4 | 0.69 | 1.00 | 0.11 | HBM | 1.51 | 19 (16) | 2,637 | other |
+| `gemm_50x1600x720` | W1 expert.qkv_proj, W1-b expert.qkv_proj | `splitN_x4y1g16_t64x32x256` | splitN, non-square groups | 64 | 10.90 | 8.1 | 0.29 | 1.00 | 0.28 | HBM | 2.48 | 22 (17) | 2,953 | other |
+| `gemm_50x4096x720` | W1 expert.mlp_gateup, W1-b expert.mlp_gateup | `splitN_x2y1g32_t64x64x256` | splitN, non-square groups | 64 | 17.08 | 13.2 | 0.73 | 1.00 | 0.18 | HBM | 6.23 | 23 (18) | 4,000 | other |
+| `gemm_192x960x12288` | W1 connector.connector_proj, W1-b connector.connector_proj | `Nosplit_s8g1_t32x128x256` | Nosplit | 64 | 147.16 | 23.5 | 0.70 | 1.00 | 0.33 | compute | 34.56 | 10 (10) | 3,572 | none |
+| `gemm_241x320x320` | W1 expert.cross_k_proj, W1 expert.cross_v_proj, W1-b expert.cross_k_proj, W1-b expert.cross_v_proj | `Nosplit_s8g1_t32x64x160` | Nosplit | 64 | 5.67 | 6.6 | 0.59 | 1.00 | 0.11 | HBM | 0.50 | 10 (10) | 1,700 | none |
+| `gemm_241x320x960` | W1 prefix.k_proj, W1 prefix.v_proj, W1-b prefix.k_proj, W1-b prefix.v_proj | `Nosplit_s8g1_t32x64x192` | Nosplit | 64 | 11.47 | 9.8 | 0.59 | 1.00 | 0.17 | HBM | 1.20 | 11 (11) | 1,962 | none |
+| `gemm_241x960x960` | W1 prefix.o_proj, W1 prefix.q_proj, W1-b prefix.o_proj, W1-b prefix.q_proj | `Nosplit_s8g1_t32x128x192` | Nosplit | 64 | 14.77 | 23.0 | 0.88 | 1.00 | 0.26 | compute | 3.39 | 11 (11) | 3,754 | none |
+| `gemm_241x960x2560` | W1 prefix.mlp_down, W1-b prefix.mlp_down | `Nosplit_s8g1_t32x128x256` | Nosplit | 64 | 30.96 | 29.2 | 0.88 | 1.00 | 0.33 | compute | 9.04 | 10 (10) | 3,799 | none |
+| `gemm_241x2560x960` | W1 prefix.mlp_gate, W1 prefix.mlp_up, W1-b prefix.mlp_gate, W1-b prefix.mlp_up | `splitN_s4g4_t64x160x192` | splitN, square groups | 64 | 27.59 | 32.8 | 0.78 | 1.00 | 0.42 | compute | 9.04 | 11 (11) | 4,742 | none |
+| `gemm_1024x768x768` | W1 vision.k_proj, W1 vision.o_proj, W1 vision.patch_embed, W1 vision.q_proj, W1 vision.v_proj | `Nosplit_s8g1_t128x96x128` | Nosplit | 64 | 20.48 | 45.0 | 0.75 | 1.00 | 0.60 | compute | 9.22 | 11 (11) | 4,406 | none |
+| `gemm_1024x768x3072` | W1 vision.mlp_down | `Nosplit_s8g1_t128x96x256` | Nosplit | 64 | 59.84 | 61.6 | 0.75 | 1.00 | 0.82 | compute | 36.86 | 12 (12) | 4,425 | none |
+| `gemm_1024x3072x768` | W1 vision.mlp_up | `Nosplit_s8g1_t128x192x192` | Nosplit | 64 | 56.44 | 65.3 | 1.00 | 1.00 | 0.65 | compute | 36.86 | 11 (11) | 6,094 | none |
+| `gemm_3072x768x768` | W1-b vision.k_proj, W1-b vision.o_proj, W1-b vision.patch_embed, W1-b vision.q_proj, W1-b vision.v_proj | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 51.96 | 53.2 | 0.75 | 1.00 | 0.71 | compute | 27.65 | 12 (12) | 4,544 | none |
+| `gemm_3072x768x3072` | W1-b vision.mlp_down | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 167.29 | 66.1 | 0.75 | 1.00 | 0.88 | compute | 110.59 | 12 (12) | 4,552 | none |
+| `gemm_3072x3072x768` | W1-b vision.mlp_up | `Nosplit_s8g1_t192x192x128` | Nosplit | 64 | 150.76 | 73.4 | 1.00 | 1.00 | 0.73 | compute | 110.59 | 11 (11) | 6,132 | none |
 
-### Why RedMulE array padding counts in f_pad
+### f_pad in words
 
-GVSoC's RedMulE model times every call in output blocks of 32 rows x 64 columns (redmule_h x redmule_w * (redmule_pipe + 1) from constants.yaml arch.h1), at redmule_pipe + 1 = 2 cycles per reduction element per block, however many of the block's columns hold data (`light_redmule.cpp`, `init_redmule_meta_data` and `get_redmule_array_runtime`). On H1 a tile of 128 x 96 thus takes the time of 128 x 128: 75 % of the array time does real MACs. This is counted with shape padding in f_pad, not left in f_rest, because:
+f_pad = shape padding x RedMulE block fill. Shape padding: the operator rounded up to whole tiles. Block fill: how much of the area RedMulE times holds the tile, since it times each call in whole 32 x 64 output blocks (a 128 x 96 tile runs as 128 x 128, block fill 0.75).
+
+* `flatattention_12x1024x1024x64`: 1.00 = shape 1.00 (no padding) x block fill not modelled
+* `flatattention_15x50x241x64`: 0.74 = shape 0.74 (q padded to 64, kv to 256) x block fill not modelled
+* `flatattention_15x50x291x64`: 0.44 = shape 0.44 (q padded to 64, kv to 512) x block fill not modelled
+* `flatattention_15x241x241x64`: 0.89 = shape 0.89 (q padded to 256, kv to 256) x block fill not modelled
+* `gemm_50x32x720`: 0.27 = shape 0.55 (50x32x720 padded to 64x32x1024) x block fill 0.50 (tile 32x32 runs as 32x64)
+* `gemm_50x720x32`: 0.55 = shape 0.55 (50x720x32 padded to 64x1024x32) x block fill 1.00 (tile fills whole blocks)
+* `gemm_50x720x720`: 0.69 = shape 0.69 (50x720x720 padded to 64x768x768) x block fill 1.00 (tile fills whole blocks)
+* `gemm_50x720x960`: 0.69 = shape 0.69 (50x720x960 padded to 64x768x1024) x block fill 1.00 (tile fills whole blocks)
+* `gemm_50x720x1440`: 0.69 = shape 0.69 (50x720x1440 padded to 64x768x1536) x block fill 1.00 (tile fills whole blocks)
+* `gemm_50x720x2048`: 0.73 = shape 0.73 (50x720x2048 padded to 64x768x2048) x block fill 1.00 (tile fills whole blocks)
+* `gemm_50x960x720`: 0.69 = shape 0.69 (50x960x720 padded to 64x1024x768) x block fill 1.00 (tile fills whole blocks)
+* `gemm_50x1600x720`: 0.29 = shape 0.57 (50x1600x720 padded to 64x2048x768) x block fill 0.50 (tile 64x32 runs as 64x64)
+* `gemm_50x4096x720`: 0.73 = shape 0.73 (50x4096x720 padded to 64x4096x768) x block fill 1.00 (tile fills whole blocks)
+* `gemm_192x960x12288`: 0.70 = shape 0.70 (192x960x12288 padded to 256x1024x12288) x block fill 1.00 (tile fills whole blocks)
+* `gemm_241x320x320`: 0.59 = shape 0.59 (241x320x320 padded to 256x512x320) x block fill 1.00 (tile fills whole blocks)
+* `gemm_241x320x960`: 0.59 = shape 0.59 (241x320x960 padded to 256x512x960) x block fill 1.00 (tile fills whole blocks)
+* `gemm_241x960x960`: 0.88 = shape 0.88 (241x960x960 padded to 256x1024x960) x block fill 1.00 (tile fills whole blocks)
+* `gemm_241x960x2560`: 0.88 = shape 0.88 (241x960x2560 padded to 256x1024x2560) x block fill 1.00 (tile fills whole blocks)
+* `gemm_241x2560x960`: 0.78 = shape 0.94 (241x2560x960 padded to 256x2560x960) x block fill 0.83 (tile 64x160 runs as 64x192)
+* `gemm_1024x768x768`: 0.75 = shape 1.00 (no padding) x block fill 0.75 (tile 128x96 runs as 128x128)
+* `gemm_1024x768x3072`: 0.75 = shape 1.00 (no padding) x block fill 0.75 (tile 128x96 runs as 128x128)
+* `gemm_1024x3072x768`: 1.00 = shape 1.00 (no padding) x block fill 1.00 (tile fills whole blocks)
+* `gemm_3072x768x768`: 0.75 = shape 1.00 (no padding) x block fill 0.75 (tile 192x96 runs as 192x128)
+* `gemm_3072x768x3072`: 0.75 = shape 1.00 (no padding) x block fill 0.75 (tile 192x96 runs as 192x128)
+* `gemm_3072x3072x768`: 1.00 = shape 1.00 (no padding) x block fill 1.00 (tile fills whole blocks)
+
+### Why RedMulE block fill counts in f_pad
+
+GVSoC's RedMulE model times every call in output blocks of 32 rows x 64 columns (redmule_h x redmule_w * (redmule_pipe + 1) from constants.yaml arch.h1), at redmule_pipe + 1 = 2 cycles per reduction element per block, however many of the block's columns hold data (`light_redmule.cpp`, `init_redmule_meta_data` and `get_redmule_array_runtime`). On H1 a tile of 128 x 96 thus takes the time of 128 x 128: 75 % of the array time does real MACs (block fill 0.75). This is counted with shape padding in f_pad, not left in f_rest, because:
 
 * it is the same kind of loss: array time spent on work that is not in the operator (empty block slots instead of zero rows), at the full peak rate;
 * the mapping fixes it before the kernel runs: it follows from the tile shape and the arch alone, so it can be computed for every candidate, traced or not, and a different tile or mapping removes it;
 * f_rest then keeps only the run-time losses (data movement, synchronisation, per-call overhead, pipeline fill), which need traces or a cost model to explain.
 
-The per-call rule ceil(m/32) x ceil(n/64) x k x 2 cycles + about 160 cycles matched the RedMulE event durations of 9 traced stage-1 GEMM shapes (estimate from a fit, 2026-11-23). Array padding is modelled for GEMM only: FlatAttention's RedMulE call shapes have not been read yet, so attention keeps f_pad,array = 1. The interpretation that each CE interleaves ce_pipe + 1 outputs to hide the FMA latency is an inference; the timing rule itself is the simulator's code.
+The per-call rule ceil(m/32) x ceil(n/64) x k x 2 cycles + about 160 cycles matched the RedMulE event durations of 9 traced stage-1 GEMM shapes (estimate from a fit, 2026-11-23). Array padding is modelled for GEMM only: FlatAttention's RedMulE call shapes have not been read yet, so attention keeps block fill = 1. The interpretation that each CE interleaves ce_pipe + 1 outputs to hide the FMA latency is an inference; the timing rule itself is the simulator's code.
 
 
 Trace column: *selected* = a trace of the selected setting exists; *other* = only traces of non-selected candidates (the page says which); *none* = no trace. Reasons:

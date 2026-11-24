@@ -56,3 +56,11 @@ def test_f_pad_includes_array_padding():
     assert k["f_pad"] == 0.75
     assert abs(k["f_pad"] * k["f_occ"] * k["f_rest"] - k["mfu"]) < 1e-12
     assert all(k["f_pad_array"] == 1.0 for k in ex.kernels.values() if k["kind"] == "attn")
+    assert k["f_pad_text"] == "0.75 = shape 1.00 (no padding) x block fill 0.75 (tile 128x96 runs as 128x128)"
+
+
+def test_mesh_comes_from_constants():
+    from workload_modeling import constants
+    c = constants.load()
+    assert (kx.MESH_X, kx.MESH_Y) == (c.value("arch.h1.clusters_x"), c.value("arch.h1.clusters_y"))
+    assert kx.NCL == c.clusters("h1")
