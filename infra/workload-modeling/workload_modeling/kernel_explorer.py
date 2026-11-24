@@ -27,7 +27,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import constants, kernel_model, md_to_html, render
+from . import constants, kernel_interface, kernel_model, md_to_html, render
 from . import smolvla_ops as m
 
 REPO = Path(__file__).resolve().parents[3]
@@ -209,19 +209,21 @@ def gemm_not_swept(shape: list[int], cands: list[dict]) -> list[dict]:
                 f"{len(sk)} run ({ok} with correct output): upstream opt()'s own splitK setting (gemm_upstream.py); "
                 "no tile or group sweep. splitK is correct only with all 64 clusters busy and at most 2 N steps per "
                 "group (wrong-output-runs-h1.md)")))
-        else:
-            out.append(dict(name="splitK: never run", why=(
-                "upstream opt() puts the whole mesh in one group for this shape, so it has no splitK setting, and "
-                "gemm_sweep.py leaves splitK out (the reduction changes the summation order, so the bit-exact "
-                "golden does not apply; the abs-tolerance check of gemm_smallm_sweep.py would)")))
         ns = [c for c in cands if not c["setting"]["square"]]
         out.append(dict(name="non-square groups", why=(
             "with more than one M step not runnable (SummaGEMM.h:165 steps X along M by summa_group_x); with one M "
             "step " + (f"only upstream's setting ran ({len(ns)} run{'s' if len(ns) != 1 else ''})" if ns else
                        "never run"))))
-    out.append(dict(name="reshape on load / store", why="resha_x_from / resha_z_to (TALL / THIN) in the kernel "
-                    "config, never enabled"))
     return out
+
+
+def row_kernel_dir(name: str) -> str:
+    """Kernel directory of a row-kernel name (eltwise_bias_1024x768 -> Eltwise)."""
+    for pre, kern in (("eltwise_", "Eltwise"), ("gelu_", "Activation"), ("silu", "Activation"),
+                      ("layernorm_", "LayerNorm"), ("rmsnorm_", "RMSNorm")):
+        if name.startswith(pre):
+            return kern
+    raise KeyError(name)
 ATTN_TECHNIQUES = (
     ("collective", "group of sx x sy clusters shares one head; row max / sum by NoC collectives", "attn_sweep.py"),
     ("async", "as collective, with asynchronous overlap of heads; needs an even head count per group", "attn_sweep.py"),
@@ -252,6 +254,10 @@ class Explorer:
         f1 = RES / "final_h1_stage1.csv"
         self.final_s1 = {r["name"]: r for r in _rows(f1)} if f1.exists() else dict(self.final)
         self.traces = json.loads((RES / "trace_summary_h1.json").read_text())
+        # kernel parameter interfaces parsed from the kernel sources; upstream's frozen (kernel_interface --freeze)
+        self.iface = kernel_interface.interface()
+        up = kernel_interface.UPSTREAM_JSON
+        self.iface_up = json.loads(up.read_text()) if up.exists() else None
         self.kernels: dict[str, dict] = {}
         self.checks: list[dict] = []
         self.pages = [self._page(*p) for p in PAGES]
@@ -377,6 +383,7 @@ class Explorer:
         k.update(candidates=cands, selected=sel, space=space,
                  techniques=self._tech_table(GEMM_TECHNIQUES, space, cands, sel, (M, N, K) in self.S.SHAPES),
                  not_swept=gemm_not_swept(k["shape"], cands))
+        self._interface(k, "SummaGEMM", [c["run_dir"] for c in cands if not c.get("transposed")], fin["dir"])
         self._traces_for(k, shp, cands, sel)
         self._stage1(k)
 
@@ -411,18 +418,62 @@ class Explorer:
         k["stage1"] = None
         k.update(candidates=cands, selected=sel, space=space, hq=hq, hkv=hkv,
                  techniques=self._tech_table(ATTN_TECHNIQUES, space, cands, sel, True), not_swept=[])
+        self._interface(k, "FlatAttention", [c["run_dir"] for c in cands], sel["run_dir"])
         self._traces_for(k, name, cands, sel)
 
-    def _row_not_swept(self, k: dict, fin: dict) -> list[dict]:
-        """Activation's bias_enable (Activation.h: the bias added in the same pass) is never run: the bias before
-        GELU is a separate Eltwise call."""
-        if not k["name"].startswith("gelu_"):
-            return []
-        shp = k["name"].split("_", 1)[1]
-        b = self.final.get(f"eltwise_bias_{shp}")
-        return [dict(name="bias fused into the activation (bias_enable)", why=(
-            "in Activation.h and acti_preload.py, never run on H1: the bias before GELU runs as its own Eltwise call"
-            + (f" (eltwise_bias_{shp}, {int(b['time_ns']) / 1e3:.1f} µs)" if b else "")))]
+    def _interface(self, k: dict, kern: str, run_dirs: list[str], sel_dir: str) -> None:
+        """k["interface"]: per parameter of the kernel, kind, default, the selected run's value, the values over all
+        runs of this kernel (from the generated headers in the run folders) and upstream's interface; then
+        k["not_swept"] += the tunable parameters that kept one value in every run."""
+        runs = [v for v in (kernel_interface.run_values(Path(d), kern) for d in dict.fromkeys(run_dirs) if d) if v]
+        sel = kernel_interface.run_values(Path(sel_dir), kern) or {}
+        up = {r["param"]: r for r in (self.iface_up or {}).get("interface", {}).get(kern, [])}
+        has_up = self.iface_up is not None and kern in self.iface_up.get("interface", {})
+
+        def val(h, r):
+            if r["param"] in h:
+                return h[r["param"]] if h[r["param"]] != "" else "defined"
+            return "not defined" if r["use"] == "switch" else None
+
+        rows = []
+        for r in self.iface[kern]:
+            seen = {}
+            for h in runs:
+                v = val(h, r)
+                if v is not None:
+                    seen[v] = seen.get(v, 0) + 1
+            rows.append(dict(r, selected=val(sel, r), seen=seen, n_runs=len(runs),
+                             upstream=("same" if r["param"] in up else "not upstream") if has_up else None))
+        for prm, u in sorted(up.items()):
+            if prm not in {r["param"] for r in rows}:
+                a = kernel_interface.ANNOT_UPSTREAM.get(kern, {}).get(prm, {})
+                rows.append(dict(u, kind=a.get("kind"), note=a.get("note", "") + " (upstream only, soft_hier_je "
+                                 + self.iface_up["commit"][:7] + ")",
+                                 selected=None, seen={}, n_runs=len(runs), upstream="upstream only"))
+        k["interface"] = rows
+        k["interface_kernel"] = kern
+        on = {r["param"] for r in rows if r["seen"] and set(r["seen"]) - {"0", "not defined"}}
+        for r in rows:
+            if r["kind"] in kernel_interface.TUNABLE and len(r["seen"]) == 1 and not (r.get("dep") and r["dep"] not in on):
+                (v, n), = r["seen"].items()
+                k["not_swept"].append(dict(name=f"{r['param']}", why=f"{r['note']}; {v} in all {n} runs "
+                                           f"({r['where']})" + self._extra_why(k, r)))
+            if r["upstream"] == "upstream only" and r["kind"] in kernel_interface.TUNABLE:
+                k["not_swept"].append(dict(name=r["param"], why=f"{r['note']}: a {r['use']} of upstream's kernel "
+                                           f"({r['where']} there), not in ours"))
+
+    def _extra_why(self, k: dict, r: dict) -> str:
+        if r["param"] == "GEMM_SUMMA_GROUP_SPLITK":
+            return ("; upstream opt() puts the whole mesh in one group for this shape (no splitK setting) and "
+                    "gemm_sweep.py leaves splitK out (the bit-exact golden does not apply; the abs-tolerance check of "
+                    "gemm_smallm_sweep.py would)")
+        if r["param"] == "ACTI_BIAS_ENABLE" and k["name"].startswith("gelu_"):
+            shp = k["name"].split("_", 1)[1]
+            b = self.final.get(f"eltwise_bias_{shp}")
+            if b:
+                return f"; the bias before GELU runs as its own Eltwise call (eltwise_bias_{shp}, " \
+                       f"{int(b['time_ns']) / 1e3:.1f} µs)"
+        return ""
 
     def _row(self, k: dict) -> None:
         fin = self.final[k["name"]]
@@ -432,8 +483,10 @@ class Explorer:
         pipelined = fin["setting"].endswith(" pipeline=1")
         k.update(candidates=[], selected=dict(cand=fin["setting"], time_ns=int(fin["time_ns"]),
                                               run_dir=fin["dir"], setting=None),
-                 space={}, techniques=[], not_swept=self._row_not_swept(k, fin), config=fin["setting"],
-                 pipelined=pipelined)
+                 space={}, techniques=[], not_swept=[], config=fin["setting"], pipelined=pipelined)
+        dirs = [fin["dir"]] + [r["run_dir"] for r in self.rk if r["name"] == k["name"]] + \
+               [r["run_dir"] for r in self.elt if r["name"] == k["name"]]
+        self._interface(k, row_kernel_dir(k["name"]), dirs, fin["dir"])
         # runs of this kernel: the stage-1 schedule (row_kernels.py) and, for Eltwise, the pipelined schedule
         # (eltwise_pipeline.py; runs whose config sets pipeline); the pick is the fastest checked one
         runs = [(r["config"], int(r["time_ns"])) for r in self.rk if r["name"] == k["name"] and r["status"] == "ok"]
@@ -748,7 +801,46 @@ def render_md(ex: Explorer) -> str:
         L.append(f"| `{k['name']}` | {uses} | {_f(k['time_ns'] / 1e3, 2)} | {_f(k['hbm_eff_bw'] / 1e9, 0)} | {extra} |")
     L.append("")
     L += render_options_md(ex)
+    L += render_interfaces_md(ex)
     return "\n".join(L)
+
+
+def render_interfaces_md(ex: Explorer) -> list[str]:
+    """Per kernel: the tunable parameters parsed from the kernel sources, the values they took over every H1 run of
+    that kernel, and the comparison with upstream's frozen interface."""
+    L = ["## Kernel parameter interfaces", "",
+         "Parsed from the kernel sources (`workload_modeling/kernel_interface.py`: descriptor fields passed to the "
+         "entry call, `#if` switches, other macros of the kernel's prefix); kind from its annotation table, which a "
+         "test keeps in step with the code both ways. Values: the generated headers in the run folders of every run "
+         "of the kernel on H1. Tunable = mapping, schedule, fusion or layout.", "",
+         "| kernel | parameter | kind | values over all H1 runs | upstream |", "| --- | --- | --- | --- | --- |"]
+    by: dict[str, dict] = {}
+    for k in ex.kernels.values():
+        kern = k.get("interface_kernel")
+        for r in k.get("interface", []):
+            e = by.setdefault(kern, {}).setdefault(r["param"], dict(r, seen={}))
+            for v, n in r["seen"].items():
+                e["seen"][v] = e["seen"].get(v, 0) + n
+    for kern in kernel_interface.KERNELS:
+        for prm, r in sorted(by.get(kern, {}).items()):
+            if r["kind"] not in kernel_interface.TUNABLE:
+                continue
+            vals = sorted(r["seen"], key=lambda v: -r["seen"][v])
+            txt = (", ".join(f"{v}" for v in vals[:8]) + (f" ({len(vals)} values)" if len(vals) > 8 else "")) or "–"
+            if len(vals) == 1:
+                txt += " (never swept)"
+            L.append(f"| {kern} | `{prm}` | {r['kind']} | {txt} | {r.get('upstream') or '–'} |")
+    if ex.iface_up:
+        ours = set(kernel_interface.KERNELS)
+        only = [k for k in ex.iface_up["kernels"] if k not in ours]
+        L += ["", f"Upstream (soft_hier_je {ex.iface_up['commit'][:7]}, frozen in "
+              "`infra/kernel-runs/results/kernel_interface_upstream.json`): the shared kernels have the same tunable "
+              "parameters except those marked *upstream only*; the other differences are output-check switches "
+              "(upstream `*_NUMER`, ours `*_CHECK_*`, `GEMM_M/N_VALID`). The kernel code differs where the interface "
+              "matches (our SummaGEMM store-range guard, FlatAttention `sqrt_dim`, Activation fixes and GELU). "
+              f"Kernel directories only upstream has (`Other`: microbenchmarks), not run here: {', '.join(f'`{k}`' for k in only)} (`RoPE` is "
+              "relevant: rope runs here as an Eltwise op).", ""]
+    return L
 
 
 def render_options_md(ex: Explorer) -> list[str]:

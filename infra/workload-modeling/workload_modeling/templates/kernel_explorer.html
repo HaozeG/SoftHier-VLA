@@ -340,6 +340,25 @@ function techTable(k) {
   return h + notSwept(k);
 }
 
+function ifaceTable(k) {
+  // parsed from the kernel sources (kernel_interface.py); values from the generated headers in the run folders
+  const order = {mapping: 0, schedule: 1, fusion: 2, layout: 3, operator: 4, shape: 5, precision: 6, check: 7};
+  const rows = [...(k.interface || [])].sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9) || a.param.localeCompare(b.param));
+  const seen = r => { const e = Object.entries(r.seen || {}); if (!e.length) return "<span class='muted'>–</span>";
+    const t = e.sort((a, b) => b[1] - a[1]).slice(0, 6).map(([v, n]) => `${esc(v)}<span class="muted">×${n}</span>`).join(", ");
+    return (e.length > 6 ? `${e.length} values: ` : "") + t; };
+  const tun = r => ["mapping", "schedule", "fusion", "layout"].includes(r.kind);
+  let h = `<details${k.kind === "row" ? " open" : ""}><summary>${rows.length} parameters; ${rows.filter(tun).length} tunable (mapping, schedule, fusion, layout)</summary>
+    <div style="overflow-x:auto"><table><tr><th>parameter</th><th>kind</th><th>use</th><th>default</th><th>selected</th><th>values over ${rows.length ? rows[0].n_runs : 0} runs</th><th>upstream</th><th>where</th></tr>`;
+  for (const r of rows) {
+    const one = tun(r) && Object.keys(r.seen || {}).length === 1;
+    h += `<tr${r.upstream === "upstream only" ? ' class="muted"' : ""}><td class="mono" title="${esc(r.note || "")}">${esc(r.param)}</td><td>${esc(r.kind || "?")}</td><td>${esc(r.use)}</td>
+      <td class="mono">${esc(r.default ?? "–")}</td><td class="mono">${esc(r.selected ?? "–")}</td><td class="mono">${seen(r)}${one ? ' <span class="badge">never swept</span>' : ""}</td>
+      <td>${esc(r.upstream || "–")}</td><td class="mono muted" style="font-size:11px">${esc(r.where)}</td></tr>`;
+  }
+  return h + `</table></div><p class="sec" style="font-size:12px">Parameters parsed from the kernel sources (descriptor fields passed to the entry call, #if switches, other macros); kind and note from kernel_interface.ANNOT; values read from the generated header kept in each run folder. Hover a parameter for its note.</p></details>`;
+}
+
 function notSwept(k) {
   return k.not_swept.length ? `<details style="margin-top:6px"><summary>In the kernel but never swept</summary><ul>${k.not_swept.map(x => `<li><b>${esc(x.name)}</b>: <span class="sec">${esc(x.why)}</span></li>`).join("")}</ul></details>` : "";
 }
@@ -449,6 +468,8 @@ function renderDetail(keepScroll) {
         ${(k.wrong_faster || []).length ? `<div class="note warn">${k.wrong_faster.length} run(s) failed the output check but were faster than the selected setting: ${k.wrong_faster.map(w => `<code>${esc(w.cand)}</code> ${us(w.time_ns)} µs (${w.bad} bad)`).join(", ")}. Excluded by the pick rule.</div>` : ""}
         <h3>Mapping techniques for this shape</h3>
         ${techTable(k)}
+        <h3>Kernel parameters (${esc(k.interface_kernel)}: interface + selected)</h3>
+        ${ifaceTable(k)}
       </div>
       <div>
         <h3>Spatial mapping on the ${DATA.arch.mesh[0]} x ${DATA.arch.mesh[1]} mesh</h3>

@@ -377,3 +377,43 @@ Call time with the stage-1 picks instead (estimate: kernel times add up as on th
 
 * W1: 28.994 ms with the stage-1 picks, 27.19 ms with constants.yaml
 * W1-b: 27.897 ms with the stage-1 picks, 26.00 ms with constants.yaml
+
+## Kernel parameter interfaces
+
+Parsed from the kernel sources (`workload_modeling/kernel_interface.py`: descriptor fields passed to the entry call, `#if` switches, other macros of the kernel's prefix); kind from its annotation table, which a test keeps in step with the code both ways. Values: the generated headers in the run folders of every run of the kernel on H1. Tunable = mapping, schedule, fusion or layout.
+
+| kernel | parameter | kind | values over all H1 runs | upstream |
+| --- | --- | --- | --- | --- |
+| SummaGEMM | `GEMM_K_TILE` | mapping | 256, 128, 192, 32, 64, 96, 160, 120 (13 values) | same |
+| SummaGEMM | `GEMM_M_TILE` | mapping | 32, 64, 128, 256, 192, 50, 96, 160 (9 values) | same |
+| SummaGEMM | `GEMM_N_TILE` | mapping | 96, 192, 128, 256, 32, 64, 160, 224 (10 values) | same |
+| SummaGEMM | `GEMM_RESHAPE_X_FROM_K` | layout | – | same |
+| SummaGEMM | `GEMM_RESHAPE_Z_TO_N` | layout | – | same |
+| SummaGEMM | `GEMM_RESHA_X_FROM_ENABLE` | layout | 0 (never swept) | same |
+| SummaGEMM | `GEMM_RESHA_X_FROM_M` | layout | 128 (never swept) | same |
+| SummaGEMM | `GEMM_RESHA_X_FROM_TALL` | layout | not defined (never swept) | same |
+| SummaGEMM | `GEMM_RESHA_X_FROM_THIN` | layout | not defined (never swept) | same |
+| SummaGEMM | `GEMM_RESHA_Z_TO_ENABLE` | layout | 0 (never swept) | same |
+| SummaGEMM | `GEMM_RESHA_Z_TO_M` | layout | 2048 (never swept) | same |
+| SummaGEMM | `GEMM_RESHA_Z_TO_TALL` | layout | not defined (never swept) | same |
+| SummaGEMM | `GEMM_RESHA_Z_TO_THIN` | layout | not defined (never swept) | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_GAP_W` | mapping | 0, 768, 1024, 512, 256, 384, 98304, 2048 (53 values) | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_GAP_X` | mapping | 0, 128, 64, 192, 384, 256, 768, 180 (17 values) | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_GAP_Z` | mapping | 0, 768, 1024, 512, 256, 384, 192, 128 (21 values) | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_NUMBER` | mapping | 1, 8, 4, 2, 16, 32, 64 | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_REDUCE` | mapping | 0, 1 | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_SPLITK` | mapping | 0, 1 | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_SPLITN` | mapping | 0, 1 | same |
+| SummaGEMM | `GEMM_SUMMA_SCALE_X` | mapping | 8, 2, 4, 1 | same |
+| SummaGEMM | `GEMM_SUMMA_SCALE_Y` | mapping | 2, 1, 8, 4 | same |
+| FlatAttention | `ATTN_FLATTEN_ASYNC` | schedule | 0, 1 | same |
+| FlatAttention | `ATTN_FLATTEN_SCALE_X` | mapping | 4, 8, 2 | same |
+| FlatAttention | `ATTN_FLATTEN_SCALE_Y` | mapping | 1, 4, 2, 8 | same |
+| FlatAttention | `ATTN_FLATTEN_SHAPE_X` | mapping | 256, 128, 512, 1024, 384, 64 | same |
+| FlatAttention | `ATTN_FLATTEN_SHAPE_Y` | mapping | 192, 1024, 64, 256, 768, 512, 384 | same |
+| FlatAttention | `ATTN_FLATTEN_SWCOLL` | schedule | – | upstream only |
+| FlatAttention | `ATTN_FLATTEN_SWCOLL_PIPELINE` | schedule | – | upstream only |
+| Activation | `ACTI_BIAS_ENABLE` | fusion | 0 (never swept) | same |
+| Eltwise | `ELT_PIPELINE` | schedule | not defined, 1 | – |
+
+Upstream (soft_hier_je 4610405, frozen in `infra/kernel-runs/results/kernel_interface_upstream.json`): the shared kernels have the same tunable parameters except those marked *upstream only*; the other differences are output-check switches (upstream `*_NUMER`, ours `*_CHECK_*`, `GEMM_M/N_VALID`). The kernel code differs where the interface matches (our SummaGEMM store-range guard, FlatAttention `sqrt_dim`, Activation fixes and GELU). Kernel directories only upstream has (`Other`: microbenchmarks), not run here: `FA`, `FlatMLA`, `MoECombine`, `MoEDispatch`, `MoEGate`, `Other`, `RoPE` (`RoPE` is relevant: rope runs here as an Eltwise op).
