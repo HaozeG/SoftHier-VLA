@@ -27,3 +27,27 @@ def test_all_baseline_checks_pass():
     assert not bad, bad
     kinds = {c["kind"] for c in ex.checks}
     assert kinds == {"pick", "constants", "placement", "sum"}
+
+
+def test_redmule_block_constants_match_h1_arch():
+    import re
+    arch = (kx.KR / "arch" / "arch_h1.py").read_text()
+    val = {k: int(re.search(rf"redmule_ce_{k}\s*=\s*(\d+)", arch).group(1)) for k in ("height", "width", "pipe")}
+    assert (val["height"], val["width"], val["pipe"]) == (kx.RM_CE_H, kx.RM_CE_W, kx.RM_CE_PIPE)
+    assert (kx.RM_BLK_M, kx.RM_BLK_N, kx.RM_BLK_K) == (32, 64, 32)
+
+
+def test_redmule_array_eff_counts_whole_blocks():
+    assert kx.redmule_array_eff(128, 128, 128) == 1.0
+    assert kx.redmule_array_eff(128, 96, 128) == 0.75           # 96 columns -> two 64-column blocks
+    assert kx.redmule_array_eff(32, 32, 256) == 0.5
+    assert abs(kx.redmule_array_eff(64, 160, 192) - 160 / 192) < 1e-12
+
+
+def test_f_pad_includes_array_padding():
+    ex = kx.Explorer()
+    k = ex.kernels["gemm_1024x768x768"]
+    assert (k["f_pad_shape"], k["f_pad_array"]) == (1.0, 0.75)
+    assert k["f_pad"] == 0.75
+    assert abs(k["f_pad"] * k["f_occ"] * k["f_rest"] - k["mfu"]) < 1e-12
+    assert all(k["f_pad_array"] == 1.0 for k in ex.kernels.values() if k["kind"] == "attn")

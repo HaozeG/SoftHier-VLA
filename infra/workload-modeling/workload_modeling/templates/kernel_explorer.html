@@ -124,7 +124,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
 
   <div class="card">
     <h2>Where the time goes, per stage <span class="muted" style="font-weight:400">(estimate)</span></h2>
-    <p class="sec">Each matrix kernel's time is split into <b>ideal</b> (true FLOP at the 131.1 TFLOP/s peak), <b>padding</b> (padded FLOP at the same rate),
+    <p class="sec">Each matrix kernel's time is split into <b>ideal</b> (true FLOP at the 131.1 TFLOP/s peak), <b>padding</b> (padded FLOP at the same rate: shape padding to whole tiles, plus for GEMM RedMulE array padding to whole 32 x 64 output blocks),
       <b>idle clusters</b> (padded FLOP on only the clusters the mapping uses), <b>HBM floor</b> (extra time if the operator's unique bytes need longer at
       1,024 GB/s; that bandwidth is an inference, the memspec gives half) and <b>rest beyond roofline</b> (tiling re-reads, NoC, synchronisation, per-call overhead, HBM below peak). Row operators run on the vector cores and count whole. MFU = ideal / total.</p>
     <div class="legend" id="budgetLegend"></div>
@@ -307,7 +307,7 @@ function factorBars(k) {
     <div>HBM lower bound</div><div>${us(k.t_hbm_min_ns)} µs vs ${us(k.time_ns)} µs measured</div>
     <div>MFU</div><div class="muted">not meaningful: few FLOP on the vector cores, divided by the matrix-unit peak</div></div>`;
   const f = (l, v, t) => `<div class="factor"><div>${l}</div><div class="bar" title="${esc(t)}"><span style="width:${Math.min(100, 100 * v)}%"></span></div><div class="mono">${v.toFixed(2)}</div></div>`;
-  return f("f_pad", k.f_pad, "true / padded FLOP") + f("f_occ", k.f_occ, "active clusters / 64") + f("f_rest", k.f_rest, "matrix-unit share of time inside the active clusters")
+  return f(`f_pad <span class="muted">(${k.f_pad_shape.toFixed(2)} shape × ${k.f_pad_array.toFixed(2)} array)</span>`, k.f_pad, "true / padded FLOP = shape padding (whole tiles) × RedMulE array padding (whole 32 x 64 output blocks, GEMM only)") + f("f_occ", k.f_occ, "active clusters / 64") + f("f_rest", k.f_rest, "matrix-unit share of time inside the active clusters")
     + `<div class="factor"><div><b>MFU</b></div><div class="bar"><span style="width:${100 * k.mfu}%;background:var(--s2)"></span></div><div class="mono">${pct(k.mfu)} %</div></div>
     <div class="kv" style="margin-top:8px">
       <div>ideal (FLOP at peak)</div><div>${us(k.t_ideal_ns)} µs</div>
@@ -467,7 +467,7 @@ function renderDetail(keepScroll) {
     side.innerHTML = `<div class="mono" style="margin-bottom:6px">${esc(cand.cand)}${cand.cand === k.selected.cand ? " ★" : ""}</div>` +
       (k.kind === "gemm" ? `${s.groups} group(s) of ${s.sx} x ${s.sy} = <b>${s.active}</b> of 64 clusters. ${s.strategy === "splitN" ? "Each group owns a block of N." : s.strategy === "splitK" ? "Each group owns a block of K; FlooNoC reduction adds the partial sums." : "One group does the whole product."}
         <br>Tile ${s.mt} x ${s.nt} x ${s.kt}; padded ${s.Mp} x ${s.Np} x ${s.Kp} (work ${cand.work_ratio}x).
-        <br>Per cluster: M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter} = ${s.redmule_calls} RedMulE calls; at peak ${us(s.redmule_floor_ns)} µs vs ${cand.time_ns ? us(cand.time_ns) : "–"} µs measured (${cand.time_ns ? pct(s.redmule_floor_ns / cand.time_ns) : "–"} %).`
+        <br>Per cluster: M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter} = ${s.redmule_calls} RedMulE calls; at peak ${us(s.redmule_floor_ns)} µs, with RedMulE array padding (32 x 64 blocks, ${pct(s.f_array)} % used) ${us(s.redmule_array_ns)} µs, vs ${cand.time_ns ? us(cand.time_ns) : "–"} µs measured (${cand.time_ns ? pct(s.redmule_floor_ns / cand.time_ns) : "–"} %).`
       : `${s.groups} groups of ${s.sx} x ${s.sy}; ${s.active_groups} busy (${k.hkv} KV heads, ${s.heads_per_group} per group) = <b>${s.active}</b> clusters. ${s.mode} mode.
         <br>Block ${s.Br} x ${s.Bc}, per cluster ${s.Br_s} x ${s.Bc_s}; Tr ${s.Tr} x Tc ${s.Tc} blocks (q padded to ${s.q_pad}, kv to ${s.kv_pad}; work ${cand.work_ratio}x).`) +
       `<br><br><span class="muted">Placement from <code>flex_group_barrier.h:43</code>: cluster id = x + 8y, groups tile the mesh row-major, group id &lt; groups works. y = 0 drawn at the bottom; HBM channels on the west and south edges (arch_h1.py). ${mode === "map" ? "" : "Numbers: busy % in the kernel window (shade steps of 20 %); outlined cells are the mapping's active clusters."}</span>` +
