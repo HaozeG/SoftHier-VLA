@@ -30,6 +30,18 @@ def parse(out):
             max((int(u) for _, u in chk), default=None))
 
 
+def pipelined_cfg(name, d):
+    """configs/h1/<name>.py with pipeline = 1 (the ELT_PIPELINE schedule; the kernel builds the stage-1 schedule
+    without it). Kernel commits before 2026-11-24's ELT_PIPELINE switch (e7829dc, 46589cd) pipelined always."""
+    src = (HERE / f"configs/h1/{name}.py").read_text()
+    anchor = "        self.dtype"
+    assert anchor in src, name
+    d.mkdir(parents=True, exist_ok=True)
+    out = d / f"{name}.py"
+    out.write_text(src.replace(anchor, "        self.pipeline                = 1\n" + anchor, 1))
+    return out
+
+
 old = {(r["name"], r["kernel_commit"]): r for r in csv.DictReader(CSV.open())} if CSV.exists() else {}
 for name in names:
     if sys.argv[1:] and name not in sys.argv[1:]:
@@ -38,7 +50,8 @@ for name in names:
     t, ncl, bad, mu = parse(out)
     if t is None:                                   # not run yet with this kernel commit
         print(f"[{name}] ...", flush=True)
-        subprocess.run(["bash", str(HERE / "run_kernel.sh"), "elt", str(HERE / f"configs/h1/{name}.py"), str(out)],
+        cfg = pipelined_cfg(name, OUT / commit / "cfg")
+        subprocess.run(["bash", str(HERE / "run_kernel.sh"), "elt", str(cfg), str(out)],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         t, ncl, bad, mu = parse(out)
     ok = t is not None and ncl > 0 and bad == 0

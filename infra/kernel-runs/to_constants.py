@@ -59,6 +59,9 @@ def main():
     final = {r["name"]: r for r in rd("final_h1.csv")}
     gsweep, asweep = rd("gemm_sweep_h1.csv"), rd("attn_sweep_h1.csv")
     ssweep = rd("gemm_smallm_h1.csv") if (HERE / "results/gemm_smallm_h1.csv").exists() else []
+    # transposed GEMM runs (gemm_transpose.py): candidates of the operator's shape, setting "T:<candidate>"
+    tsweep = [dict(r, shape=r["orig_shape"], run_shape=r["shape"], cand="T:" + r["cand"])
+              for r in (rd("gemm_transpose_h1.csv") if (HERE / "results/gemm_transpose_h1.csv").exists() else [])]
     build = next(iter(final.values()))["build"]
     out = {}
     for key in sorted(need, key=lambda k: (m.STAGES.index(k.split(".")[1]), k)):
@@ -85,7 +88,7 @@ def main():
             f = final[fname]
             t, run_dir = int(f["time_ns"]), f["dir"]
             if kern == "gemm":
-                ok = [r for r in gsweep + ssweep if r["shape"] == shape and r["status"] == "ok"]
+                ok = [r for r in gsweep + ssweep + tsweep if r["shape"] == shape and r["status"] == "ok"]
                 p = next(r for r in ok if r["cand"] == f["setting"])
                 ts = sorted(int(r["time_ns"]) for r in ok)
                 if "scale_x" in p and p.get("scale_x"):
@@ -94,14 +97,21 @@ def main():
                     group = f"scale {p['scale']}"
                 params = (f"gemm {p['strategy']} tile {p['m_tile']}/{p['n_tile']}/{p['k_tile']} {group} "
                           f"groups {p['groups']} padded {p['m_size']}x{p['n_size']}x{p['k_size']}")
+                if p["cand"].startswith("T:"):
+                    params = f"gemm transposed (Z^T = W^T X^T, run as {p['run_shape']}): " + params[5:]
                 check = ("within 0.02 (absolute) of the replay golden (splitK: NoC reduction order differs)"
                          if p["strategy"] == "splitK" else "bit-exact against the replay golden")
                 note = (f"fastest of {len(ok)} checked settings in the sweeps ({ts[0]:,} to {ts[-1]:,} ns, mixed builds; "
                         f"re-run on the recorded build: {t:,} ns); work {p['work_ratio']}x nominal; {check}")
+                if p["cand"].startswith("T:"):
+                    note += ("; transposed: W^T is laid out offline, X^T and Z^T are activation layouts the "
+                             "neighbouring operators must produce and accept (that cost is not in this time)")
                 tr_prefix = f"{shape}_{f['setting']}"
             else:
                 params = f"{f['kernel']} {f['setting']}"
-                note = "one run, exact shape; output check passed" + (
+                note = ("pipelined row schedule (ELT_PIPELINE: store row j-1 and load row j+1 while Spatz computes "
+                        "row j); " if f["setting"].endswith("pipeline=1") else "")
+                note += "one run, exact shape; output check passed" + (
                     " (32 ULP against float64 x / rms(x); the kernel has no weight and no eps)" if kern == "rmsnorm"
                     else " (bit-exact against the replay golden)")
                 tr_prefix = name
@@ -109,11 +119,18 @@ def main():
         note += f"; {tr}" if tr else "; no trace recorded (stage1-spec §4.3 item 9)"
         note += f"; {wl}: {ops}"
         b = final[fname]["build"] if kern not in ("flatattention",) else build
-        krepo = f"{KREPO_COMMIT2})" if b == BUILD2 else f"{KREPO_COMMIT} + build {b[:8]})"
+        if b == BUILD2:
+            krepo = f"{KREPO_COMMIT2})"
+        elif len(b) == 7:                         # re-run on a kernel commit (final_runs.py: kernel_repo_commit.txt)
+            krepo = f"HaozeG/gvsoc@{b} (submodule third_party/softhier-kernels)"
+        else:                                     # the frozen stage-1 build (hash of its worktree diff)
+            krepo = f"{KREPO_COMMIT} + build {b[:8]})"
         src = f"{krepo}; {stamp(run_dir)}; arch_h1.py; {params}"
         out[key] = (t, src, note)
     lines = [BEGIN,
-             "# Stage-1 kernel times on H1 (docs/designs/stage1-spec.md §4), ns per call, one operator instance per run.",
+             "# Kernel times on H1, ns per call, one operator instance per run: the W1 preset, the fastest checked run",
+             "# per kernel over every result set (stage-1 sweeps, docs/designs/stage1-spec.md §4, and later runs: transposed",
+             "# GEMM, pipelined Eltwise). The stage-1 picks: results/final_h1_stage1.csv.",
              "# Run folders: ~/.cache/softhier-vla/stage1-h1/ (final/, attn/); driver scripts: infra/kernel-runs/.",
              "h1_kernels:"]
     stage = None

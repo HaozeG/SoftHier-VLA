@@ -4,8 +4,9 @@
 
 For every operator of W1 and W1-b it links: operator -> kernel shape -> selected setting -> every swept candidate
 -> Perfetto trace, and checks the join:
-  1. the selected setting is the fastest checked run over all sweeps of that shape, and its time is the one in
-     constants.yaml (h1_kernels);
+  1. the selected setting (the one constants.yaml h1_kernels was made from, results/final_h1.csv) is the fastest
+     checked run over every result set of that shape (stage-1 sweeps, transposed GEMM, pipelined Eltwise), and its
+     time is the one in constants.yaml;
   2. the spatial mapping computed here from the kernel source (SummaGEMM.h / FlatAttentionUtil.h group placement)
      gives the same set of busy clusters as the trace of that setting, where a trace exists;
   3. the per-operator sum reproduces the composed call time of the operator-graph page.
@@ -218,9 +219,13 @@ class Explorer:
         self.sq = _rows(RES / "gemm_sweep_h1.csv")
         self.sm = _rows(RES / "gemm_smallm_h1.csv")
         self.at = _rows(RES / "attn_sweep_h1.csv")
-        # options measured after stage 1, not in constants.yaml: transposed GEMM, pipelined Eltwise
+        # result sets measured after stage 1: transposed GEMM, pipelined Eltwise (candidates like the sweeps)
         self.tr = _rows(RES / "gemm_transpose_h1.csv") if (RES / "gemm_transpose_h1.csv").exists() else []
         self.elt = _rows(RES / "eltwise_pipeline_h1.csv") if (RES / "eltwise_pipeline_h1.csv").exists() else []
+        self.rk = _rows(RES / "row_kernels_h1.csv")
+        # the stage-1 picks, frozen (reference only: constants.yaml now holds the W1 preset's fastest runs)
+        f1 = RES / "final_h1_stage1.csv"
+        self.final_s1 = {r["name"]: r for r in _rows(f1)} if f1.exists() else dict(self.final)
         self.traces = json.loads((RES / "trace_summary_h1.json").read_text())
         self.kernels: dict[str, dict] = {}
         self.checks: list[dict] = []
@@ -327,7 +332,7 @@ class Explorer:
             for t, n in space_counts(gemm_square_space(self.G, N, M, K), True).items():
                 space[t] = space.get(t, 0) + n
         fin = self.final[k["name"]]
-        ok = [c for c in cands if c["status"] == "ok" and not c["transposed"]]
+        ok = [c for c in cands if c["status"] == "ok"]
         best = min(ok, key=lambda c: c["time_ns"])
         sel = next(c for c in cands if c["cand"] == fin["setting"])
         sel = dict(sel, time_final_ns=int(fin["time_ns"]))
@@ -340,21 +345,15 @@ class Explorer:
                  techniques=self._tech_table(GEMM_TECHNIQUES, space, cands, sel, (M, N, K) in self.S.SHAPES),
                  not_swept=[dict(name=a, why=b) for a, b in GEMM_NOT_SWEPT])
         self._traces_for(k, shp, cands, sel)
-        self._faster(k, cands)
+        self._stage1(k)
 
-    def _faster(self, k: dict, cands: list[dict]) -> None:
-        """Fastest checked transposed run, kept as k['option'] when it beats the stage-1 pick (estimate input for
-        the page total; the run itself is measured). X^T / Z^T layout cost in the neighbours is not counted."""
-        sel = k["selected"]
-        ok = [c for c in cands if c["transposed"] and c["status"] == "ok"]
-        b = min(ok, key=lambda c: c["time_ns"]) if ok else None
-        k["option"] = None
-        if b and b["time_ns"] < sel["time_ns"]:
-            k["option"] = dict(kind="transposed", label=f"transposed {b['run_shape']}", cand=b["cand"],
-                               time_ns=b["time_ns"], speedup=sel["time_ns"] / b["time_ns"],
-                               f_array=b["setting"]["f_array"], f_array_sel=sel["setting"]["f_array"],
-                               runs=sum(c["transposed"] for c in cands), ok=len(ok),
-                               note="transposed: X^T / Z^T layout cost in the neighbouring operators not counted")
+    def _stage1(self, k: dict) -> None:
+        """The stage-1 pick of this kernel (final_h1_stage1.csv), when the selected run differs from it."""
+        f1 = self.final_s1.get(k["name"])
+        k["stage1"] = None
+        if f1 and (f1["setting"] != self.final[k["name"]]["setting"] or f1["build"] != self.final[k["name"]]["build"]):
+            k["stage1"] = dict(setting=f1["setting"], time_ns=int(f1["time_ns"]),
+                               speedup=int(f1["time_ns"]) / k["time_ns"])
 
     def _attn(self, k: dict) -> None:
         h, sq, skv, d = k["shape"]
@@ -375,7 +374,7 @@ class Explorer:
                     f"fastest checked of {len(ok)} = {best['cand']} ({best['time_ns']:,} ns); "
                     f"constants {int(k['time_ns']):,} ns")
         sel = dict(best, time_final_ns=best["time_ns"])
-        k["option"] = None
+        k["stage1"] = None
         k.update(candidates=cands, selected=sel, space=space, hq=hq, hkv=hkv,
                  techniques=self._tech_table(ATTN_TECHNIQUES, space, cands, sel, True), not_swept=[])
         self._traces_for(k, name, cands, sel)
@@ -385,28 +384,34 @@ class Explorer:
         self._check("constants", k["name"], int(fin["time_ns"]) == int(k["time_ns"]),
                     f"final_h1 {int(fin['time_ns']):,} ns, constants {int(k['time_ns']):,} ns")
         tr = self._trace(k["name"])
+        pipelined = fin["setting"].endswith(" pipeline=1")
         k.update(candidates=[], selected=dict(cand=fin["setting"], time_ns=int(fin["time_ns"]),
                                               run_dir=fin["dir"], setting=None),
-                 space={}, techniques=[], not_swept=[], config=fin["setting"])
+                 space={}, techniques=[], not_swept=[], config=fin["setting"], pipelined=pipelined)
+        # runs of this kernel: the stage-1 schedule (row_kernels.py) and, for Eltwise, the pipelined schedule
+        # (eltwise_pipeline.py; runs whose config sets pipeline); the pick is the fastest checked one
+        runs = [(r["config"], int(r["time_ns"])) for r in self.rk if r["name"] == k["name"] and r["status"] == "ok"]
+        for r in self.elt:
+            cfg = Path(r["run_dir"]) / "kernel_cfg.py"
+            if r["name"] == k["name"] and r["status"] == "ok" and cfg.exists() and "self.pipeline" in cfg.read_text():
+                runs.append((runs[0][0] + " pipeline=1" if runs else "pipeline=1", int(r["time_ns"])))
+        if runs:
+            b = min(runs, key=lambda x: x[1])
+            self._check("pick", k["name"], b[0] == fin["setting"],
+                        f"fastest checked of {len(runs)} runs = {b[0]} ({b[1]:,} ns); final_h1 = {fin['setting']}")
+        k["row_runs"] = [dict(setting=a, time_ns=t) for a, t in runs]
+        self._stage1(k)
         rows = k["shape"][0]
         k["trace_status"] = "selected" if tr and tr.get("busy_frac") else "none"
         k["trace"] = tr
         k["trace_note"] = ("trace of this run" if k["trace_status"] == "selected" else "no trace")
+        if pipelined and tr:                          # the traces are of the stage-1 runs
+            k["trace_status"], k["trace_note"] = "other", "trace of the stage-1 schedule; the pipelined run is not traced"
         k["row_note"] = ("no mapping knob: the kernel spreads the rows over the clusters itself; the busy clusters "
                          "shown are read from the trace")
         if tr and tr.get("busy_frac"):
             k["active_trace"] = len(tr["active_clusters"])
             k["rows_per_cluster"] = -(-rows // NCL)
-        # pipelined Eltwise (eltwise_pipeline.py): the newest kernel commit with a checked run of this kernel
-        k["option"] = None
-        er = [r for r in self.elt if r["name"] == k["name"] and r["status"] == "ok"]
-        if er and int(er[-1]["time_ns"]) < int(fin["time_ns"]):
-            r = er[-1]
-            t = int(r["time_ns"])
-            k["option"] = dict(kind="pipelined", label="pipelined rows", cand=f"Eltwise @ {r['kernel_commit']}",
-                               time_ns=t, speedup=int(fin["time_ns"]) / t, runs=1, ok=1,
-                               note="store row j-1 and load row j+1 while Spatz computes row j; output identical")
-
     def _tech_table(self, techs, space, cands, sel, enumerated: bool) -> list[dict]:
         out = []
         for t, desc, driver in techs:
@@ -509,24 +514,17 @@ class Explorer:
             out.append(b)
         return out
 
-    # ----------------------------------------------------------------- options not in constants (estimate)
-    def options_total(self, page: dict) -> dict:
-        """Call time if every faster option were taken (estimate: kernel times add up as on the operator-graph
-        page; the transposed GEMMs' layout cost in the neighbouring operators is not counted)."""
-        base = opt = 0.0
-        by: dict[str, float] = {}
+    # ----------------------------------------------------------------- stage-1 reference (estimate)
+    def stage1_total(self, page: dict) -> float:
+        """Call time in ms with the stage-1 picks instead of the selected kernels (kernel times add up as on the
+        operator-graph page)."""
+        t = 0.0
         for o in page["ops"]:
             if o["kernel"] is None or o["ns"] is None:
                 continue
-            k = self.kernels[o["kernel"]]
-            t = o["count"] * o["ns"]
-            base += t
-            op = k.get("option")
-            if op and op["time_ns"] < o["ns"]:
-                by[op["kind"]] = by.get(op["kind"], 0.0) + o["count"] * (o["ns"] - op["time_ns"])
-                t = o["count"] * op["time_ns"]
-            opt += t
-        return dict(base_ms=base / 1e6, opt_ms=opt / 1e6, saved_ms={x: v / 1e6 for x, v in by.items()})
+            s1 = self.kernels[o["kernel"]].get("stage1")
+            t += o["count"] * (s1["time_ns"] if s1 else o["ns"])
+        return t / 1e6
 
     # ----------------------------------------------------------------- page data for the HTML
     def data(self) -> dict:
@@ -548,7 +546,7 @@ class Explorer:
             arch=dict(peak=self.peak, peak_cluster=self.peak_cl, bw=self.bw, mesh=[MESH_X, MESH_Y], rm_blk=list(self.rm_blk)),
             pages=[dict(name=p["name"], desc=p["desc"], ops=p["ops"], budget=self.budget(p),
                         total_ms=p["sums"]["total_ms"], mfu=p["sums"]["total"]["mfu"],
-                        options=self.options_total(p)) for p in self.pages],
+                        stage1_ms=self.stage1_total(p)) for p in self.pages],
             kernels=kernels, checks=self.checks)
 
 
@@ -581,8 +579,9 @@ def render_md(ex: Explorer) -> str:
         L.append(f"| {c['kind']} | `{c['what']}` | {'pass' if c['ok'] else '**FAIL**'} | {c['detail']} |")
     n_fail = sum(not c["ok"] for c in ex.checks)
     L += ["", f"{len(ex.checks) - n_fail} of {len(ex.checks)} checks pass.", "",
-          "* **pick**: the selected setting is the fastest run with a passing output check over every sweep of the "
-          "shape (for M = 50 GEMMs: `gemm_sweep_h1.csv` and `gemm_smallm_h1.csv`).",
+          "* **pick**: the selected setting (the one constants.yaml was made from) is the fastest run with a passing "
+          "output check over every result set of the shape (`gemm_sweep_h1.csv`, `gemm_smallm_h1.csv`, "
+          "`gemm_transpose_h1.csv`; row kernels: `row_kernels_h1.csv`, `eltwise_pipeline_h1.csv`).",
           "* **constants**: the re-run time in `final_h1.csv` is the time in `constants.yaml` (`h1_kernels`).",
           "* **placement**: for every traced setting, the clusters the kernel's group placement makes active "
           "(`placement()`, from `flex_group_barrier.h:43` and `SummaGEMM.h:131-138`) are exactly the clusters with "
@@ -705,36 +704,34 @@ def render_md(ex: Explorer) -> str:
 
 
 def render_options_md(ex: Explorer) -> list[str]:
-    """Runs faster than the stage-1 pick that constants.yaml does not use yet."""
-    ks = [k for k in ex.kernels.values() if k.get("option")]
+    """Kernels whose constants.yaml entry is no longer the stage-1 pick."""
+    ks = [k for k in ex.kernels.values() if k.get("stage1")]
     n_tr = sum(c.get("transposed", False) for k in ex.kernels.values() for c in k["candidates"])
-    L = ["## Faster runs not in constants.yaml", "",
-         "Measured after stage 1. The stage-1 picks (`final_h1.csv`, `constants.yaml`) stay the selected settings "
-         "above; these runs are candidates beside them.", "",
-         f"* **transposed** GEMM runs ({n_tr} so far; `infra/kernel-runs/gemm_transpose.py`, "
-         "`results/gemm_transpose_h1.csv`) are listed among each shape's candidates as `T:<setting>`: "
-         "Z^T = W^T X^T, run as the GEMM N x M x K with gemm_sweep's candidates and output check. W^T is free "
-         "(weights are laid out offline); X^T and Z^T are activation layouts the neighbouring operators would have "
-         "to produce and accept, a cost not counted here. They are left out of the pick check.",
-         "* **pipelined** Eltwise (`infra/kernel-runs/eltwise_pipeline.py`, `results/eltwise_pipeline_h1.csv`): "
-         "the kernel stores row j-1 and loads row j+1 while Spatz computes row j (three row buffers); output "
-         "identical to stage 1 (bad 0, max_ulp 0).", "",
-         "| kernel | stage-1 pick | µs | faster run | µs | speedup | block fill (pick -> run) |",
-         "| --- | --- | ---: | --- | ---: | ---: | --- |"]
+    L = ["## Changes since stage 1", "",
+         "constants.yaml (h1_kernels) holds the W1 preset: per kernel the fastest checked run over every result set. "
+         "Besides the stage-1 sweeps these are:", "",
+         f"* **transposed GEMM** ({n_tr} runs; `infra/kernel-runs/gemm_transpose.py`, `results/gemm_transpose_h1.csv`), "
+         "listed among each shape's candidates as `T:<setting>`: Z^T = W^T X^T, run as the GEMM N x M x K with "
+         "gemm_sweep's candidates and output check. W^T is free (weights are laid out offline); X^T and Z^T are "
+         "activation layouts the neighbouring operators would have to produce and accept, a cost not counted here.",
+         "* **pipelined Eltwise** (`infra/kernel-runs/eltwise_pipeline.py`, `results/eltwise_pipeline_h1.csv`; "
+         "config `pipeline = 1`): the kernel stores row j-1 and loads row j+1 while Spatz computes row j (three row "
+         "buffers); output identical (bad 0, max_ulp 0). Part of the gain comes from the code generated, not the "
+         "overlap (the stage-1 loop compiled with the new struct alone was faster too); not separated.", "",
+         "| kernel | stage-1 pick | µs | selected (constants) | µs | speedup |",
+         "| --- | --- | ---: | --- | ---: | ---: |"]
     for k in sorted(ks, key=lambda k: (k["kind"], k["shape"])):
-        o = k["option"]
+        s1 = k["stage1"]
         sel = k["selected"]["cand"] if k["kind"] != "row" else k["config"]
-        fill = f"{o['f_array_sel']:.2f} -> {o['f_array']:.2f}" if o["kind"] == "transposed" else "-"
-        L.append(f"| `{k['name']}` | `{sel}` | {_f(k['time_ns'] / 1e3, 2)} | {o['label']}: `{o['cand']}` | "
-                 f"{_f(o['time_ns'] / 1e3, 2)} | {o['speedup']:.2f} | {fill} |")
+        L.append(f"| `{k['name']}` | `{s1['setting']}` | {_f(s1['time_ns'] / 1e3, 2)} | `{sel}` | "
+                 f"{_f(k['time_ns'] / 1e3, 2)} | {s1['speedup']:.2f} |")
     if not ks:
-        L.append("| none | | | | | | |")
-    L += ["", "Call time if every faster run were taken (estimate: kernel times add up as on the operator-graph "
-          "page; transposed layout cost not counted):", ""]
+        L.append("| none | | | | | |")
+    L += ["", "Call time with the stage-1 picks instead (estimate: kernel times add up as on the operator-graph page; "
+          "transposed layout cost not counted):", ""]
     for p in ex.pages:
-        t = ex.options_total(p)
-        saved = ", ".join(f"{x} -{v:.3f} ms" for x, v in sorted(t["saved_ms"].items())) or "none"
-        L.append(f"* {p['name']}: {t['base_ms']:.3f} ms -> {t['opt_ms']:.3f} ms ({saved})")
+        L.append(f"* {p['name']}: {ex.stage1_total(p):.3f} ms with the stage-1 picks, {p['sums']['total_ms']} ms "
+                 "with constants.yaml")
     L.append("")
     return L
 

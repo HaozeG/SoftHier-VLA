@@ -206,7 +206,8 @@ function renderTiles() {
   tile(`${fmt(sum("hbm") / 1e6, 2)} ms`, "HBM floor (unique bytes at 1,024 GB/s)");
   tile(`${fmt(sum("rest") / 1e6, 2)} ms`, "rest beyond roofline (largest loss)");
   tile(`${fmt(sum("row") / 1e6, 2)} ms`, "row operators on vector cores");
-  const o = p.options; if (o && o.opt_ms < o.base_ms - 1e-9) tile(`${fmt(o.opt_ms, 2)} ms`, `with every faster option not in constants (estimate; ${Object.entries(o.saved_ms).map(([x, v]) => `${x} −${fmt(v, 2)} ms`).join(", ")}; transposed layout cost not counted)`);
+  const ctot = parseFloat(String(p.total_ms).replace(/,/g, ""));
+  if (p.stage1_ms > ctot + 1e-6) tile(`${fmt(p.stage1_ms, 2)} ms`, `with the stage-1 picks (estimate; constants now ${fmt(ctot, 2)} ms, ×${(p.stage1_ms / ctot).toFixed(2)})`);
 }
 
 function renderChecks() {
@@ -258,7 +259,7 @@ function kernelRows() {
   const key = { name: r => r.k.name, calls: r => -r.calls, time: r => -r.k.time_ns, total: r => -r.total, share: r => -r.share,
     mfu: r => r.k.kind === "row" ? NA : -r.k.mfu, fac: r => r.k.kind === "row" ? NA : r.k.f_rest,
     bound: r => r.k.kind === "row" ? "z" : r.k.bound, cand: r => r.k.kind === "row" ? "~" : r.k.selected.cand,
-    trace: r => TR[r.k.trace_status], opt: r => r.k.option ? -r.k.option.speedup : NA }[state.sort];
+    trace: r => TR[r.k.trace_status], opt: r => r.k.stage1 ? -r.k.stage1.speedup : NA }[state.sort];
   const dir = state.sortRev ? -1 : 1;
   rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * dir || (b.total - a.total); });
   return rows;
@@ -267,7 +268,7 @@ const TRACE_BADGE = { selected: ["ok", "selected"], other: ["warn", "other setti
 function renderKernels() {
   const t = $("#kernelTable"); const rows = kernelRows();
   const th = (k, l, n, title) => `<th class="sort ${n ? "n" : ""}" data-s="${k}"${title ? ` title="${title}"` : ""}>${l}${state.sort === k ? (state.sortRev ? " ▴" : " ▾") : ""}</th>`;
-  t.innerHTML = `<tr>${th("name", "kernel")}<th>operators</th>${th("calls", "calls", 1)}${th("time", "µs per call", 1)}${th("total", "ms per policy call", 1)}${th("share", "share", 1)}${th("mfu", "MFU, %", 1)}${th("fac", "f_pad · f_occ · f_rest", 0, "sorts by f_rest, lowest first")}${th("bound", "bound")}${th("cand", "selected setting")}${th("opt", "faster run, µs", 0, "a checked run faster than the selected setting, measured after stage 1 and not in constants (transposed GEMM, pipelined Eltwise); largest speedup first")}${th("trace", "trace", 0, "selected setting traced first")}</tr>`;
+  t.innerHTML = `<tr>${th("name", "kernel")}<th>operators</th>${th("calls", "calls", 1)}${th("time", "µs per call", 1)}${th("total", "ms per policy call", 1)}${th("share", "share", 1)}${th("mfu", "MFU, %", 1)}${th("fac", "f_pad · f_occ · f_rest", 0, "sorts by f_rest, lowest first")}${th("bound", "bound")}${th("cand", "selected setting")}${th("opt", "vs stage 1", 0, "speedup of the selected kernel (constants) over the stage-1 pick; largest first")}${th("trace", "trace", 0, "selected setting traced first")}</tr>`;
   t.querySelectorAll("th.sort").forEach(h => h.onclick = () => { state.sortRev = state.sort === h.dataset.s ? !state.sortRev : false; state.sort = h.dataset.s; renderKernels(); });
   for (const r of rows) {
     const k = r.k; const tr = el("tr", { class: "click" + (state.kernel === k.name ? " on" : "") });
@@ -303,10 +304,11 @@ async function openPerfetto(t, btn) {
 }
 
 function optCell(k) {
-  const o = k.option; if (!o) return "";
+  const o = k.stage1; if (!o) return "";
   const cls = o.speedup > 1.005 ? "ok" : o.speedup < 0.995 ? "fail" : "";
-  return `<span title="${esc(o.label + ": " + o.cand + " · " + o.note)}">${esc(o.kind)} ${us(o.time_ns)} <span class="badge ${cls}">×${o.speedup.toFixed(2)}</span></span>`;
+  return `<span title="${esc("stage 1: " + o.setting + ", " + us(o.time_ns) + " µs")}"><span class="badge ${cls}">×${o.speedup.toFixed(2)}</span></span>`;
 }
+
 function factorBars(k) {
   if (k.kind === "row") return `<div class="kv">
     <div>effective bandwidth</div><div>${fmt(k.hbm_eff_bw / 1e9, 0)} GB/s of ${fmt(DATA.arch.bw / 1e9, 0)} GB/s HBM (operator's unique bytes / time)</div>
@@ -377,7 +379,7 @@ function candTip(k, c) {
   if (k.kind === "gemm") geo = `${s.strategy}, group ${s.sx}x${s.sy} x ${s.groups} groups = ${s.active} clusters<br>tile ${s.mt}x${s.nt}x${s.kt}, padded ${s.Mp}x${s.Np}x${s.Kp} (work ${c.work_ratio}x)<br>RedMulE calls per cluster ${s.redmule_calls} (M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter})`;
   else geo = `${s.mode}, group ${s.sx}x${s.sy}, ${s.active_groups} of ${s.groups} groups busy = ${s.active} clusters<br>block ${s.Br}x${s.Bc} (per cluster ${s.Br_s}x${s.Bc_s}), Tr ${s.Tr} · Tc ${s.Tc}, work ${c.work_ratio}x`;
   return `<b class="mono">${esc(c.cand)}</b>${c.cand === k.selected.cand ? " ★ selected" : ""}<br>${geo}<br>time ${c.time_ns ? us(c.time_ns) + " µs" : "–"} · status ${c.status}` +
-    (c.transposed ? `<br><b>transposed</b>: Z<sup>T</sup> = W<sup>T</sup> X<sup>T</sup>, run as ${esc(c.run_shape)}; not in constants; X<sup>T</sup> / Z<sup>T</sup> layout cost in the neighbouring operators not counted` : "") +
+    (c.transposed ? `<br><b>transposed</b>: Z<sup>T</sup> = W<sup>T</sup> X<sup>T</sup>, run as ${esc(c.run_shape)}; X<sup>T</sup> / Z<sup>T</sup> layout cost in the neighbouring operators not counted` : "") +
     (c.est_ns ? `<br><span class="muted">driver's rough model ${us(c.est_ns)} µs (ranking only)</span>` : "") + (c.trace ? `<br>trace available` : "") + `<br><span class="muted">${esc(c.source)}</span>`;
 }
 
@@ -436,7 +438,8 @@ function renderDetail(keepScroll) {
         <h3>Selected and where MFU is lost</h3>
         <div class="kv" style="margin-bottom:8px">
           <div>time per call</div><div><b>${us(k.time_ns)} µs</b> <span class="muted">(measured, constants <code>${esc(k.constants_key)}</code>)</span></div>
-          ${k.kind === "row" ? "" : `<div>selected</div><div class="mono">${esc(k.selected.cand)} <span class="muted">(${esc(k.selected.technique)})</span></div>`}
+          ${k.kind === "row" ? (k.pipelined ? `<div>schedule</div><div>pipelined rows (<code>pipeline = 1</code>)</div>` : "") : `<div>selected</div><div class="mono">${esc(k.selected.cand)} <span class="muted">(${esc(k.selected.technique)})</span>${k.selected.transposed ? ` <span class="badge">transposed, runs as ${esc(k.selected.run_shape)}; layout cost of X<sup>T</sup> / Z<sup>T</sup> not counted</span>` : ""}</div>`}
+          ${k.stage1 ? `<div>stage 1</div><div class="mono">${esc(k.stage1.setting)} · ${us(k.stage1.time_ns)} µs <span class="muted">(×${k.stage1.speedup.toFixed(2)} now)</span></div>` : ""}
         </div>
         ${factorBars(k)}
         <details style="margin-top:8px"><summary>Provenance (constants.yaml)</summary><p class="sec mono" style="white-space:pre-wrap">${esc(k.constants_source)}\n\n${esc(k.constants_note)}</p></details>
@@ -454,7 +457,7 @@ function renderDetail(keepScroll) {
     </div>
     ${k.candidates.length ? `<h3>Swept candidates (${k.candidates.length}), fastest first</h3>
       <div class="legend">${[...new Set(k.candidates.map(c => c.technique))].map(t => `<span><i style="background:var(${TECH_COLOR[t]})"></i>${esc(t)}</span>`).join("")}
-        <span>○ hollow = output check failed</span><span>★ selected</span>${k.candidates.some(c => c.transposed) ? `<span>T: transposed run (N x M x K), not in constants</span>` : ""}<span class="muted">click a row to draw its mapping</span></div>
+        <span>○ hollow = output check failed</span><span>★ selected</span>${k.candidates.some(c => c.transposed) ? `<span>T: transposed run (N x M x K)</span>` : ""}<span class="muted">click a row to draw its mapping</span></div>
       <div id="cands"></div>` : ""}
   `;
   if (k.candidates.length) candPlot(k, $("#cands"));

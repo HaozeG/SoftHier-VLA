@@ -14,24 +14,32 @@ Labels: kernel times, sweep rows and trace events are *measured*; the valid spac
 | constants | `gemm_1024x768x768` | pass | final_h1 20,479 ns, constants 20,479 ns |
 | placement | `gemm_1024x768x768 / Nosplit_s8g1_t128x96x128` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_bias_1024x768` | pass | final_h1 8,852 ns, constants 8,852 ns |
+| pick | `eltwise_bias_1024x768` | pass | fastest checked of 1 runs = op=bias m_size=1024 n_size=768 (8,852 ns); final_h1 = op=bias m_size=1024 n_size=768 |
 | constants | `eltwise_add_1024x768` | pass | final_h1 9,697 ns, constants 9,697 ns |
+| pick | `eltwise_add_1024x768` | pass | fastest checked of 1 runs = op=add m_size=1024 n_size=768 (9,697 ns); final_h1 = op=add m_size=1024 n_size=768 |
 | constants | `layernorm_1024x768` | pass | final_h1 10,930 ns, constants 10,930 ns |
+| pick | `layernorm_1024x768` | pass | fastest checked of 1 runs = m_size=1024 n_size=768 (10,930 ns); final_h1 = m_size=1024 n_size=768 |
 | pick | `flatattention_12x1024x1024x64` | pass | fastest checked of 9 = async_s8x4_b1024x1024 (74,252 ns); constants 74,252 ns |
 | placement | `flatattention_12x1024x1024x64 / async_s8x4_b1024x1024` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `gemm_1024x3072x768` | pass | fastest checked of 11 = Nosplit_s8g1_t128x192x192 (56,436 ns); final_h1 = Nosplit_s8g1_t128x192x192 |
 | constants | `gemm_1024x3072x768` | pass | final_h1 56,436 ns, constants 56,436 ns |
 | placement | `gemm_1024x3072x768 / Nosplit_s8g1_t128x192x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_bias_1024x3072` | pass | final_h1 22,326 ns, constants 22,326 ns |
+| pick | `eltwise_bias_1024x3072` | pass | fastest checked of 1 runs = op=bias m_size=1024 n_size=3072 (22,326 ns); final_h1 = op=bias m_size=1024 n_size=3072 |
 | constants | `gelu_1024x3072` | pass | final_h1 23,567 ns, constants 23,567 ns |
+| pick | `gelu_1024x3072` | pass | fastest checked of 1 runs = algo=gelu m_size=1024 n_size=3072 gate_enable=0 bias_enable=0 (23,567 ns); final_h1 = algo=gelu m_size=1024 n_size=3072 gate_enable=0 bias_enable=0 |
 | pick | `gemm_1024x768x3072` | pass | fastest checked of 12 = Nosplit_s8g1_t128x96x256 (59,843 ns); final_h1 = Nosplit_s8g1_t128x96x256 |
 | constants | `gemm_1024x768x3072` | pass | final_h1 59,843 ns, constants 59,843 ns |
 | placement | `gemm_1024x768x3072 / Nosplit_s8g1_t128x96x256` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_pixel_shuffle_3072x768` | pass | final_h1 16,348 ns, constants 16,348 ns |
+| pick | `eltwise_pixel_shuffle_3072x768` | pass | fastest checked of 1 runs = op=pixel_shuffle m_size=192 n_size=12288 (16,348 ns); final_h1 = op=pixel_shuffle m_size=192 n_size=12288 |
 | pick | `gemm_192x960x12288` | pass | fastest checked of 10 = Nosplit_s8g1_t32x128x256 (147,159 ns); final_h1 = Nosplit_s8g1_t32x128x256 |
 | constants | `gemm_192x960x12288` | pass | final_h1 147,159 ns, constants 147,159 ns |
 | placement | `gemm_192x960x12288 / Nosplit_s8g1_t32x128x256` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_scale_192x960` | pass | final_h1 2,285 ns, constants 2,285 ns |
+| pick | `eltwise_scale_192x960` | pass | fastest checked of 1 runs = op=scale m_size=192 n_size=960 (2,285 ns); final_h1 = op=scale m_size=192 n_size=960 |
 | constants | `rmsnorm_241x960` | pass | final_h1 4,697 ns, constants 4,697 ns |
+| pick | `rmsnorm_241x960` | pass | fastest checked of 1 runs = m_size=241 n_size=960 (4,697 ns); final_h1 = m_size=241 n_size=960 |
 | pick | `gemm_241x960x960` | pass | fastest checked of 11 = Nosplit_s8g1_t32x128x192 (14,766 ns); final_h1 = Nosplit_s8g1_t32x128x192 |
 | constants | `gemm_241x960x960` | pass | final_h1 14,766 ns, constants 14,766 ns |
 | placement | `gemm_241x960x960 / Nosplit_s8g1_t32x128x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
@@ -39,14 +47,18 @@ Labels: kernel times, sweep rows and trace events are *measured*; the valid spac
 | constants | `gemm_241x320x960` | pass | final_h1 11,470 ns, constants 11,470 ns |
 | placement | `gemm_241x320x960 / Nosplit_s8g1_t32x64x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_rope_241x960` | pass | final_h1 3,926 ns, constants 3,926 ns |
+| pick | `eltwise_rope_241x960` | pass | fastest checked of 1 runs = op=rope m_size=241 n_size=960 head_dim=64 (3,926 ns); final_h1 = op=rope m_size=241 n_size=960 head_dim=64 |
 | constants | `eltwise_rope_241x320` | pass | final_h1 2,656 ns, constants 2,656 ns |
+| pick | `eltwise_rope_241x320` | pass | fastest checked of 1 runs = op=rope m_size=241 n_size=320 head_dim=64 (2,656 ns); final_h1 = op=rope m_size=241 n_size=320 head_dim=64 |
 | pick | `flatattention_15x241x241x64` | pass | fastest checked of 10 = coll_s2x4_b768x256 (17,129 ns); constants 17,129 ns |
 | placement | `flatattention_15x241x241x64 / coll_s2x4_b768x256` | pass | 40 clusters from the kernel's group placement, 40 with redmule activity in the trace |
 | constants | `eltwise_add_241x960` | pass | final_h1 3,701 ns, constants 3,701 ns |
+| pick | `eltwise_add_241x960` | pass | fastest checked of 1 runs = op=add m_size=241 n_size=960 (3,701 ns); final_h1 = op=add m_size=241 n_size=960 |
 | pick | `gemm_241x2560x960` | pass | fastest checked of 11 = splitN_s4g4_t64x160x192 (27,594 ns); final_h1 = splitN_s4g4_t64x160x192 |
 | constants | `gemm_241x2560x960` | pass | final_h1 27,594 ns, constants 27,594 ns |
 | placement | `gemm_241x2560x960 / splitN_s4g4_t64x160x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `silu_gate_241x2560` | pass | final_h1 8,729 ns, constants 8,729 ns |
+| pick | `silu_gate_241x2560` | pass | fastest checked of 1 runs = algo=silu m_size=241 n_size=2560 gate_enable=1 bias_enable=0 (8,729 ns); final_h1 = algo=silu m_size=241 n_size=2560 gate_enable=1 bias_enable=0 |
 | pick | `gemm_241x960x2560` | pass | fastest checked of 10 = Nosplit_s8g1_t32x128x256 (30,963 ns); final_h1 = Nosplit_s8g1_t32x128x256 |
 | constants | `gemm_241x960x2560` | pass | final_h1 30,963 ns, constants 30,963 ns |
 | placement | `gemm_241x960x2560 / Nosplit_s8g1_t32x128x256` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
@@ -58,16 +70,19 @@ Labels: kernel times, sweep rows and trace events are *measured*; the valid spac
 | placement | `gemm_50x720x32 / splitN_s2g2_t32x192x32` | pass | 8 clusters from the kernel's group placement, 8 with redmule activity in the trace |
 | placement | `gemm_50x720x32 / splitN_x4y2g4_t32x64x32` | pass | 32 clusters from the kernel's group placement, 32 with redmule activity in the trace |
 | constants | `eltwise_bias_50x720` | pass | final_h1 1,461 ns, constants 1,461 ns |
+| pick | `eltwise_bias_50x720` | pass | fastest checked of 1 runs = op=bias m_size=50 n_size=720 (1,461 ns); final_h1 = op=bias m_size=50 n_size=720 |
 | pick | `gemm_50x720x1440` | pass | fastest checked of 19 = splitK_x4y2g8_t32x192x192 (9,160 ns); final_h1 = splitK_x4y2g8_t32x192x192 |
 | constants | `gemm_50x720x1440` | pass | final_h1 9,160 ns, constants 9,160 ns |
 | placement | `gemm_50x720x1440 / splitK_x4y2g8_t32x192x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | placement | `gemm_50x720x1440 / splitN_s2g4_t32x96x160` | pass | 16 clusters from the kernel's group placement, 16 with redmule activity in the trace |
 | constants | `silu_50x720` | pass | final_h1 1,094 ns, constants 1,094 ns |
+| pick | `silu_50x720` | pass | fastest checked of 1 runs = algo=silu m_size=50 n_size=720 gate_enable=0 bias_enable=0 (1,094 ns); final_h1 = algo=silu m_size=50 n_size=720 gate_enable=0 bias_enable=0 |
 | pick | `gemm_50x720x720` | pass | fastest checked of 29 = splitK_x4y2g8_t32x192x96 (6,018 ns); final_h1 = splitK_x4y2g8_t32x192x96 |
 | constants | `gemm_50x720x720` | pass | final_h1 6,018 ns, constants 6,018 ns |
 | placement | `gemm_50x720x720 / splitK_x4y2g8_t32x192x96` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | placement | `gemm_50x720x720 / splitN_s2g2_t32x192x256` | pass | 8 clusters from the kernel's group placement, 8 with redmule activity in the trace |
 | constants | `rmsnorm_50x720` | pass | final_h1 1,607 ns, constants 1,607 ns |
+| pick | `rmsnorm_50x720` | pass | fastest checked of 1 runs = m_size=50 n_size=720 (1,607 ns); final_h1 = m_size=50 n_size=720 |
 | pick | `gemm_50x1600x720` | pass | fastest checked of 17 = splitN_x4y1g16_t64x32x256 (10,898 ns); final_h1 = splitN_x4y1g16_t64x32x256 |
 | constants | `gemm_50x1600x720` | pass | final_h1 10,898 ns, constants 10,898 ns |
 | placement | `gemm_50x1600x720 / splitN_s2g4_t32x224x256` | pass | 16 clusters from the kernel's group placement, 16 with redmule activity in the trace |
@@ -77,7 +92,9 @@ Labels: kernel times, sweep rows and trace events are *measured*; the valid spac
 | placement | `gemm_50x960x720 / splitK_x8y2g4_t32x128x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | placement | `gemm_50x960x720 / splitN_s2g2_t32x256x256` | pass | 8 clusters from the kernel's group placement, 8 with redmule activity in the trace |
 | constants | `eltwise_rope_50x960` | pass | final_h1 1,531 ns, constants 1,531 ns |
+| pick | `eltwise_rope_50x960` | pass | fastest checked of 1 runs = op=rope m_size=50 n_size=960 head_dim=64 (1,531 ns); final_h1 = op=rope m_size=50 n_size=960 head_dim=64 |
 | constants | `eltwise_rope_50x320` | pass | final_h1 1,147 ns, constants 1,147 ns |
+| pick | `eltwise_rope_50x320` | pass | fastest checked of 1 runs = op=rope m_size=50 n_size=320 head_dim=64 (1,147 ns); final_h1 = op=rope m_size=50 n_size=320 head_dim=64 |
 | pick | `flatattention_15x50x291x64` | pass | fastest checked of 10 = coll_s8x1_b192x512 (12,979 ns); constants 12,979 ns |
 | placement | `flatattention_15x50x291x64 / coll_s8x1_b192x512` | pass | 40 clusters from the kernel's group placement, 40 with redmule activity in the trace |
 | pick | `flatattention_15x50x241x64` | pass | fastest checked of 10 = coll_s8x1_b192x256 (12,059 ns); constants 12,059 ns |
@@ -87,11 +104,13 @@ Labels: kernel times, sweep rows and trace events are *measured*; the valid spac
 | placement | `gemm_50x720x960 / splitK_x4y2g8_t32x192x128` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | placement | `gemm_50x720x960 / splitN_s2g4_t32x96x192` | pass | 16 clusters from the kernel's group placement, 16 with redmule activity in the trace |
 | constants | `eltwise_add_50x720` | pass | final_h1 1,220 ns, constants 1,220 ns |
+| pick | `eltwise_add_50x720` | pass | fastest checked of 1 runs = op=add m_size=50 n_size=720 (1,220 ns); final_h1 = op=add m_size=50 n_size=720 |
 | pick | `gemm_50x4096x720` | pass | fastest checked of 18 = splitN_x2y1g32_t64x64x256 (17,081 ns); final_h1 = splitN_x2y1g32_t64x64x256 |
 | constants | `gemm_50x4096x720` | pass | final_h1 17,081 ns, constants 17,081 ns |
 | placement | `gemm_50x4096x720 / splitN_s2g4_t32x256x256` | pass | 16 clusters from the kernel's group placement, 16 with redmule activity in the trace |
 | placement | `gemm_50x4096x720 / splitN_x2y1g32_t64x64x256` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `silu_gate_50x2048` | pass | final_h1 2,455 ns, constants 2,455 ns |
+| pick | `silu_gate_50x2048` | pass | fastest checked of 1 runs = algo=silu m_size=50 n_size=2048 gate_enable=1 bias_enable=0 (2,455 ns); final_h1 = algo=silu m_size=50 n_size=2048 gate_enable=1 bias_enable=0 |
 | pick | `gemm_50x720x2048` | pass | fastest checked of 18 = splitK_x4y1g16_t64x192x128 (11,131 ns); final_h1 = splitK_x4y1g16_t64x192x128 |
 | constants | `gemm_50x720x2048` | pass | final_h1 11,131 ns, constants 11,131 ns |
 | placement | `gemm_50x720x2048 / splitK_x4y1g16_t64x192x128` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
@@ -101,27 +120,34 @@ Labels: kernel times, sweep rows and trace events are *measured*; the valid spac
 | placement | `gemm_50x32x720 / Nosplit_s1g1_t64x32x256` | pass | 1 clusters from the kernel's group placement, 1 with redmule activity in the trace |
 | placement | `gemm_50x32x720 / splitK_x1y2g32_t32x32x32` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_bias_50x32` | pass | final_h1 1,172 ns, constants 1,172 ns |
+| pick | `eltwise_bias_50x32` | pass | fastest checked of 1 runs = op=bias m_size=50 n_size=32 (1,172 ns); final_h1 = op=bias m_size=50 n_size=32 |
 | constants | `eltwise_axpy_50x32` | pass | final_h1 1,109 ns, constants 1,109 ns |
-| pick | `gemm_3072x768x768` | pass | fastest checked of 12 = Nosplit_s8g1_t192x96x192 (51,957 ns); final_h1 = Nosplit_s8g1_t192x96x192 |
+| pick | `eltwise_axpy_50x32` | pass | fastest checked of 1 runs = op=axpy m_size=50 n_size=32 (1,109 ns); final_h1 = op=axpy m_size=50 n_size=32 |
+| pick | `gemm_3072x768x768` | **FAIL** | fastest checked of 25 = T:splitN_s4g4_t192x192x128 (44,820 ns); final_h1 = Nosplit_s8g1_t192x96x192 |
 | constants | `gemm_3072x768x768` | pass | final_h1 51,957 ns, constants 51,957 ns |
 | placement | `gemm_3072x768x768 / Nosplit_s8g1_t192x96x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_bias_3072x768` | pass | final_h1 24,918 ns, constants 24,918 ns |
+| pick | `eltwise_bias_3072x768` | pass | fastest checked of 1 runs = op=bias m_size=3072 n_size=768 (24,918 ns); final_h1 = op=bias m_size=3072 n_size=768 |
 | constants | `eltwise_add_3072x768` | pass | final_h1 34,938 ns, constants 34,938 ns |
+| pick | `eltwise_add_3072x768` | pass | fastest checked of 1 runs = op=add m_size=3072 n_size=768 (34,938 ns); final_h1 = op=add m_size=3072 n_size=768 |
 | constants | `layernorm_3072x768` | pass | final_h1 26,862 ns, constants 26,862 ns |
+| pick | `layernorm_3072x768` | pass | fastest checked of 1 runs = m_size=3072 n_size=768 (26,862 ns); final_h1 = m_size=3072 n_size=768 |
 | pick | `gemm_3072x3072x768` | pass | fastest checked of 11 = Nosplit_s8g1_t192x192x128 (150,763 ns); final_h1 = Nosplit_s8g1_t192x192x128 |
 | constants | `gemm_3072x3072x768` | pass | final_h1 150,763 ns, constants 150,763 ns |
 | placement | `gemm_3072x3072x768 / Nosplit_s8g1_t192x192x128` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_bias_3072x3072` | pass | final_h1 57,975 ns, constants 57,975 ns |
+| pick | `eltwise_bias_3072x3072` | pass | fastest checked of 1 runs = op=bias m_size=3072 n_size=3072 (57,975 ns); final_h1 = op=bias m_size=3072 n_size=3072 |
 | constants | `gelu_3072x3072` | pass | final_h1 66,251 ns, constants 66,251 ns |
-| pick | `gemm_3072x768x3072` | pass | fastest checked of 12 = Nosplit_s8g1_t192x96x192 (167,293 ns); final_h1 = Nosplit_s8g1_t192x96x192 |
+| pick | `gelu_3072x3072` | pass | fastest checked of 1 runs = algo=gelu m_size=3072 n_size=3072 gate_enable=0 bias_enable=0 (66,251 ns); final_h1 = algo=gelu m_size=3072 n_size=3072 gate_enable=0 bias_enable=0 |
+| pick | `gemm_3072x768x3072` | **FAIL** | fastest checked of 19 = T:Nosplit_s8g1_t96x192x192 (134,970 ns); final_h1 = Nosplit_s8g1_t192x96x192 |
 | constants | `gemm_3072x768x3072` | pass | final_h1 167,293 ns, constants 167,293 ns |
 | placement | `gemm_3072x768x3072 / Nosplit_s8g1_t192x96x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | sum | `W1` | pass | sum over operators of count x kernel time = 28.994 ms; operator-graph page 28.99 ms |
 | sum | `W1-b` | pass | sum over operators of count x kernel time = 27.897 ms; operator-graph page 27.90 ms |
 
-108 of 108 checks pass.
+132 of 134 checks pass.
 
-* **pick**: the selected setting is the fastest run with a passing output check over every sweep of the shape (for M = 50 GEMMs: `gemm_sweep_h1.csv` and `gemm_smallm_h1.csv`).
+* **pick**: the selected setting (the one constants.yaml was made from) is the fastest run with a passing output check over every result set of the shape (`gemm_sweep_h1.csv`, `gemm_smallm_h1.csv`, `gemm_transpose_h1.csv`; row kernels: `row_kernels_h1.csv`, `eltwise_pipeline_h1.csv`).
 * **constants**: the re-run time in `final_h1.csv` is the time in `constants.yaml` (`h1_kernels`).
 * **placement**: for every traced setting, the clusters the kernel's group placement makes active (`placement()`, from `flex_group_barrier.h:43` and `SummaGEMM.h:131-138`) are exactly the clusters with RedMulE activity in the kernel window of the trace (`results/trace_summary_h1.json`). Coverage: the traces are of square groups (1x1, 2x2) and attention only. The selected non-square and splitK expert mappings and the scale-8 picks have no trace, so their mesh diagrams rest on the kernel source alone.
 * **sum**: count x kernel time over all operators gives the composed time of the operator-graph page.
@@ -183,7 +209,7 @@ MFU = f_pad x f_occ x f_rest. f_pad = true / padded FLOP = shape padding x RedMu
 | `gemm_1024x768x3072` | W1 vision.mlp_down | `Nosplit_s8g1_t128x96x256` | Nosplit | 64 | 59.84 | 61.6 | 0.75 | 1.00 | 0.82 | compute | 36.86 | 12 (12) | 4,425 | selected |
 | `gemm_1024x3072x768` | W1 vision.mlp_up | `Nosplit_s8g1_t128x192x192` | Nosplit | 64 | 56.44 | 65.3 | 1.00 | 1.00 | 0.65 | compute | 36.86 | 11 (11) | 6,094 | selected |
 | `gemm_3072x768x768` | W1-b vision.k_proj, W1-b vision.o_proj, W1-b vision.patch_embed, W1-b vision.q_proj, W1-b vision.v_proj | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 51.96 | 53.2 | 0.75 | 1.00 | 0.71 | compute | 27.65 | 25 (25) | 10,610 | selected |
-| `gemm_3072x768x3072` | W1-b vision.mlp_down | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 167.29 | 66.1 | 0.75 | 1.00 | 0.88 | compute | 110.59 | 12 (12) | 4,552 | selected |
+| `gemm_3072x768x3072` | W1-b vision.mlp_down | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 167.29 | 66.1 | 0.75 | 1.00 | 0.88 | compute | 110.59 | 19 (19) | 10,626 | selected |
 | `gemm_3072x3072x768` | W1-b vision.mlp_up | `Nosplit_s8g1_t192x192x128` | Nosplit | 64 | 150.76 | 73.4 | 1.00 | 1.00 | 0.73 | compute | 110.59 | 11 (11) | 6,132 | selected |
 
 ### f_pad in words
@@ -259,7 +285,7 @@ Valid settings per technique (the driver's candidate generator: tiles multiples 
 | `gemm_1024x768x3072` | 1,512 / 9 (9) | 2,913 / 3 (3) | - | - | - | Nosplit |
 | `gemm_1024x3072x768` | 1,603 / 8 (8) | 4,491 / 3 (3) | - | - | - | Nosplit |
 | `gemm_3072x768x768` | 3,118 / 18 (18) | 7,492 / 7 (7) | - | - | - | Nosplit |
-| `gemm_3072x768x3072` | 1,561 / 9 (9) | 2,991 / 3 (3) | - | - | - | Nosplit |
+| `gemm_3072x768x3072` | 3,122 / 16 (16) | 7,504 / 3 (3) | - | - | - | Nosplit |
 | `gemm_3072x3072x768` | 1,604 / 8 (8) | 4,528 / 3 (3) | - | - | - | Nosplit |
 
 In the kernel but never swept: splitK on M > 64 shapes (in the kernel (summa_group_splitk); gemm_sweep.py left it out: the reduction changes the summation order, so the bit-exact golden does not apply); non-square groups on M > 64 shapes (SummaGEMM.h:165 steps X along M by summa_group_x, wrong for M_iter > 1); reshape on load / store (resha_x_from, resha_z_to) (in the kernel config, never enabled).
@@ -297,32 +323,18 @@ No mapping knob: the kernel spreads the rows over the clusters itself. Effective
 | `silu_gate_241x2560` | prefix.silu_mul | 8.73 | 424 | 64 | 0.51 | 0.19 |
 | `silu_gate_50x2048` | expert.silu_mul | 2.46 | 250 | 50 | 0.53 | 0.14 |
 
-## Faster runs not in constants.yaml
+## Changes since stage 1
 
-Measured after stage 1. The stage-1 picks (`final_h1.csv`, `constants.yaml`) stay the selected settings above; these runs are candidates beside them.
+constants.yaml (h1_kernels) holds the W1 preset: per kernel the fastest checked run over every result set. Besides the stage-1 sweeps these are:
 
-* **transposed** GEMM runs (13 so far; `infra/kernel-runs/gemm_transpose.py`, `results/gemm_transpose_h1.csv`) are listed among each shape's candidates as `T:<setting>`: Z^T = W^T X^T, run as the GEMM N x M x K with gemm_sweep's candidates and output check. W^T is free (weights are laid out offline); X^T and Z^T are activation layouts the neighbouring operators would have to produce and accept, a cost not counted here. They are left out of the pick check.
-* **pipelined** Eltwise (`infra/kernel-runs/eltwise_pipeline.py`, `results/eltwise_pipeline_h1.csv`): the kernel stores row j-1 and loads row j+1 while Spatz computes row j (three row buffers); output identical to stage 1 (bad 0, max_ulp 0).
+* **transposed GEMM** (20 runs; `infra/kernel-runs/gemm_transpose.py`, `results/gemm_transpose_h1.csv`), listed among each shape's candidates as `T:<setting>`: Z^T = W^T X^T, run as the GEMM N x M x K with gemm_sweep's candidates and output check. W^T is free (weights are laid out offline); X^T and Z^T are activation layouts the neighbouring operators would have to produce and accept, a cost not counted here.
+* **pipelined Eltwise** (`infra/kernel-runs/eltwise_pipeline.py`, `results/eltwise_pipeline_h1.csv`; config `pipeline = 1`): the kernel stores row j-1 and loads row j+1 while Spatz computes row j (three row buffers); output identical (bad 0, max_ulp 0). Part of the gain comes from the code generated, not the overlap (the stage-1 loop compiled with the new struct alone was faster too); not separated.
 
-| kernel | stage-1 pick | µs | faster run | µs | speedup | block fill (pick -> run) |
-| --- | --- | ---: | --- | ---: | ---: | --- |
-| `gemm_3072x768x768` | `Nosplit_s8g1_t192x96x192` | 51.96 | transposed 768x3072x768: `T:splitN_s4g4_t192x192x128` | 44.82 | 1.16 | 0.75 -> 1.00 |
-| `eltwise_bias_50x32` | `op=bias m_size=50 n_size=32` | 1.17 | pipelined rows: `Eltwise @ e7829dc` | 1.15 | 1.02 | - |
-| `eltwise_axpy_50x32` | `op=axpy m_size=50 n_size=32` | 1.11 | pipelined rows: `Eltwise @ e7829dc` | 1.04 | 1.06 | - |
-| `eltwise_rope_50x320` | `op=rope m_size=50 n_size=320 head_dim=64` | 1.15 | pipelined rows: `Eltwise @ e7829dc` | 1.05 | 1.09 | - |
-| `eltwise_bias_50x720` | `op=bias m_size=50 n_size=720` | 1.46 | pipelined rows: `Eltwise @ e7829dc` | 1.36 | 1.08 | - |
-| `eltwise_scale_192x960` | `op=scale m_size=192 n_size=960` | 2.29 | pipelined rows: `Eltwise @ e7829dc` | 2.22 | 1.03 | - |
-| `eltwise_rope_241x320` | `op=rope m_size=241 n_size=320 head_dim=64` | 2.66 | pipelined rows: `Eltwise @ e7829dc` | 2.39 | 1.11 | - |
-| `eltwise_rope_241x960` | `op=rope m_size=241 n_size=960 head_dim=64` | 3.93 | pipelined rows: `Eltwise @ e7829dc` | 3.27 | 1.20 | - |
-| `eltwise_add_241x960` | `op=add m_size=241 n_size=960` | 3.70 | pipelined rows: `Eltwise @ e7829dc` | 3.10 | 1.19 | - |
-| `eltwise_bias_1024x768` | `op=bias m_size=1024 n_size=768` | 8.85 | pipelined rows: `Eltwise @ e7829dc` | 6.98 | 1.27 | - |
-| `eltwise_add_1024x768` | `op=add m_size=1024 n_size=768` | 9.70 | pipelined rows: `Eltwise @ e7829dc` | 9.58 | 1.01 | - |
-| `eltwise_bias_1024x3072` | `op=bias m_size=1024 n_size=3072` | 22.33 | pipelined rows: `Eltwise @ e7829dc` | 19.46 | 1.15 | - |
-| `eltwise_bias_3072x768` | `op=bias m_size=3072 n_size=768` | 24.92 | pipelined rows: `Eltwise @ e7829dc` | 19.05 | 1.31 | - |
-| `eltwise_add_3072x768` | `op=add m_size=3072 n_size=768` | 34.94 | pipelined rows: `Eltwise @ e7829dc` | 32.41 | 1.08 | - |
-| `eltwise_bias_3072x3072` | `op=bias m_size=3072 n_size=3072` | 57.98 | pipelined rows: `Eltwise @ e7829dc` | 51.94 | 1.12 | - |
+| kernel | stage-1 pick | µs | selected (constants) | µs | speedup |
+| --- | --- | ---: | --- | ---: | ---: |
+| none | | | | | |
 
-Call time if every faster run were taken (estimate: kernel times add up as on the operator-graph page; transposed layout cost not counted):
+Call time with the stage-1 picks instead (estimate: kernel times add up as on the operator-graph page; transposed layout cost not counted):
 
-* W1: 28.994 ms -> 28.493 ms (pipelined -0.501 ms)
-* W1-b: 27.897 ms -> 27.008 ms (pipelined -0.539 ms, transposed -0.350 ms)
+* W1: 28.994 ms with the stage-1 picks, 28.99 ms with constants.yaml
+* W1-b: 27.897 ms with the stage-1 picks, 27.90 ms with constants.yaml
