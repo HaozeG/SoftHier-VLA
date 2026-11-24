@@ -182,7 +182,7 @@ MFU = f_pad x f_occ x f_rest. f_pad = true / padded FLOP = shape padding x RedMu
 | `gemm_1024x768x768` | W1 vision.k_proj, W1 vision.o_proj, W1 vision.patch_embed, W1 vision.q_proj, W1 vision.v_proj | `Nosplit_s8g1_t128x96x128` | Nosplit | 64 | 20.48 | 45.0 | 0.75 | 1.00 | 0.60 | compute | 9.22 | 11 (11) | 4,406 | selected |
 | `gemm_1024x768x3072` | W1 vision.mlp_down | `Nosplit_s8g1_t128x96x256` | Nosplit | 64 | 59.84 | 61.6 | 0.75 | 1.00 | 0.82 | compute | 36.86 | 12 (12) | 4,425 | selected |
 | `gemm_1024x3072x768` | W1 vision.mlp_up | `Nosplit_s8g1_t128x192x192` | Nosplit | 64 | 56.44 | 65.3 | 1.00 | 1.00 | 0.65 | compute | 36.86 | 11 (11) | 6,094 | selected |
-| `gemm_3072x768x768` | W1-b vision.k_proj, W1-b vision.o_proj, W1-b vision.patch_embed, W1-b vision.q_proj, W1-b vision.v_proj | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 51.96 | 53.2 | 0.75 | 1.00 | 0.71 | compute | 27.65 | 12 (12) | 4,544 | selected |
+| `gemm_3072x768x768` | W1-b vision.k_proj, W1-b vision.o_proj, W1-b vision.patch_embed, W1-b vision.q_proj, W1-b vision.v_proj | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 51.96 | 53.2 | 0.75 | 1.00 | 0.71 | compute | 27.65 | 25 (25) | 10,610 | selected |
 | `gemm_3072x768x3072` | W1-b vision.mlp_down | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 167.29 | 66.1 | 0.75 | 1.00 | 0.88 | compute | 110.59 | 12 (12) | 4,552 | selected |
 | `gemm_3072x3072x768` | W1-b vision.mlp_up | `Nosplit_s8g1_t192x192x128` | Nosplit | 64 | 150.76 | 73.4 | 1.00 | 1.00 | 0.73 | compute | 110.59 | 11 (11) | 6,132 | selected |
 
@@ -258,7 +258,7 @@ Valid settings per technique (the driver's candidate generator: tiles multiples 
 | `gemm_1024x768x768` | 1,509 / 8 (8) | 2,897 / 3 (3) | - | - | - | Nosplit |
 | `gemm_1024x768x3072` | 1,512 / 9 (9) | 2,913 / 3 (3) | - | - | - | Nosplit |
 | `gemm_1024x3072x768` | 1,603 / 8 (8) | 4,491 / 3 (3) | - | - | - | Nosplit |
-| `gemm_3072x768x768` | 1,559 / 9 (9) | 2,985 / 3 (3) | - | - | - | Nosplit |
+| `gemm_3072x768x768` | 3,118 / 18 (18) | 7,492 / 7 (7) | - | - | - | Nosplit |
 | `gemm_3072x768x3072` | 1,561 / 9 (9) | 2,991 / 3 (3) | - | - | - | Nosplit |
 | `gemm_3072x3072x768` | 1,604 / 8 (8) | 4,528 / 3 (3) | - | - | - | Nosplit |
 
@@ -296,3 +296,33 @@ No mapping knob: the kernel spreads the rows over the clusters itself. Effective
 | `silu_50x720` | expert.time_silu | 1.09 | 132 | 50 | 0.23 | 0.07 |
 | `silu_gate_241x2560` | prefix.silu_mul | 8.73 | 424 | 64 | 0.51 | 0.19 |
 | `silu_gate_50x2048` | expert.silu_mul | 2.46 | 250 | 50 | 0.53 | 0.14 |
+
+## Faster runs not in constants.yaml
+
+Measured after stage 1. The stage-1 picks (`final_h1.csv`, `constants.yaml`) stay the selected settings above; these runs are candidates beside them.
+
+* **transposed** GEMM runs (13 so far; `infra/kernel-runs/gemm_transpose.py`, `results/gemm_transpose_h1.csv`) are listed among each shape's candidates as `T:<setting>`: Z^T = W^T X^T, run as the GEMM N x M x K with gemm_sweep's candidates and output check. W^T is free (weights are laid out offline); X^T and Z^T are activation layouts the neighbouring operators would have to produce and accept, a cost not counted here. They are left out of the pick check.
+* **pipelined** Eltwise (`infra/kernel-runs/eltwise_pipeline.py`, `results/eltwise_pipeline_h1.csv`): the kernel stores row j-1 and loads row j+1 while Spatz computes row j (three row buffers); output identical to stage 1 (bad 0, max_ulp 0).
+
+| kernel | stage-1 pick | µs | faster run | µs | speedup | block fill (pick -> run) |
+| --- | --- | ---: | --- | ---: | ---: | --- |
+| `gemm_3072x768x768` | `Nosplit_s8g1_t192x96x192` | 51.96 | transposed 768x3072x768: `T:splitN_s4g4_t192x192x128` | 44.82 | 1.16 | 0.75 -> 1.00 |
+| `eltwise_bias_50x32` | `op=bias m_size=50 n_size=32` | 1.17 | pipelined rows: `Eltwise @ e7829dc` | 1.15 | 1.02 | - |
+| `eltwise_axpy_50x32` | `op=axpy m_size=50 n_size=32` | 1.11 | pipelined rows: `Eltwise @ e7829dc` | 1.04 | 1.06 | - |
+| `eltwise_rope_50x320` | `op=rope m_size=50 n_size=320 head_dim=64` | 1.15 | pipelined rows: `Eltwise @ e7829dc` | 1.05 | 1.09 | - |
+| `eltwise_bias_50x720` | `op=bias m_size=50 n_size=720` | 1.46 | pipelined rows: `Eltwise @ e7829dc` | 1.36 | 1.08 | - |
+| `eltwise_scale_192x960` | `op=scale m_size=192 n_size=960` | 2.29 | pipelined rows: `Eltwise @ e7829dc` | 2.22 | 1.03 | - |
+| `eltwise_rope_241x320` | `op=rope m_size=241 n_size=320 head_dim=64` | 2.66 | pipelined rows: `Eltwise @ e7829dc` | 2.39 | 1.11 | - |
+| `eltwise_rope_241x960` | `op=rope m_size=241 n_size=960 head_dim=64` | 3.93 | pipelined rows: `Eltwise @ e7829dc` | 3.27 | 1.20 | - |
+| `eltwise_add_241x960` | `op=add m_size=241 n_size=960` | 3.70 | pipelined rows: `Eltwise @ e7829dc` | 3.10 | 1.19 | - |
+| `eltwise_bias_1024x768` | `op=bias m_size=1024 n_size=768` | 8.85 | pipelined rows: `Eltwise @ e7829dc` | 6.98 | 1.27 | - |
+| `eltwise_add_1024x768` | `op=add m_size=1024 n_size=768` | 9.70 | pipelined rows: `Eltwise @ e7829dc` | 9.58 | 1.01 | - |
+| `eltwise_bias_1024x3072` | `op=bias m_size=1024 n_size=3072` | 22.33 | pipelined rows: `Eltwise @ e7829dc` | 19.46 | 1.15 | - |
+| `eltwise_bias_3072x768` | `op=bias m_size=3072 n_size=768` | 24.92 | pipelined rows: `Eltwise @ e7829dc` | 19.05 | 1.31 | - |
+| `eltwise_add_3072x768` | `op=add m_size=3072 n_size=768` | 34.94 | pipelined rows: `Eltwise @ e7829dc` | 32.41 | 1.08 | - |
+| `eltwise_bias_3072x3072` | `op=bias m_size=3072 n_size=3072` | 57.98 | pipelined rows: `Eltwise @ e7829dc` | 51.94 | 1.12 | - |
+
+Call time if every faster run were taken (estimate: kernel times add up as on the operator-graph page; transposed layout cost not counted):
+
+* W1: 28.994 ms -> 28.493 ms (pipelined -0.501 ms)
+* W1-b: 27.897 ms -> 27.008 ms (pipelined -0.539 ms, transposed -0.350 ms)
