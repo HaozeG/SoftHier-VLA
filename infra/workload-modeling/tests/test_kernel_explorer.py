@@ -17,7 +17,7 @@ def test_placement_matches_grid_sync_group_init():
 
 def test_gemm_iterations_follow_summagemm():
     s = kx.gemm_setting(dict(scale_x="4", scale_y="2", groups="8", m_tile="32", n_tile="192", k_tile="96",
-                             m_size="64", n_size="768", k_size="768", strategy="splitK"))
+                             m_size="64", n_size="768", k_size="768", strategy="splitK"), (32, 64, 32), 1024.0)
     assert (s["active"], s["m_iter"], s["n_iter"], s["k_iter"]) == (64, 1, 1, 1)
 
 
@@ -29,19 +29,24 @@ def test_all_baseline_checks_pass():
     assert kinds == {"pick", "constants", "placement", "sum"}
 
 
-def test_redmule_block_constants_match_h1_arch():
+def test_redmule_constants_match_h1_arch_file():
+    # constants.yaml arch.h1 is the one source for the explorer; this guards it against drift from the arch file
     import re
+    from workload_modeling import constants
+    c = constants.load()
     arch = (kx.KR / "arch" / "arch_h1.py").read_text()
     val = {k: int(re.search(rf"redmule_ce_{k}\s*=\s*(\d+)", arch).group(1)) for k in ("height", "width", "pipe")}
-    assert (val["height"], val["width"], val["pipe"]) == (kx.RM_CE_H, kx.RM_CE_W, kx.RM_CE_PIPE)
-    assert (kx.RM_BLK_M, kx.RM_BLK_N, kx.RM_BLK_K) == (32, 64, 32)
+    assert (val["height"], val["width"], val["pipe"]) == tuple(
+        int(c.value(f"arch.h1.redmule_{k}")) for k in ("h", "w", "pipe"))
+    assert kx.redmule_blocks(c) == (32, 64, 32)
 
 
 def test_redmule_array_eff_counts_whole_blocks():
-    assert kx.redmule_array_eff(128, 128, 128) == 1.0
-    assert kx.redmule_array_eff(128, 96, 128) == 0.75           # 96 columns -> two 64-column blocks
-    assert kx.redmule_array_eff(32, 32, 256) == 0.5
-    assert abs(kx.redmule_array_eff(64, 160, 192) - 160 / 192) < 1e-12
+    blk = (32, 64, 32)
+    assert kx.redmule_array_eff(128, 128, 128, blk) == 1.0
+    assert kx.redmule_array_eff(128, 96, 128, blk) == 0.75      # 96 columns -> two 64-column blocks
+    assert kx.redmule_array_eff(32, 32, 256, blk) == 0.5
+    assert abs(kx.redmule_array_eff(64, 160, 192, blk) - 160 / 192) < 1e-12
 
 
 def test_f_pad_includes_array_padding():

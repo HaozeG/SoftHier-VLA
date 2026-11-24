@@ -166,7 +166,7 @@ MFU = f_pad x f_occ x f_rest. f_pad = true / padded FLOP = f_pad,shape x f_pad,a
 
 ### Why RedMulE array padding counts in f_pad
 
-GVSoC's RedMulE model times every call in output blocks of 32 rows x 64 columns (ce_height x ce_width * (ce_pipe + 1) on H1), at 2 cycles per reduction element per block, however many of the block's columns hold data (`light_redmule.cpp`, `init_redmule_meta_data` and `get_redmule_array_runtime`). A tile of 128 x 96 thus takes the time of 128 x 128: 75 % of the array time does real MACs. This is counted with shape padding in f_pad, not left in f_rest, because:
+GVSoC's RedMulE model times every call in output blocks of 32 rows x 64 columns (redmule_h x redmule_w * (redmule_pipe + 1) from constants.yaml arch.h1), at redmule_pipe + 1 = 2 cycles per reduction element per block, however many of the block's columns hold data (`light_redmule.cpp`, `init_redmule_meta_data` and `get_redmule_array_runtime`). On H1 a tile of 128 x 96 thus takes the time of 128 x 128: 75 % of the array time does real MACs. This is counted with shape padding in f_pad, not left in f_rest, because:
 
 * it is the same kind of loss: array time spent on work that is not in the operator (empty block slots instead of zero rows), at the full peak rate;
 * the mapping fixes it before the kernel runs: it follows from the tile shape and the arch alone, so it can be computed for every candidate, traced or not, and a different tile or mapping removes it;
