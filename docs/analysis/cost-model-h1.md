@@ -148,6 +148,14 @@ B = 2\left( g\, M_{it} N_{it}\, K_g\, (s_y m_t + s_x n_t) + M_p N_p \right),\qua
 t = \max(t_{comp},\ t_{HBM})
 ```
 
+**Per-call overhead `c_o`.** From the traces of 30 GEMM runs (`trace_summary_h1.json`): RedMulE busy time per cluster divided by the calls per cluster, minus the array time of one call:
+
+```math
+c_o = \frac{t_{busy}}{M_{it} N_{it} K_{it}}\,f - T_{array}(m_t, n_t, k_t)
+```
+
+median 160 cycles; 29 of 30 runs within 160 ± 15 cycles (range 160 to 256). The array part follows the simulator's rule exactly; the overhead is constant per call whatever the tile.
+
 Not modelled: NoC broadcast and reduction traffic, barriers, pipeline fill and drain, the store of the last tile. These are why the absolute times are short (section 5).
 
 **MFU split** in the kernel explorer (measured MFU, with the model's block fill):
@@ -166,7 +174,7 @@ From `constants.yaml` `arch.h1` (the model reads nothing else). Label: measured 
 | `w` | `arch.h1.redmule_w` | 32 CE | measured | arch_h1.py:54 |
 | `p` | `arch.h1.redmule_pipe` | 1 stage | measured | arch_h1.py:55 redmule_ce_pipe (GVSoC LightRedmule times a call in output blocks of redmule_h rows x redmule_w * (redmule_pipe + 1) columns (light_redmule.cpp init_redmule_meta_data)) |
 | `f` | `arch.h1.clock_hz` | 1.0e9 Hz | measured | GVSoC soft_hier_release pulp/pulp/chips/flex_cluster/flex_cluster.py (1 GHz cluster clock, as arch.stage1) |
-| `c_o` | `arch.h1.redmule_call_overhead` | 160 cycle | estimate | fit of the RedMulE event durations in 9 traced stage-1 GEMM shapes to ceil(m/32) x ceil(n/64) x k x 2 cycles + overhead (2026-11-23) (per RedMulE call; used by workload_modeling.kernel_model (GEMM ranking model and kernel explorer)) |
+| `c_o` | `arch.h1.redmule_call_overhead` | 160 cycle | estimate | RedMulE busy time per call minus the array time, over the traced GEMM runs (trace_summary_h1.json); computed in workload_modeling/cost_model_doc.py Data.overhead_fit, shown in docs/analysis/cost-model-h1.md section 3 (per RedMulE call; used by workload_modeling.kernel_model (GEMM ranking model and kernel explorer)) |
 | `t_red` | `arch.h1.splitk_reduce_step` | 300 ns | estimate | gemm_smallm_sweep.py ranking model, 2026-11-21 (a guess, not fitted) (FlooNoC group reduction of one Z tile per N step in splitK; ranking only) |
 | `n_ch` | `arch.h1.hbm_channels` | 16  | measured | arch_h1.py:69 hbm_chan_placement = [8,0,0,8] (8 west, 8 south); one controller per edge (num_node_per_ctrl = hbm_node_aliase = 8, XOR scrambling) |
 | `b_ch` | `arch.h1.hbm_bw_per_channel` | 64 GB/s | inference | as arch.stage1.hbm_bw_per_channel (DRAMSys utilization report) (the memspec alone (64 bit x 4000 MT/s) gives 32 GB/s; difference not resolved) |
@@ -185,6 +193,8 @@ Derived: block 32 x 64 x 32; RedMulE peak 1,024 MAC/ns per cluster; HBM 1,024 GB
 Points above the line: the model is optimistic. Measured over model for each shape's fastest run: 1.10x to 13.13x (median 2.24x); the gap is largest for M = 50, where fixed costs (barriers, NoC, splitK reduction) dominate a few short RedMulE calls.
 
 Ranking per shape (Spearman rank correlation with the measured times; top choice = measured time of the model's first choice over the fastest run). Mean correlation: **0.84** for kernel_model, 0.49 for the earlier ranking model (1,024 MAC/cycle whatever the tile, 150 ns per call, HBM 200 B/ns). Top choice within 6 % of the fastest: 17 of 21 shapes (earlier model: 12).
+
+Held-out check: 10 runs were added because kernel_model ranked them above the shape's current best; none beat it (`50x1600x720` 1.33x, `50x1600x720` 1.46x, `50x4096x720` 1.40x, `50x4096x720` 1.63x, `50x4096x720` 2.13x, `50x4096x720` 1.69x, `50x4096x720` 1.47x, `50x4096x720` 1.62x, `241x320x960` 1.33x, `1024x768x768` 1.77x of the fastest). Top-choice misses (model's first choice more than 6 % slower than the fastest): `50x1600x720` 1.12x, fastest `splitN_x4y1g16_t64x32x256` (gemm_smallm_sweep); `50x4096x720` 1.26x, fastest `splitN_x2y1g32_t64x64x256` (gemm_smallm_sweep); `241x960x960` 1.25x, fastest `splitK_x8y2g4_t128x128x120` (gemm_upstream); `241x2560x960` 1.09x, fastest `splitN_x8y2g4_t128x80x128` (gemm_upstream). All are M <= 241 shapes whose fastest run spreads the work over several groups, which the model costs only by RedMulE calls and HBM bytes (splitK reduction guessed as `t_red`, NoC traffic not modelled).
 
 | shape | runs | rank corr. earlier | rank corr. kernel_model | top choice earlier | top choice kernel_model | measured / model (fastest) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -212,7 +222,7 @@ Ranking per shape (Spearman rank correlation with the measured times; top choice
 
 ## 6. Limits and next steps
 
-* **Fixed costs.** No term for barriers, NoC collectives or pipeline fill: small shapes come out 2x to 13x short. Next: fit a per-kernel constant and a per-step synchronisation cost to the traced runs.
+* **Fixed costs.** No term for barriers, NoC collectives or pipeline fill: the fastest run of a shape takes 1.1x to 13.1x the model time, most for M = 50. Next: fit a per-kernel constant and a per-step synchronisation cost to the traced runs.
 * **splitK reduction.** `t_red` = 300 ns is a guess, not fitted; splitK runs are the most underestimated. Next: read the reduction time from traces of splitK picks.
 * **Correctness is not modelled.** splitK with idle clusters or more than 2 N steps per group gives wrong output (`wrong-output-runs-h1.md`); the model ranks such settings as if they worked, and only the output check removes them.
 * **FlatAttention has no model.** `attn_sweep.py` ranks by padded work per busy cluster; upstream's rule is 1.9x to 2.9x slower than the sweep's best. A FlatAttention model (RedMulE calls of the score and output GEMMs, Spatz softmax, NoC row reductions) would make the same split possible.

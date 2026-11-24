@@ -70,6 +70,7 @@ repo.
 | `gemm_transpose.py plan\|run\|pick [--shape MxNxK]` | transposed GEMM (Z^T = W^T X^T run as N x M x K) with gemm_sweep's candidates -> `results/gemm_transpose_h1.csv`; run for the shapes whose stage-1 pick loses RedMulE block fill |
 | `gemm_upstream.py plan\|run\|pick [--shape MxNxK]` | upstream's own settings: soft_hier_je `gemm_auto.py` `opt()` ported rule for rule (splitK and splitN, padded where it asserts), on every GEMM shape -> `results/gemm_upstream_h1.csv` |
 | `eltwise_pipeline.py [NAME ...]` | the 17 Eltwise configs with `pipeline = 1` (pipelined row schedule) -> `results/eltwise_pipeline_h1.csv` |
+| `wrong_runs.py` | every run whose output check failed, with the splitK correctness rule tested against all splitK runs -> `docs/analysis/wrong-output-runs-h1.md` |
 | `final_runs.py [--plan]` | the W1 preset: per GEMM shape and row kernel the fastest checked run over every result set (sweeps, upstream settings, transposed GEMM, pipelined Eltwise), re-run once -> `results/final_h1.csv` (stage-1 picks frozen in `results/final_h1_stage1.csv`) |
 | `trace_picks.py` | Perfetto traces of the picked settings -> `results/traces_h1.csv` |
 | `reproduce.py list\|run\|export` | re-runs the 51 recorded settings (`configs/h1/`) and compares with the recorded times; `export` (owner) refreshes `configs/h1/` |

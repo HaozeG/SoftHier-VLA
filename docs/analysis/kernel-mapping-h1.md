@@ -10,7 +10,7 @@ Labels: kernel times, sweep rows and trace events are *measured*; the valid spac
 
 | check | what | result | detail |
 | --- | --- | --- | --- |
-| pick | `gemm_1024x768x768` | pass | fastest checked of 26 = T:Nosplit_s8g1_t96x128x256 (18,254 ns); final_h1 = T:Nosplit_s8g1_t96x128x256 |
+| pick | `gemm_1024x768x768` | pass | fastest checked of 25 = T:Nosplit_s8g1_t96x128x256 (18,254 ns); final_h1 = T:Nosplit_s8g1_t96x128x256 |
 | constants | `gemm_1024x768x768` | pass | final_h1 18,254 ns, constants 18,254 ns |
 | placement | `gemm_1024x768x768 / Nosplit_s8g1_t128x96x128` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_bias_1024x768` | pass | final_h1 6,979 ns, constants 6,979 ns |
@@ -28,7 +28,7 @@ Labels: kernel times, sweep rows and trace events are *measured*; the valid spac
 | pick | `eltwise_bias_1024x3072` | pass | fastest checked of 2 runs = op=bias m_size=1024 n_size=3072 pipeline=1 (19,457 ns); final_h1 = op=bias m_size=1024 n_size=3072 pipeline=1 |
 | constants | `gelu_1024x3072` | pass | final_h1 23,567 ns, constants 23,567 ns |
 | pick | `gelu_1024x3072` | pass | fastest checked of 1 runs = algo=gelu m_size=1024 n_size=3072 gate_enable=0 bias_enable=0 (23,567 ns); final_h1 = algo=gelu m_size=1024 n_size=3072 gate_enable=0 bias_enable=0 |
-| pick | `gemm_1024x768x3072` | pass | fastest checked of 26 = T:Nosplit_s8g1_t96x128x256 (48,870 ns); final_h1 = T:Nosplit_s8g1_t96x128x256 |
+| pick | `gemm_1024x768x3072` | pass | fastest checked of 25 = T:Nosplit_s8g1_t96x128x256 (48,870 ns); final_h1 = T:Nosplit_s8g1_t96x128x256 |
 | constants | `gemm_1024x768x3072` | pass | final_h1 48,870 ns, constants 48,870 ns |
 | placement | `gemm_1024x768x3072 / Nosplit_s8g1_t128x96x256` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_pixel_shuffle_3072x768` | pass | final_h1 16,348 ns, constants 16,348 ns |
@@ -205,8 +205,8 @@ MFU = f_pad x f_occ x f_rest. f_pad = true / padded FLOP = shape padding x RedMu
 | `gemm_241x960x960` | W1 prefix.o_proj, W1 prefix.q_proj, W1-b prefix.o_proj, W1-b prefix.q_proj | `splitK_x8y2g4_t128x128x120` | splitK, non-square groups | 64 | 11.82 | 28.7 | 0.83 | 1.00 | 0.35 | compute | 3.39 | 12 (12) | 3,754 | other |
 | `gemm_241x960x2560` | W1 prefix.mlp_down, W1-b prefix.mlp_down | `splitK_x8y2g4_t128x128x128` | splitK, non-square groups | 64 | 20.73 | 43.6 | 0.88 | 1.00 | 0.49 | compute | 9.04 | 11 (11) | 3,799 | other |
 | `gemm_241x2560x960` | W1 prefix.mlp_gate, W1 prefix.mlp_up, W1-b prefix.mlp_gate, W1-b prefix.mlp_up | `splitN_x8y2g4_t128x80x128` | splitN, non-square groups | 64 | 25.30 | 35.7 | 0.55 | 1.00 | 0.65 | compute | 9.04 | 26 (25) | 7,263 | other |
-| `gemm_1024x768x768` | W1 vision.k_proj, W1 vision.o_proj, W1 vision.patch_embed, W1 vision.q_proj, W1 vision.v_proj | `T:Nosplit_s8g1_t96x128x256` | Nosplit | 64 | 18.25 | 50.5 | 1.00 | 1.00 | 0.50 | compute | 9.22 | 26 (26) | 9,380 | other |
-| `gemm_1024x768x3072` | W1 vision.mlp_down | `T:Nosplit_s8g1_t96x128x256` | Nosplit | 64 | 48.87 | 75.4 | 1.00 | 1.00 | 0.75 | compute | 36.86 | 26 (26) | 9,405 | other |
+| `gemm_1024x768x768` | W1 vision.k_proj, W1 vision.o_proj, W1 vision.patch_embed, W1 vision.q_proj, W1 vision.v_proj | `T:Nosplit_s8g1_t96x128x256` | Nosplit | 64 | 18.25 | 50.5 | 1.00 | 1.00 | 0.50 | compute | 9.22 | 25 (25) | 9,380 | other |
+| `gemm_1024x768x3072` | W1 vision.mlp_down | `T:Nosplit_s8g1_t96x128x256` | Nosplit | 64 | 48.87 | 75.4 | 1.00 | 1.00 | 0.75 | compute | 36.86 | 25 (25) | 9,405 | other |
 | `gemm_1024x3072x768` | W1 vision.mlp_up | `Nosplit_s8g1_t128x192x192` | Nosplit | 64 | 56.44 | 65.3 | 1.00 | 1.00 | 0.65 | compute | 36.86 | 12 (12) | 6,094 | selected |
 | `gemm_3072x768x768` | W1-b vision.k_proj, W1-b vision.o_proj, W1-b vision.patch_embed, W1-b vision.q_proj, W1-b vision.v_proj | `T:splitN_s4g4_t192x192x128` | splitN, square groups | 64 | 44.82 | 61.7 | 1.00 | 1.00 | 0.62 | compute | 27.65 | 26 (26) | 10,610 | other |
 | `gemm_3072x768x3072` | W1-b vision.mlp_down | `T:splitN_s4g4_t192x192x128` | splitN, square groups | 64 | 131.50 | 84.1 | 1.00 | 1.00 | 0.84 | compute | 110.59 | 26 (26) | 10,626 | other |
@@ -250,7 +250,7 @@ GVSoC's RedMulE model times every call in output blocks of 32 rows x 64 columns 
 * the mapping fixes it before the kernel runs: it follows from the tile shape and the arch alone, so it can be computed for every candidate, traced or not, and a different tile or mapping removes it;
 * f_rest then keeps only the run-time losses (data movement, synchronisation, per-call overhead, pipeline fill), which need traces or a cost model to explain.
 
-The per-call rule ceil(m/32) x ceil(n/64) x k x 2 cycles + about 160 cycles matched the RedMulE event durations of 9 traced stage-1 GEMM shapes (estimate from a fit, 2026-11-23). Array padding is modelled for GEMM only: FlatAttention's RedMulE call shapes have not been read yet, so attention keeps block fill = 1. The interpretation that each CE interleaves ce_pipe + 1 outputs to hide the FMA latency is an inference; the timing rule itself is the simulator's code.
+The per-call rule ceil(m/32) x ceil(n/64) x k x 2 cycles + about 160 cycles matched the RedMulE busy time per call of the traced GEMM runs (estimate; fit in cost-model-h1.md section 3). Array padding is modelled for GEMM only: FlatAttention's RedMulE call shapes have not been read yet, so attention keeps block fill = 1. The interpretation that each CE interleaves ce_pipe + 1 outputs to hide the FMA latency is an inference; the timing rule itself is the simulator's code.
 
 
 Trace column: *selected* = a trace of the selected setting exists; *other* = only traces of non-selected candidates (the page says which); *none* = no trace. Reasons:
@@ -293,14 +293,14 @@ Valid settings per technique (the driver's candidate generator: tiles multiples 
 | `gemm_241x960x960` | 1,076 / 8 (8) | 2,678 / 3 (3) | - | - | - | splitK, non-square groups |
 | `gemm_241x960x2560` | 1,084 / 7 (7) | 2,715 / 3 (3) | - | - | - | splitK, non-square groups |
 | `gemm_241x2560x960` | 2,236 / 18 (18) | 5,027 / 6 (6) | - | - | - | splitN, non-square groups |
-| `gemm_1024x768x768` | 3,018 / 18 (18) | 6,362 / 8 (8) | - | - | - | Nosplit |
-| `gemm_1024x768x3072` | 3,024 / 20 (20) | 6,381 / 6 (6) | - | - | - | Nosplit |
+| `gemm_1024x768x768` | 3,018 / 17 (17) | 6,362 / 8 (8) | - | - | - | Nosplit |
+| `gemm_1024x768x3072` | 3,024 / 19 (19) | 6,381 / 6 (6) | - | - | - | Nosplit |
 | `gemm_1024x3072x768` | 1,603 / 9 (9) | 4,491 / 3 (3) | - | - | - | Nosplit |
 | `gemm_3072x768x768` | 3,118 / 19 (19) | 7,492 / 7 (7) | - | - | - | splitN, square groups |
 | `gemm_3072x768x3072` | 3,122 / 20 (20) | 7,504 / 6 (6) | - | - | - | splitN, square groups |
 | `gemm_3072x3072x768` | 1,604 / 9 (9) | 4,528 / 3 (3) | - | - | - | Nosplit |
 
-In the kernel but never swept: splitK on M > 64 shapes, beyond upstream's setting (in the kernel (summa_group_splitk); gemm_sweep.py left it out (the reduction changes the summation order, so the bit-exact golden does not apply); only upstream opt()'s own splitK setting runs (gemm_upstream.py)); non-square groups on M > 64 shapes (SummaGEMM.h:165 steps X along M by summa_group_x, wrong for M_iter > 1); reshape on load / store (resha_x_from, resha_z_to) (in the kernel config, never enabled).
+In the kernel but never swept (per shape in the explorer): splitK beyond upstream's setting on M > 64 shapes (only upstream opt()'s own splitK setting ran (gemm_upstream.py); no tile or group sweep. splitK is correct only with all 64 clusters busy and at most 2 N steps per group (wrong-output-runs-h1.md)); non-square groups with M_iter > 1 (not runnable: SummaGEMM.h:165 steps X along M by summa_group_x); reshape on load / store (resha_x_from, resha_z_to; TALL / THIN) (in the kernel config, never enabled). Row kernels: Activation's bias_enable (bias added in the same pass) is never run; the bias before GELU is a separate Eltwise call.
 
 ## Row kernels
 
@@ -340,8 +340,8 @@ No mapping knob: the kernel spreads the rows over the clusters itself. Effective
 constants.yaml (h1_kernels) holds the W1 preset: per kernel the fastest checked run over every result set. Besides the stage-1 sweeps these are:
 
 * **transposed GEMM** (83 runs; `infra/kernel-runs/gemm_transpose.py`, `results/gemm_transpose_h1.csv`), listed among each shape's candidates as `T:<setting>`: Z^T = W^T X^T, run as the GEMM N x M x K with gemm_sweep's candidates and output check. W^T is free (weights are laid out offline); X^T and Z^T are activation layouts the neighbouring operators would have to produce and accept, a cost not counted here. Run only where the RedMulE block-fill model predicts a gain (the stage-1 pick's block fill below 1); not transposed: `gemm_50x720x32`, `gemm_50x720x720`, `gemm_50x720x960`, `gemm_50x720x1440`, `gemm_50x720x2048`, `gemm_50x960x720`, `gemm_50x4096x720`, `gemm_192x960x12288`, `gemm_241x320x320`, `gemm_241x320x960`, `gemm_241x960x960`, `gemm_241x960x2560`, `gemm_1024x3072x768`, `gemm_3072x3072x768` (no block-fill loss, or only shape padding, which transposing moves to the other dimension).
-* **upstream's own settings** (27 runs, marked `(upstream opt())`): soft_hier_je's GEMM `opt()` (`gemm_auto.py`; one splitK and one splitN setting per shape, `infra/kernel-runs/gemm_upstream.py`, `results/gemm_upstream_h1.csv`) and FlatAttention `opt()` (`attn_auto.py`, `attn_sweep.upstream_cand`), ported rule for rule and padded where upstream asserts divisibility. Upstream has no cost model: it simulates these settings and keeps the faster.
-* **one GEMM model** (`workload_modeling.kernel_model`, estimate; parameters from constants.yaml arch.h1): RedMulE calls timed in whole 32 x 64 output blocks plus a fitted per-call overhead, against SUMMA HBM traffic at the HBM bandwidth. The GEMM sweeps rank candidates with it and the candidate tooltips show it; over the checked runs its per-shape rank correlation with the measured times averages 0.84 (the earlier rough ranking model: 0.47). Its absolute times are 1.1x (large shapes) to 13x (M = 50) too short.
+* **upstream's own settings** (25 runs, marked `(upstream opt())`): soft_hier_je's GEMM `opt()` (`gemm_auto.py`; one splitK and one splitN setting per shape, `infra/kernel-runs/gemm_upstream.py`, `results/gemm_upstream_h1.csv`) and FlatAttention `opt()` (`attn_auto.py`, `attn_sweep.upstream_cand`), ported rule for rule and padded where upstream asserts divisibility. Upstream has no cost model: it simulates these settings and keeps the faster.
+* **one GEMM model** (`workload_modeling.kernel_model`, estimate; parameters from constants.yaml arch.h1): RedMulE calls timed in whole 32 x 64 output blocks plus a fitted per-call overhead, against SUMMA HBM traffic at the HBM bandwidth. The GEMM sweeps rank candidates with it and the candidate tooltips show it; design, parameters and validation: [cost-model-h1.md](cost-model-h1.md).
 * **pipelined Eltwise** (`infra/kernel-runs/eltwise_pipeline.py`, `results/eltwise_pipeline_h1.csv`; config `pipeline = 1`): the kernel stores row j-1 and loads row j+1 while Spatz computes row j (three row buffers); output identical (bad 0, max_ulp 0). Part of the gain comes from the code generated, not the overlap (the stage-1 loop compiled with the new struct alone was faster too); not separated.
 
 | kernel | stage-1 pick | µs | selected (constants) | µs | speedup |

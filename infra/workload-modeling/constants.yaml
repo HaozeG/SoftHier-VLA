@@ -84,7 +84,7 @@ arch:
     redmule_h: {value: 32, unit: CE, label: measured, source: "arch_h1.py:53"}
     redmule_w: {value: 32, unit: CE, label: measured, source: "arch_h1.py:54"}
     redmule_pipe: {value: 1, unit: stage, label: measured, source: "arch_h1.py:55 redmule_ce_pipe", note: "GVSoC LightRedmule times a call in output blocks of redmule_h rows x redmule_w * (redmule_pipe + 1) columns (light_redmule.cpp init_redmule_meta_data)"}
-    redmule_call_overhead: {value: 160, unit: cycle, label: estimate, source: "fit of the RedMulE event durations in 9 traced stage-1 GEMM shapes to ceil(m/32) x ceil(n/64) x k x 2 cycles + overhead (2026-11-23)", note: "per RedMulE call; used by workload_modeling.kernel_model (GEMM ranking model and kernel explorer)"}
+    redmule_call_overhead: {value: 160, unit: cycle, label: estimate, source: "RedMulE busy time per call minus the array time, over the traced GEMM runs (trace_summary_h1.json); computed in workload_modeling/cost_model_doc.py Data.overhead_fit, shown in docs/analysis/cost-model-h1.md section 3", note: "per RedMulE call; used by workload_modeling.kernel_model (GEMM ranking model and kernel explorer)"}
     splitk_reduce_step: {value: 300, unit: ns, label: estimate, source: "gemm_smallm_sweep.py ranking model, 2026-11-21 (a guess, not fitted)", note: "FlooNoC group reduction of one Z tile per N step in splitK; ranking only"}
     tcdm_bytes: {value: 393216, unit: B, label: measured, source: "arch_h1.py:35 (0x60000)"}
     noc_link_bits: {value: 1024, unit: bit, label: measured, source: "arch_h1.py:75"}

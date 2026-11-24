@@ -187,13 +187,41 @@ GEMM_TECHNIQUES = (
     ("splitK, square groups", "groups own K blocks; partial sums added by the FlooNoC group reduction", "gemm_smallm_sweep.py"),
     ("splitK, non-square groups", "as above, groups 1 or 2 clusters tall", "gemm_smallm_sweep.py, gemm_upstream.py"),
 )
+# Kernel options never (or only partly) run; per kernel the text is filled from the runs (gemm_not_swept, _row).
 GEMM_NOT_SWEPT = (
-    ("splitK on M > 64 shapes, beyond upstream's setting", "in the kernel (summa_group_splitk); gemm_sweep.py left "
-     "it out (the reduction changes the summation order, so the bit-exact golden does not apply); only upstream "
-     "opt()'s own splitK setting runs (gemm_upstream.py)"),
-    ("non-square groups on M > 64 shapes", "SummaGEMM.h:165 steps X along M by summa_group_x, wrong for M_iter > 1"),
-    ("reshape on load / store (resha_x_from, resha_z_to)", "in the kernel config, never enabled"),
+    ("splitK beyond upstream's setting on M > 64 shapes", "only upstream opt()'s own splitK setting ran "
+     "(gemm_upstream.py); no tile or group sweep. splitK is correct only with all 64 clusters busy and at most "
+     "2 N steps per group (wrong-output-runs-h1.md)"),
+    ("non-square groups with M_iter > 1", "not runnable: SummaGEMM.h:165 steps X along M by summa_group_x"),
+    ("reshape on load / store (resha_x_from, resha_z_to; TALL / THIN)", "in the kernel config, never enabled"),
 )
+
+
+def gemm_not_swept(shape: list[int], cands: list[dict]) -> list[dict]:
+    """In the kernel but never (fully) swept, for one GEMM shape, from the runs it has."""
+    M = shape[0]
+    out = []
+    if M > 64:                       # M = 50: gemm_smallm_sweep.py swept splitK and non-square groups
+        sk = [c for c in cands if c["setting"]["strategy"] == "splitK"]
+        if sk:
+            ok = sum(c["status"] == "ok" for c in sk)
+            out.append(dict(name="splitK: only upstream's setting", why=(
+                f"{len(sk)} run ({ok} with correct output): upstream opt()'s own splitK setting (gemm_upstream.py); "
+                "no tile or group sweep. splitK is correct only with all 64 clusters busy and at most 2 N steps per "
+                "group (wrong-output-runs-h1.md)")))
+        else:
+            out.append(dict(name="splitK: never run", why=(
+                "upstream opt() puts the whole mesh in one group for this shape, so it has no splitK setting, and "
+                "gemm_sweep.py leaves splitK out (the reduction changes the summation order, so the bit-exact "
+                "golden does not apply; the abs-tolerance check of gemm_smallm_sweep.py would)")))
+        ns = [c for c in cands if not c["setting"]["square"]]
+        out.append(dict(name="non-square groups", why=(
+            "with more than one M step not runnable (SummaGEMM.h:165 steps X along M by summa_group_x); with one M "
+            "step " + (f"only upstream's setting ran ({len(ns)} run{'s' if len(ns) != 1 else ''})" if ns else
+                       "never run"))))
+    out.append(dict(name="reshape on load / store", why="resha_x_from / resha_z_to (TALL / THIN) in the kernel "
+                    "config, never enabled"))
+    return out
 ATTN_TECHNIQUES = (
     ("collective", "group of sx x sy clusters shares one head; row max / sum by NoC collectives", "attn_sweep.py"),
     ("async", "as collective, with asynchronous overlap of heads; needs an even head count per group", "attn_sweep.py"),
@@ -318,8 +346,9 @@ class Explorer:
             if r["shape"] == shp:
                 s = gemm_setting(r, self.rm_blk, self.rm_mac_per_ns)
                 cands.append(self._cand(r, s, "gemm_smallm_sweep", gemm_technique(s)))
-        for r in self.up:
-            if r["shape"] == shp and r["status"] != "skipped_m_iter":
+        seen = {r.get("run_dir") for r in self.sq if r["shape"] == shp}
+        for r in self.up:            # upstream settings identical to a gemm_sweep run reuse it: listed once
+            if r["shape"] == shp and r["status"] != "skipped_m_iter" and r.get("run_dir") not in seen:
                 s = gemm_setting(r, self.rm_blk, self.rm_mac_per_ns)
                 cands.append(self._cand(r, s, "gemm_upstream", gemm_technique(s)))
         space = space_counts(gemm_square_space(self.G, M, N, K), True)
@@ -347,7 +376,7 @@ class Explorer:
                     f"final_h1 {int(fin['time_ns']):,} ns, constants {int(k['time_ns']):,} ns")
         k.update(candidates=cands, selected=sel, space=space,
                  techniques=self._tech_table(GEMM_TECHNIQUES, space, cands, sel, (M, N, K) in self.S.SHAPES),
-                 not_swept=[dict(name=a, why=b) for a, b in GEMM_NOT_SWEPT])
+                 not_swept=gemm_not_swept(k["shape"], cands))
         self._traces_for(k, shp, cands, sel)
         self._stage1(k)
 
@@ -384,6 +413,17 @@ class Explorer:
                  techniques=self._tech_table(ATTN_TECHNIQUES, space, cands, sel, True), not_swept=[])
         self._traces_for(k, name, cands, sel)
 
+    def _row_not_swept(self, k: dict, fin: dict) -> list[dict]:
+        """Activation's bias_enable (Activation.h: the bias added in the same pass) is never run: the bias before
+        GELU is a separate Eltwise call."""
+        if not k["name"].startswith("gelu_"):
+            return []
+        shp = k["name"].split("_", 1)[1]
+        b = self.final.get(f"eltwise_bias_{shp}")
+        return [dict(name="bias fused into the activation (bias_enable)", why=(
+            "in Activation.h and acti_preload.py, never run on H1: the bias before GELU runs as its own Eltwise call"
+            + (f" (eltwise_bias_{shp}, {int(b['time_ns']) / 1e3:.1f} µs)" if b else "")))]
+
     def _row(self, k: dict) -> None:
         fin = self.final[k["name"]]
         self._check("constants", k["name"], int(fin["time_ns"]) == int(k["time_ns"]),
@@ -392,7 +432,8 @@ class Explorer:
         pipelined = fin["setting"].endswith(" pipeline=1")
         k.update(candidates=[], selected=dict(cand=fin["setting"], time_ns=int(fin["time_ns"]),
                                               run_dir=fin["dir"], setting=None),
-                 space={}, techniques=[], not_swept=[], config=fin["setting"], pipelined=pipelined)
+                 space={}, techniques=[], not_swept=self._row_not_swept(k, fin), config=fin["setting"],
+                 pipelined=pipelined)
         # runs of this kernel: the stage-1 schedule (row_kernels.py) and, for Eltwise, the pipelined schedule
         # (eltwise_pipeline.py; runs whose config sets pipeline); the pick is the fastest checked one
         runs = [(r["config"], int(r["time_ns"])) for r in self.rk if r["name"] == k["name"] and r["status"] == "ok"]
@@ -658,7 +699,7 @@ def render_md(ex: Explorer) -> str:
           "* f_rest then keeps only the run-time losses (data movement, synchronisation, per-call overhead, "
           "pipeline fill), which need traces or a cost model to explain.", "",
           f"The per-call rule ceil(m/{bm}) x ceil(n/{bn}) x k x {bn // bk} cycles + about 160 cycles matched the RedMulE "
-          "event durations of 9 traced stage-1 GEMM shapes (estimate from a fit, 2026-11-23). Array padding is "
+          "busy time per call of the traced GEMM runs (estimate; fit in cost-model-h1.md section 3). Array padding is "
           "modelled for GEMM only: FlatAttention's RedMulE call shapes have not been read yet, so attention keeps "
           "block fill = 1. The interpretation that each CE interleaves ce_pipe + 1 outputs to hide the FMA "
           "latency is an inference; the timing rule itself is the simulator's code.", ""]
@@ -685,7 +726,9 @@ def render_md(ex: Explorer) -> str:
         for t in k["techniques"]:
             cells.append(f"{t['valid']:,} / {t['swept']} ({t['ok']})" if t["enumerated"] else "-")
         L.append(f"| `{k['name']}` | " + " | ".join(cells) + f" | {k['selected']['technique']} |")
-    L += ["", "In the kernel but never swept: " + "; ".join(f"{a} ({b})" for a, b in GEMM_NOT_SWEPT) + ".", ""]
+    L += ["", "In the kernel but never swept (per shape in the explorer): " + "; ".join(f"{a} ({b})" for a, b in GEMM_NOT_SWEPT)
+          + ". Row kernels: Activation's bias_enable (bias added in the same pass) is never run; the bias before GELU "
+          "is a separate Eltwise call.", ""]
 
     L += ["## Row kernels", "",
           "No mapping knob: the kernel spreads the rows over the clusters itself. Effective bandwidth = the "
@@ -732,8 +775,7 @@ def render_options_md(ex: Explorer) -> list[str]:
          "* **one GEMM model** (`workload_modeling.kernel_model`, estimate; parameters from constants.yaml arch.h1): "
          "RedMulE calls timed in whole 32 x 64 output blocks plus a fitted per-call overhead, against SUMMA HBM "
          "traffic at the HBM bandwidth. The GEMM sweeps rank candidates with it and the candidate tooltips show it; "
-         "over the checked runs its per-shape rank correlation with the measured times averages 0.84 (the earlier "
-         "rough ranking model: 0.47). Its absolute times are 1.1x (large shapes) to 13x (M = 50) too short.",
+         "design, parameters and validation: [cost-model-h1.md](cost-model-h1.md).",
          "* **pipelined Eltwise** (`infra/kernel-runs/eltwise_pipeline.py`, `results/eltwise_pipeline_h1.csv`; "
          "config `pipeline = 1`): the kernel stores row j-1 and loads row j+1 while Spatz computes row j (three row "
          "buffers); output identical (bad 0, max_ulp 0). Part of the gain comes from the code generated, not the "

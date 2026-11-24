@@ -11,7 +11,9 @@ Every number on the page is computed here from constants.yaml and infra/kernel-r
 from __future__ import annotations
 
 import csv
+import json
 import math
+import statistics
 import sys
 from pathlib import Path
 
@@ -96,6 +98,37 @@ class Data:
         self.shapes = sorted({x["shape"] for x in self.runs if x["src"] != "gemm_transpose"}, key=_shape)
         self.up = _rows("gemm_upstream_h1.csv")
 
+    def overhead_fit(self) -> list[dict]:
+        """Per traced GEMM run (trace_summary_h1.json): RedMulE busy time per cluster / calls - array time (1.4) =
+        the overhead of one call, in cycles. This is how redmule_call_overhead is chosen."""
+        by = {(x["shape"], x["r"]["cand"]): x["r"] for x in self.runs if x["src"] != "gemm_transpose"}
+        out = []
+        for key, v in json.loads((RES / "trace_summary_h1.json").read_text()).items():
+            if v.get("kernel") != "gemm":
+                continue
+            shape, cand = key.split("_", 1)
+            r = by.get((shape, cand))
+            if not r:
+                continue
+            Mp, Np, Kp, mt, nt, kt, sx, sy, g, st = _setting(r)
+            calls = math.prod(km.iterations(Mp, Np, Kp, mt, nt, kt, sx, sy, g, st))
+            act = v["active_by_unit"]["redmule"]
+            busy = statistics.mean(v["busy_frac"]["redmule"][i] for i in act) * v["period_ns"]
+            arr = km.call_ns(mt, nt, kt, self.A, overhead=False)
+            out.append(dict(run=key, calls=calls, array_ns=arr, call_ns=busy / calls,
+                            overhead_cyc=(busy / calls - arr) * self.A.clock_ghz))
+        return out
+
+    def held_out(self) -> list[dict]:
+        """gemm_sweep runs that only the kernel_model ranking put in the top list (their est_ns column is
+        kernel_model's, not the earlier model's), against each shape's fastest run."""
+        out = []
+        for x in self.runs:
+            if x["src"] == "gemm_sweep" and x["r"].get("est_ns") and abs(int(x["r"]["est_ns"]) - x["model"]) < 1 \
+                    and abs(int(x["r"]["est_ns"]) - x["old"]) >= 1:
+                out.append(dict(shape=x["shape"], cand=x["cand"], t=x["t"], best=self.best(x["shape"])))
+        return out
+
     def best(self, shape: str) -> int:
         return int(self.final[f"gemm_{shape}"]["time_ns"])
 
@@ -113,7 +146,7 @@ class Data:
             bx = min(xs, key=lambda x: x["t"])
             out.append(dict(shape=sh, n=len(xs), rho_old=spearman([x["old"] for x in xs], t),
                             rho_new=spearman([x["model"] for x in xs], t), top_old=top("old"), top_new=top("model"),
-                            ratio=bx["t"] / bx["model"]))
+                            ratio=bx["t"] / bx["model"], best_cand=bx["cand"], best_src=bx["src"]))
         return out
 
 
@@ -180,6 +213,18 @@ def render(d: Data) -> str:
     mean = lambda k: sum(p[k] for p in ps) / len(ps)       # noqa: E731
     near = lambda k: sum(p[k] <= 1.06 for p in ps)         # noqa: E731
     ratios = sorted(p["ratio"] for p in ps)
+    fit = d.overhead_fit()
+    ovs = sorted(f["overhead_cyc"] for f in fit)
+    ho = d.held_out()
+    misses = [p for p in ps if p["top_new"] > 1.06]
+    at_rows = _rows("attn_sweep_h1.csv")
+    at_ratio = []
+    for name in At.SHAPES:
+        u = At.upstream_cand(name)
+        ur = next((r for r in at_rows if r["shape"] == name and r["cand"] == u["cand"] and r["status"] == "ok"), None)
+        ok = [int(r["time_ns"]) for r in at_rows if r["shape"] == name and r["status"] == "ok"]
+        if ur and ok:
+            at_ratio.append(int(ur["time_ns"]) / min(ok))
 
     L = [HEADER, "# Cost model for kernel settings on H1", "",
          "How a kernel setting (tiles, SUMMA groups, split, FlatAttention blocks) is chosen for each operator on arch "
@@ -325,6 +370,12 @@ def render(d: Data) -> str:
           r"t_{HBM} = \frac{B}{n_{ch}\, b_{ch}}",
           "```", "",
           "**Time** (estimate):", "", "```math", r"t = \max(t_{comp},\ t_{HBM})", "```", "",
+          f"**Per-call overhead `c_o`.** From the traces of {len(fit)} GEMM runs (`trace_summary_h1.json`): RedMulE "
+          "busy time per cluster divided by the calls per cluster, minus the array time of one call:", "",
+          "```math", r"c_o = \frac{t_{busy}}{M_{it} N_{it} K_{it}}\,f - T_{array}(m_t, n_t, k_t)", "```", "",
+          f"median {statistics.median(ovs):.0f} cycles; {sum(abs(o - 160) <= 15 for o in ovs)} of {len(ovs)} runs "
+          f"within 160 ± 15 cycles (range {ovs[0]:.0f} to {ovs[-1]:.0f}). The array part follows the simulator's "
+          "rule exactly; the overhead is constant per call whatever the tile.", "",
           "Not modelled: NoC broadcast and reduction traffic, barriers, pipeline fill and drain, the store of the "
           "last tile. These are why the absolute times are short (section 5).", "",
           "**MFU split** in the kernel explorer (measured MFU, with the model's block fill):", "",
@@ -361,6 +412,16 @@ def render(d: Data) -> str:
           f"{mean('rho_old'):.2f} for the earlier ranking model (1,024 MAC/cycle whatever the tile, 150 ns per call, "
           f"HBM 200 B/ns). Top choice within 6 % of the fastest: {near('top_new')} of {len(ps)} shapes "
           f"(earlier model: {near('top_old')}).", "",
+          ("Held-out check: " + (f"{len(ho)} runs were added because kernel_model ranked them above the shape's "
+           f"current best; none beat it (" + ", ".join(f"`{h['shape']}` {h['t'] / h['best']:.2f}x" for h in
+           sorted(ho, key=lambda h: _shape(h['shape']))) + " of the fastest). " if ho and all(h["t"] > h["best"] for h in ho)
+           else f"{len(ho)} runs were added on kernel_model's ranking alone. ")
+           + (f"Top-choice misses (model's first choice more than 6 % slower than the fastest): "
+              + "; ".join(f"`{p['shape']}` {p['top_new']:.2f}x, fastest `{p['best_cand']}` ({p['best_src']})"
+                          for p in misses)
+              + ". All are M <= 241 shapes whose fastest run spreads the work over several groups, which the "
+              "model costs only by RedMulE calls and HBM bytes (splitK reduction guessed as `t_red`, NoC traffic "
+              "not modelled)." if misses else "")), "",
           "| shape | runs | rank corr. earlier | rank corr. kernel_model | top choice earlier | top choice kernel_model | "
           "measured / model (fastest) |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for p in ps:
@@ -368,15 +429,16 @@ def render(d: Data) -> str:
                  f"{p['top_new']:.2f} | {p['ratio']:.2f} |")
     # ---------------------------------------------------------------- 6. limits
     L += ["", "## 6. Limits and next steps", "",
-          "* **Fixed costs.** No term for barriers, NoC collectives or pipeline fill: small shapes come out 2x to "
-          "13x short. Next: fit a per-kernel constant and a per-step synchronisation cost to the traced runs.",
+          f"* **Fixed costs.** No term for barriers, NoC collectives or pipeline fill: the fastest run of a shape "
+          f"takes {ratios[0]:.1f}x to {ratios[-1]:.1f}x the model time, most for M = 50. Next: fit a per-kernel "
+          "constant and a per-step synchronisation cost to the traced runs.",
           f"* **splitK reduction.** `t_red` = {v('splitk_reduce_step').value} ns is a guess, not fitted; splitK runs "
           "are the most underestimated. Next: read the reduction time from traces of splitK picks.",
           "* **Correctness is not modelled.** splitK with idle clusters or more than 2 N steps per group gives wrong "
           "output (`wrong-output-runs-h1.md`); the model ranks such settings as if they worked, and only the output "
           "check removes them.",
-          "* **FlatAttention has no model.** `attn_sweep.py` ranks by padded work per busy cluster; upstream's rule is "
-          "1.9x to 2.9x slower than the sweep's best. A FlatAttention model (RedMulE calls of the score and output "
+          f"* **FlatAttention has no model.** `attn_sweep.py` ranks by padded work per busy cluster; upstream's rule is "
+          f"{min(at_ratio):.1f}x to {max(at_ratio):.1f}x slower than the sweep's best. A FlatAttention model (RedMulE calls of the score and output "
           "GEMMs, Spatz softmax, NoC row reductions) would make the same split possible.",
           "* **Layouts.** Transposed GEMM times do not include producing X^T or consuming Z^T.", ""]
     return "\n".join(L)

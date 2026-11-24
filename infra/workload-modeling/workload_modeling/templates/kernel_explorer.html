@@ -327,7 +327,7 @@ function factorBars(k) {
 }
 
 function techTable(k) {
-  if (!k.techniques.length) return `<p class="sec">${esc(k.row_note || "")}</p><p class="sec">Run setting: <code>${esc(k.config)}</code></p>`;
+  if (!k.techniques.length) return `<p class="sec">${esc(k.row_note || "")}</p><p class="sec">Run setting: <code>${esc(k.config)}</code></p>` + notSwept(k);
   let h = `<table><tr><th>technique</th><th class="n">valid settings</th><th class="n">swept</th><th class="n">passed check</th><th class="n">fastest, µs</th><th></th></tr>`;
   for (const t of k.techniques) {
     const sw = `<i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(${TECH_COLOR[t.technique]});margin-right:6px"></i>`;
@@ -337,8 +337,11 @@ function techTable(k) {
       <td class="n">${t.best_ns ? us(t.best_ns) : "–"}</td><td>${t.selected ? `<span class="badge ok">selected</span>` : ""}</td></tr>`;
   }
   h += `</table>`;
-  if (k.not_swept.length) h += `<details style="margin-top:6px"><summary>In the kernel but never swept</summary><ul>${k.not_swept.map(x => `<li><b>${esc(x.name)}</b>: <span class="sec">${esc(x.why)}</span></li>`).join("")}</ul></details>`;
-  return h;
+  return h + notSwept(k);
+}
+
+function notSwept(k) {
+  return k.not_swept.length ? `<details style="margin-top:6px"><summary>In the kernel but never swept</summary><ul>${k.not_swept.map(x => `<li><b>${esc(x.name)}</b>: <span class="sec">${esc(x.why)}</span></li>`).join("")}</ul></details>` : "";
 }
 
 function candPlot(k, host) {
