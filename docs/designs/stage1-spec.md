@@ -284,7 +284,8 @@ A kernel time counts as a stage-1 `measured` value only if all of the following 
     comes only from `SOFTHIER_HOME` (`infra/env.sh`): the worktree's own `third_party/gvsoc` if
     initialised, otherwise one shared tree at `$SHVLA_DATA/gvsoc` used by all worktrees, under a lock
     so one build or run uses it at a time. The kernels come from the kernel repo (its
-    `implementation/` folder); only the simulator and its SDK runtime come from the patched tree.
+    `implementation/` folder, pinned as the submodule `third_party/softhier-kernels`); only the
+    simulator and its SDK runtime come from the patched tree.
     All stage-1 kernel times before 2026-11-19, including the 79.2 ms composed estimate, were taken on
     the kernel repo's own tree (`softhier_deeploy` 52859c3), which lacks the iDMA fixes (patches 0003,
     0005: hangs and lost transfers) and the RedMulE fp16 fixes (0007, 0008: sparse corrupt elements).

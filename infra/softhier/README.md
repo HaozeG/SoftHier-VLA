@@ -23,7 +23,7 @@ kernels that ship with GVSoC. Design: `docs/designs/smolvla-softhier-baseline.md
 | --- | --- |
 | `setup.sh` | one time: prerequisite check, submodule init, `uv sync`, GVSoC patch series (`apply_gvsoc_patches.sh`), `make softhier_preparation` (SystemC, DRAMSys, RISC-V toolchain), permalinks |
 | `apply_gvsoc_patches.sh [dir]` | applies `gvsoc-patches/` on the upstream base with `git am`; idempotent (already applied: no-op); refuses any other state |
-| `gvsoc-patches/` | the ten GVSoC fixes as `git format-patch` files, `series`, `expected` (base, tree, series hash), README with the finding table and the dev workflow |
+| `gvsoc-patches/` | the GVSoC fixes (13 patches, 0001-0013) as `git format-patch` files, `series`, `expected` (base, tree, series hash), README with the finding table and the dev workflow |
 | `build_arch.sh <arch.py>` | `cfg=<abs arch> make hw` in the submodule, then `stamp.py write`; on failure the stamp is deleted and the exit code is non-zero |
 | `run_kernel_tests.sh` | runs the kernels `gemm`, `norm`, `acti`, `attn`; prints a table |
 | `stamp.py` | `write <arch>`, `check <arch>` (exit 0 match, 1 with the difference), `permalinks`, `series-hash` |
@@ -39,6 +39,11 @@ bash infra/softhier/build_arch.sh third_party/gvsoc/implementation/config/arch/a
 bash infra/softhier/run_kernel_tests.sh
 python3 infra/softhier/stamp.py check third_party/gvsoc/implementation/config/arch/arch.py
 ```
+
+The `third_party/gvsoc/...` paths assume the submodule tree; with the shared tree use `$SOFTHIER_HOME/...`.
+For the stage-1 H1 kernel runs build `infra/kernel-runs/arch/arch_h1.py` instead, and do not run
+`run_kernel_tests.sh` afterwards (it rebuilds for `arch.py`): `infra/kernel-runs/README.md`, "Reproduce the stage-1
+numbers".
 
 Logs go to `$SHVLA_DATA/softhier/` (`setup/`, `build/<arch>.log`, `g1/<kernel>.log`).
 `SHVLA_SIM_TIMEOUT` (default 7200 s) limits each simulator process.
@@ -121,7 +126,7 @@ and cannot build `-march=rv32imafdv_zfh`, which the SDK uses when the arch file 
 
 The fixes to GVSoC (`gvsoc-patches/`, table in its README) are not in a fork. `third_party/gvsoc` is pinned at
 upstream `soft_hier_release` `d806a84` (`.gitmodules` keeps the upstream URL), and `setup.sh` runs
-`apply_gvsoc_patches.sh`, which `git am`s the ten patches before the preparation (five of them change
+`apply_gvsoc_patches.sh`, which `git am`s the patches before the preparation (five of them change
 `soft_hier/gvsoc_core.patch` and `gvsoc_pulp.patch`, which the preparation applies to the nested repositories). The
 script is idempotent: a tree that already has the series (second run; the developer's tree on the local branch
 `shvla/soft_hier_release`) is recognised by its tree id and left alone; a tree at any other commit is refused.

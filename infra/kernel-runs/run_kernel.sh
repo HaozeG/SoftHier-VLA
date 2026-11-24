@@ -12,7 +12,8 @@
 # The simulator is never built here. It comes from $SOFTHIER_HOME (infra/env.sh) and must pass
 # `stamp.py check <arch>` (infra/softhier/require_sim.sh): upstream soft_hier_release plus the GVSoC patch
 # series, built for this arch with infra/softhier/build_arch.sh. The script holds the tree's lock for the
-# whole run. KREPO (env) is the kernel repo worktree; only its implementation/ folder is used.
+# whole run. KREPO (env) is the kernel source, default the submodule third_party/softhier-kernels; only its
+# implementation/ folder is used.
 # Spec: docs/designs/stage1-spec.md §4.3 (measurement protocol).
 set -euo pipefail
 
@@ -21,7 +22,7 @@ KERNEL=$1; CFG=$(realpath "$2"); OUT=$3; shift 3
 TRACE=0
 HBM=0
 ARCH=$HERE/arch/arch_h1.py
-KREPO=${KREPO:-$HOME/softhier/.claude/worktrees/gelu-layernorm}
+KREPO=${KREPO:-$HERE/../../third_party/softhier-kernels}
 while [ $# -gt 0 ]; do
   case $1 in
     --trace) TRACE=1; shift ;;

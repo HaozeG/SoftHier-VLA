@@ -6,3 +6,9 @@
 	url = https://github.com/gvsoc/gvsoc.git
 	branch = soft_hier_release
 	ignore = dirty
+[submodule "third_party/softhier-kernels"]
+	path = third_party/softhier-kernels
+	url = https://github.com/HaozeG/gvsoc.git
+	branch = gelu-layernorm-kernels
+	shallow = true
+	ignore = dirty
