@@ -51,12 +51,19 @@ def test_redmule_array_eff_counts_whole_blocks():
 
 def test_f_pad_includes_array_padding():
     ex = kx.Explorer()
-    k = ex.kernels["gemm_1024x768x768"]
-    assert (k["f_pad_shape"], k["f_pad_array"]) == (1.0, 0.75)
-    assert k["f_pad"] == 0.75
-    assert abs(k["f_pad"] * k["f_occ"] * k["f_rest"] - k["mfu"]) < 1e-12
+    for k in ex.kernels.values():
+        if k["kind"] == "gemm":
+            assert k["f_pad_array"] == k["selected"]["setting"]["f_array"]
+            assert abs(k["f_pad"] - k["f_pad_shape"] * k["f_pad_array"]) < 1e-12
+            assert abs(k["f_pad"] * k["f_occ"] * k["f_rest"] - k["mfu"]) < 1e-12
     assert all(k["f_pad_array"] == 1.0 for k in ex.kernels.values() if k["kind"] == "attn")
-    assert k["f_pad_text"] == "0.75 = shape 1.00 (no padding) x block fill 0.75 (tile 128x96 runs as 128x128)"
+    # the stage-1 pick of 1024x768x768 (tile 128x96) loses a quarter of the array to block fill
+    c = next(c for c in ex.kernels["gemm_1024x768x768"]["candidates"] if c["cand"] == "Nosplit_s8g1_t128x96x128")
+    assert c["setting"]["f_array"] == 0.75 and c["setting"]["tile_blk"][:2] == [128, 128]
+    # 50x32x720 (splitK tile 32x32x32): the 32 output columns fill half of a 64-column block
+    k = ex.kernels["gemm_50x32x720"]
+    assert k["f_pad_array"] == 0.5
+    assert k["f_pad_text"].endswith("x block fill 0.50 (tile 32x32 runs as 32x64)")
 
 
 def test_mesh_comes_from_constants():

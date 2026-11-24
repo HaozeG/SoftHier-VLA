@@ -14,6 +14,7 @@ class Eltwise:
 
     def __init__(self):
 
+        self.pipeline                = 1
         self.dtype                   = 'fp16'
         self.op                      = 'scale'
         self.m_size                  = 192

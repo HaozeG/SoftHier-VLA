@@ -148,8 +148,10 @@ def test_h1_entries_provenance(c):
     assert len(h1) == 51
     for k, e in h1.items():
         assert (e.label, e.workload, e.arch, e.unit) == ("measured", "vlabench-3cam", "h1", "ns"), k
-        # kernel build: the frozen worktree build ("+ build <hash>") or commit de53537 (small-M GEMM picks)
-        build = "+ build " in e.source or "HaozeG/gvsoc@de53537" in e.source
+        # kernel build: the frozen worktree build ("+ build <hash>"), commit de53537 (small-M GEMM picks), or the
+        # submodule commit a later pick was re-run on (final_runs.py: "HaozeG/gvsoc@<7 hex> (submodule ...")
+        build = ("+ build " in e.source or "HaozeG/gvsoc@de53537" in e.source
+                 or re.search(r"HaozeG/gvsoc@[0-9a-f]{7} \(submodule third_party/softhier-kernels\)", e.source))
         assert "HaozeG/gvsoc@" in e.source and build and "GVSoC tree " in e.source, k
 
 

@@ -713,7 +713,12 @@ def render_options_md(ex: Explorer) -> list[str]:
          f"* **transposed GEMM** ({n_tr} runs; `infra/kernel-runs/gemm_transpose.py`, `results/gemm_transpose_h1.csv`), "
          "listed among each shape's candidates as `T:<setting>`: Z^T = W^T X^T, run as the GEMM N x M x K with "
          "gemm_sweep's candidates and output check. W^T is free (weights are laid out offline); X^T and Z^T are "
-         "activation layouts the neighbouring operators would have to produce and accept, a cost not counted here.",
+         "activation layouts the neighbouring operators would have to produce and accept, a cost not counted here. "
+         "Run only where the RedMulE block-fill model predicts a gain (the stage-1 pick's block fill below 1); not "
+         "transposed: " + (", ".join(f"`{k['name']}`" for k in sorted(ex.kernels.values(), key=lambda k: k["shape"])
+                                     if k["kind"] == "gemm" and not any(c.get("transposed") for c in k["candidates"]))
+                            or "none") + " (no block-fill loss, or only shape padding, which transposing moves to "
+         "the other dimension).",
          "* **pipelined Eltwise** (`infra/kernel-runs/eltwise_pipeline.py`, `results/eltwise_pipeline_h1.csv`; "
          "config `pipeline = 1`): the kernel stores row j-1 and loads row j+1 while Spatz computes row j (three row "
          "buffers); output identical (bad 0, max_ulp 0). Part of the gain comes from the code generated, not the "

@@ -14,30 +14,30 @@ gemm_241x320x960,gemm,Nosplit_s8g1_t32x64x192,11470,11386,0,0,ok,9482644ba4551a9
 gemm_241x960x960,gemm,Nosplit_s8g1_t32x128x192,14766,14766,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_241x960x960
 gemm_241x960x2560,gemm,Nosplit_s8g1_t32x128x256,30963,30963,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_241x960x2560
 gemm_241x2560x960,gemm,splitN_s4g4_t64x160x192,27594,27594,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_241x2560x960
-gemm_1024x768x768,gemm,Nosplit_s8g1_t128x96x128,20479,20479,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_1024x768x768
-gemm_1024x768x3072,gemm,Nosplit_s8g1_t128x96x256,59843,59843,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_1024x768x3072
+gemm_1024x768x768,gemm,T:Nosplit_s8g1_t96x128x256,18254,18254,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_1024x768x768
+gemm_1024x768x3072,gemm,T:Nosplit_s8g1_t96x128x256,48870,48870,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_1024x768x3072
 gemm_1024x3072x768,gemm,Nosplit_s8g1_t128x192x192,56436,56436,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_1024x3072x768
-gemm_3072x768x768,gemm,Nosplit_s8g1_t192x96x192,51957,51957,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_3072x768x768
-gemm_3072x768x3072,gemm,Nosplit_s8g1_t192x96x192,167293,167293,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_3072x768x3072
+gemm_3072x768x768,gemm,T:splitN_s4g4_t192x192x128,44820,44820,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_3072x768x768
+gemm_3072x768x3072,gemm,T:splitN_s4g4_t192x192x128,131498,131498,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_3072x768x3072
 gemm_3072x3072x768,gemm,Nosplit_s8g1_t192x192x128,150763,150763,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/gemm/gemm_3072x3072x768
 rmsnorm_241x960,norm,m_size=241 n_size=960,4697,4697,0,20,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/norm/rmsnorm_241x960
-eltwise_add_1024x768,elt,op=add m_size=1024 n_size=768,9697,9697,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_add_1024x768
-eltwise_add_3072x768,elt,op=add m_size=3072 n_size=768,34938,34938,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_add_3072x768
-eltwise_add_241x960,elt,op=add m_size=241 n_size=960,3701,3701,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_add_241x960
+eltwise_add_1024x768,elt,op=add m_size=1024 n_size=768 pipeline=1,9576,9576,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_add_1024x768
+eltwise_add_3072x768,elt,op=add m_size=3072 n_size=768 pipeline=1,32407,32407,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_add_3072x768
+eltwise_add_241x960,elt,op=add m_size=241 n_size=960 pipeline=1,3098,3098,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_add_241x960
 eltwise_add_50x720,elt,op=add m_size=50 n_size=720,1220,1220,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_add_50x720
-eltwise_axpy_50x32,elt,op=axpy m_size=50 n_size=32,1109,1109,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_axpy_50x32
-eltwise_bias_1024x768,elt,op=bias m_size=1024 n_size=768,8852,8852,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_1024x768
-eltwise_bias_1024x3072,elt,op=bias m_size=1024 n_size=3072,22326,22326,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_1024x3072
-eltwise_bias_3072x768,elt,op=bias m_size=3072 n_size=768,24918,24918,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_3072x768
-eltwise_bias_3072x3072,elt,op=bias m_size=3072 n_size=3072,57975,57975,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_3072x3072
-eltwise_bias_50x32,elt,op=bias m_size=50 n_size=32,1172,1172,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_50x32
-eltwise_bias_50x720,elt,op=bias m_size=50 n_size=720,1461,1461,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_50x720
+eltwise_axpy_50x32,elt,op=axpy m_size=50 n_size=32 pipeline=1,1043,1043,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_axpy_50x32
+eltwise_bias_1024x768,elt,op=bias m_size=1024 n_size=768 pipeline=1,6979,6979,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_1024x768
+eltwise_bias_1024x3072,elt,op=bias m_size=1024 n_size=3072 pipeline=1,19457,19457,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_1024x3072
+eltwise_bias_3072x768,elt,op=bias m_size=3072 n_size=768 pipeline=1,19050,19050,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_3072x768
+eltwise_bias_3072x3072,elt,op=bias m_size=3072 n_size=3072 pipeline=1,51940,51940,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_3072x3072
+eltwise_bias_50x32,elt,op=bias m_size=50 n_size=32 pipeline=1,1151,1151,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_50x32
+eltwise_bias_50x720,elt,op=bias m_size=50 n_size=720 pipeline=1,1356,1356,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_bias_50x720
 eltwise_pixel_shuffle_3072x768,elt,op=pixel_shuffle m_size=192 n_size=12288,16348,16348,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_pixel_shuffle_3072x768
-eltwise_rope_241x320,elt,op=rope m_size=241 n_size=320 head_dim=64,2656,2656,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_rope_241x320
-eltwise_rope_241x960,elt,op=rope m_size=241 n_size=960 head_dim=64,3926,3926,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_rope_241x960
-eltwise_rope_50x320,elt,op=rope m_size=50 n_size=320 head_dim=64,1147,1147,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_rope_50x320
+eltwise_rope_241x320,elt,op=rope m_size=241 n_size=320 head_dim=64 pipeline=1,2392,2392,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_rope_241x320
+eltwise_rope_241x960,elt,op=rope m_size=241 n_size=960 head_dim=64 pipeline=1,3271,3271,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_rope_241x960
+eltwise_rope_50x320,elt,op=rope m_size=50 n_size=320 head_dim=64 pipeline=1,1053,1053,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_rope_50x320
 eltwise_rope_50x960,elt,op=rope m_size=50 n_size=960 head_dim=64,1531,1531,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_rope_50x960
-eltwise_scale_192x960,elt,op=scale m_size=192 n_size=960,2285,2285,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_scale_192x960
+eltwise_scale_192x960,elt,op=scale m_size=192 n_size=960 pipeline=1,2222,2222,0,0,ok,1c6d43e,/home/haoze/.cache/softhier-vla/stage1-h1/final/elt/eltwise_scale_192x960
 gelu_1024x3072,acti,algo=gelu m_size=1024 n_size=3072 gate_enable=0 bias_enable=0,23567,23567,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/acti/gelu_1024x3072
 gelu_3072x3072,acti,algo=gelu m_size=3072 n_size=3072 gate_enable=0 bias_enable=0,66251,66251,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/acti/gelu_3072x3072
 silu_50x720,acti,algo=silu m_size=50 n_size=720 gate_enable=0 bias_enable=0,1094,1094,0,0,ok,9482644ba4551a9b,/home/haoze/.cache/softhier-vla/stage1-h1/final/acti/silu_50x720

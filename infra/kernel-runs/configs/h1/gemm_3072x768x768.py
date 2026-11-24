@@ -26,33 +26,33 @@ class SummaGEMM:
     def __init__(self):
 
         #GEMM parameters
-        self.m_valid = 3072
-        self.n_valid = 768
+        self.m_valid = 768
+        self.n_valid = 3072
         self.k_valid = 768
         self.dtype                   = 'fp16'
-        self.m_size                  = 3072
-        self.n_size                  = 768
+        self.m_size                  = 768
+        self.n_size                  = 3072
         self.k_size                  = 768
 
         #Hyperparamters Settings
         ## [Tile ]: tile size for each cluster
         self.m_tile                  = 192
-        self.n_tile                  = 96
-        self.k_tile                  = 192
+        self.n_tile                  = 192
+        self.k_tile                  = 128
         ## [Scale]: How many clusters (x=scale, y=scale) are assigned one GEMM.
         ##          For a set of clusters (x=scale, y=scale) we would call it **Group**
-        self.summa_scale_x           = 8
-        self.summa_scale_y           = 8
+        self.summa_scale_x           = 4
+        self.summa_scale_y           = 4
         ## [Group]: How many summa group
         ##          Do we need to reduce all groups
         ##          Adress gaps between groups
-        self.summa_group_number      = 1
+        self.summa_group_number      = 4
         self.summa_group_reduce      = 0
         self.summa_group_splitk      = 0
-        self.summa_group_splitn      = 0
+        self.summa_group_splitn      = 1
         self.summa_group_gap_x       = 0
-        self.summa_group_gap_w       = 0
-        self.summa_group_gap_z       = 0
+        self.summa_group_gap_w       = 1536
+        self.summa_group_gap_z       = 1536
         ## [Resha]: Reshape options on input and output
         self.resha_x_from_enable     = 0
         self.resha_z_to_enable       = 0

@@ -67,7 +67,9 @@ repo.
 | `row_kernels.py plan\|run\|summary` | Eltwise, Activation, LayerNorm, RMSNorm: one run per shape -> `results/row_kernels_h1.csv` |
 | `attn_sweep.py plan\|run\|pick` | FlatAttention group, block and mode sweep (padded, unmasked) -> `results/attn_sweep_h1.csv` |
 | `attn_debug.py [case ...]` | FlatAttention correctness bisection (one kernel feature per case); debug only |
-| `final_runs.py` | re-runs every picked GEMM setting (fastest over both GEMM sweeps) and row kernel -> `results/final_h1.csv` |
+| `gemm_transpose.py plan\|run\|pick [--shape MxNxK]` | transposed GEMM (Z^T = W^T X^T run as N x M x K) with gemm_sweep's candidates -> `results/gemm_transpose_h1.csv`; run for the shapes whose stage-1 pick loses RedMulE block fill |
+| `eltwise_pipeline.py [NAME ...]` | the 17 Eltwise configs with `pipeline = 1` (pipelined row schedule) -> `results/eltwise_pipeline_h1.csv` |
+| `final_runs.py [--plan]` | the W1 preset: per GEMM shape and row kernel the fastest checked run over every result set (sweeps, transposed GEMM, pipelined Eltwise), re-run once -> `results/final_h1.csv` (stage-1 picks frozen in `results/final_h1_stage1.csv`) |
 | `trace_picks.py` | Perfetto traces of the picked settings -> `results/traces_h1.csv` |
 | `reproduce.py list\|run\|export` | re-runs the 51 recorded settings (`configs/h1/`) and compares with the recorded times; `export` (owner) refreshes `configs/h1/` |
 | `trace_summary.py` | per-cluster RedMulE / iDMA / Spatz busy fractions in the kernel window of each trace -> `results/trace_summary_h1.json` (read by the kernel mapping page) |

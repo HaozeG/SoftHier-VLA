@@ -26,19 +26,19 @@ class SummaGEMM:
     def __init__(self):
 
         #GEMM parameters
-        self.m_valid = 1024
-        self.n_valid = 768
+        self.m_valid = 768
+        self.n_valid = 1024
         self.k_valid = 768
         self.dtype                   = 'fp16'
-        self.m_size                  = 1024
-        self.n_size                  = 768
+        self.m_size                  = 768
+        self.n_size                  = 1024
         self.k_size                  = 768
 
         #Hyperparamters Settings
         ## [Tile ]: tile size for each cluster
-        self.m_tile                  = 128
-        self.n_tile                  = 96
-        self.k_tile                  = 128
+        self.m_tile                  = 96
+        self.n_tile                  = 128
+        self.k_tile                  = 256
         ## [Scale]: How many clusters (x=scale, y=scale) are assigned one GEMM.
         ##          For a set of clusters (x=scale, y=scale) we would call it **Group**
         self.summa_scale_x           = 8
