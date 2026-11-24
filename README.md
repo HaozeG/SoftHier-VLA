@@ -53,3 +53,4 @@ Decision: [first baseline](softhier_vla_wiki/memories/decisions/2026-11-10-first
 *   Golden reference and LIBERO evaluation (LeRobot environment): `infra/lerobot/README.md` (added in G2).
 *   Workload model and stage-1 constants: `infra/workload-modeling/README.md`.
 *   Hand-written kernels (kernel source) and their runs on H1: `git submodule update --init third_party/softhier-kernels`, then `infra/kernel-runs/README.md`.
+*   Reproduce the stage-1 kernel times (environment setup from scratch, then `reproduce.py`): `infra/kernel-runs/README.md`, "Reproduce the stage-1 numbers".
