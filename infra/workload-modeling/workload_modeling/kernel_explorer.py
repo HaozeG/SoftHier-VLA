@@ -54,7 +54,6 @@ def redmule_blocks(c: constants.Constants, arch: str = ARCH) -> tuple[int, int, 
     h, w, pipe = (int(c.value(a + k)) for k in ("redmule_h", "redmule_w", "redmule_pipe"))
     return h, w * (pipe + 1), w
 PAGES = (("W1", None, "cameras one by one"), ("W1-b", m.STAGE1_LOWERING_W1B, "cameras batched"))
-SCALE8_LIVELOCK = "no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9)"
 
 
 def _rows(path: Path) -> list[dict]:
@@ -417,15 +416,11 @@ class Explorer:
         else:
             other = [t for t in traced if t.get("busy_frac")]
             k["trace"] = other[0] if other else None
-            s = sel["setting"]
             if mine:
                 why = "tracing the selected setting failed or timed out"
             elif sel["source"] == "gemm_smallm_sweep":
-                why = ("the selected setting was never traced: trace_picks.py traced only the gemm_sweep pick"
-                       + ("; with scale 8 the trace would also livelock (stage1-spec §4.3 item 9)"
-                          if max(s["sx"], s["sy"]) == 8 else ""))
-            elif max(s["sx"], s["sy"]) == 8:
-                why = SCALE8_LIVELOCK
+                why = ("the selected setting was never traced: trace_picks.py traces the gemm_sweep pick, "
+                       "not the gemm_smallm_sweep one")
             else:
                 why = "the selected setting was never traced"
             k["trace_status"] = "other" if other else "none"

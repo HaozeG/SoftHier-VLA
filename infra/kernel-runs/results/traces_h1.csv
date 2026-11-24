@@ -39,3 +39,16 @@ rmsnorm_50x720,norm,1607,ok,2.1,/home/haoze/.cache/softhier-vla/stage1-h1/traces
 15x241x241x64_coll_s2x4_b768x256,attn,17129,ok,48.6,/home/haoze/.cache/softhier-vla/stage1-h1/traces/attn/15x241x241x64_coll_s2x4_b768x256
 15x50x241x64_coll_s8x1_b192x256,attn,12059,ok,46.9,/home/haoze/.cache/softhier-vla/stage1-h1/traces/attn/15x50x241x64_coll_s8x1_b192x256
 15x50x291x64_coll_s8x1_b192x512,attn,12979,ok,47.0,/home/haoze/.cache/softhier-vla/stage1-h1/traces/attn/15x50x291x64_coll_s8x1_b192x512
+1024x3072x768_Nosplit_s8g1_t128x192x192,gemm,56436,ok,3.3,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/1024x3072x768_Nosplit_s8g1_t128x192x192
+1024x768x3072_Nosplit_s8g1_t128x96x256,gemm,59843,ok,3.5,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/1024x768x3072_Nosplit_s8g1_t128x96x256
+1024x768x768_Nosplit_s8g1_t128x96x128,gemm,20479,ok,3.0,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/1024x768x768_Nosplit_s8g1_t128x96x128
+192x960x12288_Nosplit_s8g1_t32x128x256,gemm,147159,ok,5.8,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/192x960x12288_Nosplit_s8g1_t32x128x256
+241x2560x960_splitN_s4g4_t64x160x192,gemm,27594,ok,2.6,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/241x2560x960_splitN_s4g4_t64x160x192
+241x320x320_Nosplit_s8g1_t32x64x160,gemm,5680,ok,2.3,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/241x320x320_Nosplit_s8g1_t32x64x160
+241x320x960_Nosplit_s8g1_t32x64x192,gemm,11386,ok,2.5,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/241x320x960_Nosplit_s8g1_t32x64x192
+241x960x2560_Nosplit_s8g1_t32x128x256,gemm,30963,ok,2.9,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/241x960x2560_Nosplit_s8g1_t32x128x256
+241x960x960_Nosplit_s8g1_t32x128x192,gemm,14766,ok,2.5,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/241x960x960_Nosplit_s8g1_t32x128x192
+3072x3072x768_Nosplit_s8g1_t192x192x128,gemm,150763,ok,5.8,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/3072x3072x768_Nosplit_s8g1_t192x192x128
+3072x768x3072_Nosplit_s8g1_t192x96x192,gemm,167293,ok,6.3,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/3072x768x3072_Nosplit_s8g1_t192x96x192
+3072x768x768_Nosplit_s8g1_t192x96x192,gemm,51957,ok,4.4,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/3072x768x768_Nosplit_s8g1_t192x96x192
+12x1024x1024x64_async_s8x4_b1024x1024,attn,74252,ok,467.1,/home/haoze/.cache/softhier-vla/stage1-h1/traces/attn/12x1024x1024x64_async_s8x4_b1024x1024

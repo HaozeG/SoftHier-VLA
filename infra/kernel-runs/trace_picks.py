@@ -11,10 +11,16 @@ OUT = Path(os.environ.get("SHVLA_DATA", Path.home() / ".cache/softhier-vla")) / 
 CSV = HERE / "results/traces_h1.csv"
 jobs = []
 rows = list(csv.DictReader(open(G.CSV)))
-for shape in {r["shape"] for r in rows}:
+for shape in sorted({r["shape"] for r in rows}):
     ok = [r for r in rows if r["shape"] == shape and r["status"] == "ok"]
     b = min(ok, key=lambda r: int(r["time_ns"]))
     jobs.append(("gemm", f"{shape}_{b['cand']}", Path(b["run_dir"]) / "kernel_cfg.py", int(b["time_ns"])))
+# FlatAttention picks: fastest checked run per shape of attn_sweep (the rule the explorer and constants use)
+arows = list(csv.DictReader(open(HERE / "results/attn_sweep_h1.csv")))
+for shape in sorted({r["shape"] for r in arows}):
+    ok = [r for r in arows if r["shape"] == shape and r["status"] == "ok"]
+    b = min(ok, key=lambda r: int(r["time_ns"]))
+    jobs.append(("attn", f"{shape}_{b['cand']}", Path(b["run_dir"]) / "kernel_cfg.py", int(b["time_ns"])))
 for r in csv.DictReader(open(R.CSV)):
     if r["status"] == "ok":
         jobs.append((r["kernel"], r["name"], Path(r["run_dir"]) / "kernel_cfg.py", int(r["time_ns"])))
@@ -24,7 +30,7 @@ for kern, name, cfg, t_meas in jobs:
         continue
     out = OUT / kern / name
     print(f"[{name}] ...", flush=True)
-    rc = subprocess.run([str(HERE / "run_kernel.sh"), kern, str(cfg), str(out), "--trace"],
+    rc = subprocess.run(["bash", str(HERE / "run_kernel.sh"), kern, str(cfg), str(out), "--trace"],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
     pf = out / "perfetto.json"
     t = G.parse_run(out)[0] if hasattr(G, "parse_run") else None

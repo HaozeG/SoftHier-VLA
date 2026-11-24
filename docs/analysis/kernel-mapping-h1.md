@@ -12,25 +12,32 @@ Labels: kernel times, sweep rows and trace events are *measured*; the valid spac
 | --- | --- | --- | --- |
 | pick | `gemm_1024x768x768` | pass | fastest checked of 11 = Nosplit_s8g1_t128x96x128 (20,479 ns); final_h1 = Nosplit_s8g1_t128x96x128 |
 | constants | `gemm_1024x768x768` | pass | final_h1 20,479 ns, constants 20,479 ns |
+| placement | `gemm_1024x768x768 / Nosplit_s8g1_t128x96x128` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_bias_1024x768` | pass | final_h1 8,852 ns, constants 8,852 ns |
 | constants | `eltwise_add_1024x768` | pass | final_h1 9,697 ns, constants 9,697 ns |
 | constants | `layernorm_1024x768` | pass | final_h1 10,930 ns, constants 10,930 ns |
 | pick | `flatattention_12x1024x1024x64` | pass | fastest checked of 9 = async_s8x4_b1024x1024 (74,252 ns); constants 74,252 ns |
+| placement | `flatattention_12x1024x1024x64 / async_s8x4_b1024x1024` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `gemm_1024x3072x768` | pass | fastest checked of 11 = Nosplit_s8g1_t128x192x192 (56,436 ns); final_h1 = Nosplit_s8g1_t128x192x192 |
 | constants | `gemm_1024x3072x768` | pass | final_h1 56,436 ns, constants 56,436 ns |
+| placement | `gemm_1024x3072x768 / Nosplit_s8g1_t128x192x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_bias_1024x3072` | pass | final_h1 22,326 ns, constants 22,326 ns |
 | constants | `gelu_1024x3072` | pass | final_h1 23,567 ns, constants 23,567 ns |
 | pick | `gemm_1024x768x3072` | pass | fastest checked of 12 = Nosplit_s8g1_t128x96x256 (59,843 ns); final_h1 = Nosplit_s8g1_t128x96x256 |
 | constants | `gemm_1024x768x3072` | pass | final_h1 59,843 ns, constants 59,843 ns |
+| placement | `gemm_1024x768x3072 / Nosplit_s8g1_t128x96x256` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_pixel_shuffle_3072x768` | pass | final_h1 16,348 ns, constants 16,348 ns |
 | pick | `gemm_192x960x12288` | pass | fastest checked of 10 = Nosplit_s8g1_t32x128x256 (147,159 ns); final_h1 = Nosplit_s8g1_t32x128x256 |
 | constants | `gemm_192x960x12288` | pass | final_h1 147,159 ns, constants 147,159 ns |
+| placement | `gemm_192x960x12288 / Nosplit_s8g1_t32x128x256` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_scale_192x960` | pass | final_h1 2,285 ns, constants 2,285 ns |
 | constants | `rmsnorm_241x960` | pass | final_h1 4,697 ns, constants 4,697 ns |
 | pick | `gemm_241x960x960` | pass | fastest checked of 11 = Nosplit_s8g1_t32x128x192 (14,766 ns); final_h1 = Nosplit_s8g1_t32x128x192 |
 | constants | `gemm_241x960x960` | pass | final_h1 14,766 ns, constants 14,766 ns |
+| placement | `gemm_241x960x960 / Nosplit_s8g1_t32x128x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `gemm_241x320x960` | pass | fastest checked of 11 = Nosplit_s8g1_t32x64x192 (11,386 ns); final_h1 = Nosplit_s8g1_t32x64x192 |
 | constants | `gemm_241x320x960` | pass | final_h1 11,470 ns, constants 11,470 ns |
+| placement | `gemm_241x320x960 / Nosplit_s8g1_t32x64x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_rope_241x960` | pass | final_h1 3,926 ns, constants 3,926 ns |
 | constants | `eltwise_rope_241x320` | pass | final_h1 2,656 ns, constants 2,656 ns |
 | pick | `flatattention_15x241x241x64` | pass | fastest checked of 10 = coll_s2x4_b768x256 (17,129 ns); constants 17,129 ns |
@@ -38,11 +45,14 @@ Labels: kernel times, sweep rows and trace events are *measured*; the valid spac
 | constants | `eltwise_add_241x960` | pass | final_h1 3,701 ns, constants 3,701 ns |
 | pick | `gemm_241x2560x960` | pass | fastest checked of 11 = splitN_s4g4_t64x160x192 (27,594 ns); final_h1 = splitN_s4g4_t64x160x192 |
 | constants | `gemm_241x2560x960` | pass | final_h1 27,594 ns, constants 27,594 ns |
+| placement | `gemm_241x2560x960 / splitN_s4g4_t64x160x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `silu_gate_241x2560` | pass | final_h1 8,729 ns, constants 8,729 ns |
 | pick | `gemm_241x960x2560` | pass | fastest checked of 10 = Nosplit_s8g1_t32x128x256 (30,963 ns); final_h1 = Nosplit_s8g1_t32x128x256 |
 | constants | `gemm_241x960x2560` | pass | final_h1 30,963 ns, constants 30,963 ns |
+| placement | `gemm_241x960x2560 / Nosplit_s8g1_t32x128x256` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `gemm_241x320x320` | pass | fastest checked of 10 = Nosplit_s8g1_t32x64x160 (5,680 ns); final_h1 = Nosplit_s8g1_t32x64x160 |
 | constants | `gemm_241x320x320` | pass | final_h1 5,671 ns, constants 5,671 ns |
+| placement | `gemm_241x320x320 / Nosplit_s8g1_t32x64x160` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `gemm_50x720x32` | pass | fastest checked of 20 = splitN_x4y2g4_t32x64x32 (2,942 ns); final_h1 = splitN_x4y2g4_t32x64x32 |
 | constants | `gemm_50x720x32` | pass | final_h1 2,942 ns, constants 2,942 ns |
 | placement | `gemm_50x720x32 / splitN_s2g2_t32x192x32` | pass | 8 clusters from the kernel's group placement, 8 with redmule activity in the trace |
@@ -85,19 +95,22 @@ Labels: kernel times, sweep rows and trace events are *measured*; the valid spac
 | constants | `eltwise_axpy_50x32` | pass | final_h1 1,109 ns, constants 1,109 ns |
 | pick | `gemm_3072x768x768` | pass | fastest checked of 12 = Nosplit_s8g1_t192x96x192 (51,957 ns); final_h1 = Nosplit_s8g1_t192x96x192 |
 | constants | `gemm_3072x768x768` | pass | final_h1 51,957 ns, constants 51,957 ns |
+| placement | `gemm_3072x768x768 / Nosplit_s8g1_t192x96x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_bias_3072x768` | pass | final_h1 24,918 ns, constants 24,918 ns |
 | constants | `eltwise_add_3072x768` | pass | final_h1 34,938 ns, constants 34,938 ns |
 | constants | `layernorm_3072x768` | pass | final_h1 26,862 ns, constants 26,862 ns |
 | pick | `gemm_3072x3072x768` | pass | fastest checked of 11 = Nosplit_s8g1_t192x192x128 (150,763 ns); final_h1 = Nosplit_s8g1_t192x192x128 |
 | constants | `gemm_3072x3072x768` | pass | final_h1 150,763 ns, constants 150,763 ns |
+| placement | `gemm_3072x3072x768 / Nosplit_s8g1_t192x192x128` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | constants | `eltwise_bias_3072x3072` | pass | final_h1 57,975 ns, constants 57,975 ns |
 | constants | `gelu_3072x3072` | pass | final_h1 66,251 ns, constants 66,251 ns |
 | pick | `gemm_3072x768x3072` | pass | fastest checked of 12 = Nosplit_s8g1_t192x96x192 (167,293 ns); final_h1 = Nosplit_s8g1_t192x96x192 |
 | constants | `gemm_3072x768x3072` | pass | final_h1 167,293 ns, constants 167,293 ns |
+| placement | `gemm_3072x768x3072 / Nosplit_s8g1_t192x96x192` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | sum | `W1` | pass | sum over operators of count x kernel time = 28.994 ms; operator-graph page 28.99 ms |
 | sum | `W1-b` | pass | sum over operators of count x kernel time = 27.897 ms; operator-graph page 27.90 ms |
 
-86 of 86 checks pass.
+99 of 99 checks pass.
 
 * **pick**: the selected setting is the fastest run with a passing output check over every sweep of the shape (for M = 50 GEMMs: `gemm_sweep_h1.csv` and `gemm_smallm_h1.csv`).
 * **constants**: the re-run time in `final_h1.csv` is the time in `constants.yaml` (`h1_kernels`).
@@ -138,7 +151,7 @@ MFU = f_pad x f_occ x f_rest. f_pad = true / padded FLOP = shape padding x RedMu
 
 | kernel | used by | selected setting | technique | active | time | MFU, % | f_pad | f_occ | f_rest | bound | roofline time | swept (ok) | valid space | trace |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- |
-| `flatattention_12x1024x1024x64` | W1 vision.qk, W1-b vision.qk | `async_s8x4_b1024x1024` | async | 64 | 74.25 | 33.7 | 1.00 | 1.00 | 0.34 | compute | 25.06 | 10 (9) | 238 | none |
+| `flatattention_12x1024x1024x64` | W1 vision.qk, W1-b vision.qk | `async_s8x4_b1024x1024` | async | 64 | 74.25 | 33.7 | 1.00 | 1.00 | 0.34 | compute | 25.06 | 10 (9) | 238 | selected |
 | `flatattention_15x50x241x64` | W1 expert.cross_qk, W1-b expert.cross_qk | `coll_s8x1_b192x256` | collective | 40 | 12.06 | 3.0 | 0.74 | 0.62 | 0.06 | compute | 0.36 | 10 (10) | 24 | selected |
 | `flatattention_15x50x291x64` | W1 expert.self_qk, W1-b expert.self_qk | `coll_s8x1_b192x512` | collective | 40 | 12.98 | 3.3 | 0.44 | 0.62 | 0.12 | compute | 0.43 | 10 (10) | 28 | selected |
 | `flatattention_15x241x241x64` | W1 prefix.qk, W1-b prefix.qk | `coll_s2x4_b768x256` | collective | 40 | 17.13 | 10.1 | 0.89 | 0.62 | 0.18 | compute | 1.73 | 10 (10) | 130 | selected |
@@ -151,18 +164,18 @@ MFU = f_pad x f_occ x f_rest. f_pad = true / padded FLOP = shape padding x RedMu
 | `gemm_50x960x720` | W1 expert.q_proj, W1-b expert.q_proj | `splitK_x8y2g4_t32x128x192` | splitK, non-square groups | 64 | 7.13 | 7.4 | 0.69 | 1.00 | 0.11 | HBM | 1.51 | 19 (16) | 2,637 | other |
 | `gemm_50x1600x720` | W1 expert.qkv_proj, W1-b expert.qkv_proj | `splitN_x4y1g16_t64x32x256` | splitN, non-square groups | 64 | 10.90 | 8.1 | 0.29 | 1.00 | 0.28 | HBM | 2.48 | 22 (17) | 2,953 | other |
 | `gemm_50x4096x720` | W1 expert.mlp_gateup, W1-b expert.mlp_gateup | `splitN_x2y1g32_t64x64x256` | splitN, non-square groups | 64 | 17.08 | 13.2 | 0.73 | 1.00 | 0.18 | HBM | 6.23 | 23 (18) | 4,000 | other |
-| `gemm_192x960x12288` | W1 connector.connector_proj, W1-b connector.connector_proj | `Nosplit_s8g1_t32x128x256` | Nosplit | 64 | 147.16 | 23.5 | 0.70 | 1.00 | 0.33 | compute | 34.56 | 10 (10) | 3,572 | none |
-| `gemm_241x320x320` | W1 expert.cross_k_proj, W1 expert.cross_v_proj, W1-b expert.cross_k_proj, W1-b expert.cross_v_proj | `Nosplit_s8g1_t32x64x160` | Nosplit | 64 | 5.67 | 6.6 | 0.59 | 1.00 | 0.11 | HBM | 0.50 | 10 (10) | 1,700 | none |
-| `gemm_241x320x960` | W1 prefix.k_proj, W1 prefix.v_proj, W1-b prefix.k_proj, W1-b prefix.v_proj | `Nosplit_s8g1_t32x64x192` | Nosplit | 64 | 11.47 | 9.8 | 0.59 | 1.00 | 0.17 | HBM | 1.20 | 11 (11) | 1,962 | none |
-| `gemm_241x960x960` | W1 prefix.o_proj, W1 prefix.q_proj, W1-b prefix.o_proj, W1-b prefix.q_proj | `Nosplit_s8g1_t32x128x192` | Nosplit | 64 | 14.77 | 23.0 | 0.88 | 1.00 | 0.26 | compute | 3.39 | 11 (11) | 3,754 | none |
-| `gemm_241x960x2560` | W1 prefix.mlp_down, W1-b prefix.mlp_down | `Nosplit_s8g1_t32x128x256` | Nosplit | 64 | 30.96 | 29.2 | 0.88 | 1.00 | 0.33 | compute | 9.04 | 10 (10) | 3,799 | none |
-| `gemm_241x2560x960` | W1 prefix.mlp_gate, W1 prefix.mlp_up, W1-b prefix.mlp_gate, W1-b prefix.mlp_up | `splitN_s4g4_t64x160x192` | splitN, square groups | 64 | 27.59 | 32.8 | 0.78 | 1.00 | 0.42 | compute | 9.04 | 11 (11) | 4,742 | none |
-| `gemm_1024x768x768` | W1 vision.k_proj, W1 vision.o_proj, W1 vision.patch_embed, W1 vision.q_proj, W1 vision.v_proj | `Nosplit_s8g1_t128x96x128` | Nosplit | 64 | 20.48 | 45.0 | 0.75 | 1.00 | 0.60 | compute | 9.22 | 11 (11) | 4,406 | none |
-| `gemm_1024x768x3072` | W1 vision.mlp_down | `Nosplit_s8g1_t128x96x256` | Nosplit | 64 | 59.84 | 61.6 | 0.75 | 1.00 | 0.82 | compute | 36.86 | 12 (12) | 4,425 | none |
-| `gemm_1024x3072x768` | W1 vision.mlp_up | `Nosplit_s8g1_t128x192x192` | Nosplit | 64 | 56.44 | 65.3 | 1.00 | 1.00 | 0.65 | compute | 36.86 | 11 (11) | 6,094 | none |
-| `gemm_3072x768x768` | W1-b vision.k_proj, W1-b vision.o_proj, W1-b vision.patch_embed, W1-b vision.q_proj, W1-b vision.v_proj | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 51.96 | 53.2 | 0.75 | 1.00 | 0.71 | compute | 27.65 | 12 (12) | 4,544 | none |
-| `gemm_3072x768x3072` | W1-b vision.mlp_down | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 167.29 | 66.1 | 0.75 | 1.00 | 0.88 | compute | 110.59 | 12 (12) | 4,552 | none |
-| `gemm_3072x3072x768` | W1-b vision.mlp_up | `Nosplit_s8g1_t192x192x128` | Nosplit | 64 | 150.76 | 73.4 | 1.00 | 1.00 | 0.73 | compute | 110.59 | 11 (11) | 6,132 | none |
+| `gemm_192x960x12288` | W1 connector.connector_proj, W1-b connector.connector_proj | `Nosplit_s8g1_t32x128x256` | Nosplit | 64 | 147.16 | 23.5 | 0.70 | 1.00 | 0.33 | compute | 34.56 | 10 (10) | 3,572 | selected |
+| `gemm_241x320x320` | W1 expert.cross_k_proj, W1 expert.cross_v_proj, W1-b expert.cross_k_proj, W1-b expert.cross_v_proj | `Nosplit_s8g1_t32x64x160` | Nosplit | 64 | 5.67 | 6.6 | 0.59 | 1.00 | 0.11 | HBM | 0.50 | 10 (10) | 1,700 | selected |
+| `gemm_241x320x960` | W1 prefix.k_proj, W1 prefix.v_proj, W1-b prefix.k_proj, W1-b prefix.v_proj | `Nosplit_s8g1_t32x64x192` | Nosplit | 64 | 11.47 | 9.8 | 0.59 | 1.00 | 0.17 | HBM | 1.20 | 11 (11) | 1,962 | selected |
+| `gemm_241x960x960` | W1 prefix.o_proj, W1 prefix.q_proj, W1-b prefix.o_proj, W1-b prefix.q_proj | `Nosplit_s8g1_t32x128x192` | Nosplit | 64 | 14.77 | 23.0 | 0.88 | 1.00 | 0.26 | compute | 3.39 | 11 (11) | 3,754 | selected |
+| `gemm_241x960x2560` | W1 prefix.mlp_down, W1-b prefix.mlp_down | `Nosplit_s8g1_t32x128x256` | Nosplit | 64 | 30.96 | 29.2 | 0.88 | 1.00 | 0.33 | compute | 9.04 | 10 (10) | 3,799 | selected |
+| `gemm_241x2560x960` | W1 prefix.mlp_gate, W1 prefix.mlp_up, W1-b prefix.mlp_gate, W1-b prefix.mlp_up | `splitN_s4g4_t64x160x192` | splitN, square groups | 64 | 27.59 | 32.8 | 0.78 | 1.00 | 0.42 | compute | 9.04 | 11 (11) | 4,742 | selected |
+| `gemm_1024x768x768` | W1 vision.k_proj, W1 vision.o_proj, W1 vision.patch_embed, W1 vision.q_proj, W1 vision.v_proj | `Nosplit_s8g1_t128x96x128` | Nosplit | 64 | 20.48 | 45.0 | 0.75 | 1.00 | 0.60 | compute | 9.22 | 11 (11) | 4,406 | selected |
+| `gemm_1024x768x3072` | W1 vision.mlp_down | `Nosplit_s8g1_t128x96x256` | Nosplit | 64 | 59.84 | 61.6 | 0.75 | 1.00 | 0.82 | compute | 36.86 | 12 (12) | 4,425 | selected |
+| `gemm_1024x3072x768` | W1 vision.mlp_up | `Nosplit_s8g1_t128x192x192` | Nosplit | 64 | 56.44 | 65.3 | 1.00 | 1.00 | 0.65 | compute | 36.86 | 11 (11) | 6,094 | selected |
+| `gemm_3072x768x768` | W1-b vision.k_proj, W1-b vision.o_proj, W1-b vision.patch_embed, W1-b vision.q_proj, W1-b vision.v_proj | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 51.96 | 53.2 | 0.75 | 1.00 | 0.71 | compute | 27.65 | 12 (12) | 4,544 | selected |
+| `gemm_3072x768x3072` | W1-b vision.mlp_down | `Nosplit_s8g1_t192x96x192` | Nosplit | 64 | 167.29 | 66.1 | 0.75 | 1.00 | 0.88 | compute | 110.59 | 12 (12) | 4,552 | selected |
+| `gemm_3072x3072x768` | W1-b vision.mlp_up | `Nosplit_s8g1_t192x192x128` | Nosplit | 64 | 150.76 | 73.4 | 1.00 | 1.00 | 0.73 | compute | 110.59 | 11 (11) | 6,132 | selected |
 
 ### f_pad in words
 
@@ -207,28 +220,15 @@ The per-call rule ceil(m/32) x ceil(n/64) x k x 2 cycles + about 160 cycles matc
 
 Trace column: *selected* = a trace of the selected setting exists; *other* = only traces of non-selected candidates (the page says which); *none* = no trace. Reasons:
 
-* `flatattention_12x1024x1024x64`: tracing the selected setting failed or timed out.
-* `gemm_50x32x720`: the selected setting was never traced: trace_picks.py traced only the gemm_sweep pick; the trace shown is of a non-selected candidate, Nosplit_s1g1_t64x32x256 (7,160 ns vs 3,059 ns selected).
-* `gemm_50x720x32`: the selected setting was never traced: trace_picks.py traced only the gemm_sweep pick; the trace shown is of a non-selected candidate, splitN_s2g2_t32x192x32 (3,279 ns vs 2,942 ns selected).
-* `gemm_50x720x720`: the selected setting was never traced: trace_picks.py traced only the gemm_sweep pick; the trace shown is of a non-selected candidate, splitN_s2g2_t32x192x256 (11,524 ns vs 6,018 ns selected).
-* `gemm_50x720x960`: the selected setting was never traced: trace_picks.py traced only the gemm_sweep pick; the trace shown is of a non-selected candidate, splitN_s2g4_t32x96x192 (12,497 ns vs 7,121 ns selected).
-* `gemm_50x720x1440`: the selected setting was never traced: trace_picks.py traced only the gemm_sweep pick; the trace shown is of a non-selected candidate, splitN_s2g4_t32x96x160 (18,509 ns vs 9,160 ns selected).
-* `gemm_50x720x2048`: the selected setting was never traced: trace_picks.py traced only the gemm_sweep pick; the trace shown is of a non-selected candidate, splitN_s2g4_t32x96x256 (21,832 ns vs 11,131 ns selected).
-* `gemm_50x960x720`: the selected setting was never traced: trace_picks.py traced only the gemm_sweep pick; with scale 8 the trace would also livelock (stage1-spec §4.3 item 9); the trace shown is of a non-selected candidate, splitN_s2g2_t32x256x256 (13,668 ns vs 7,132 ns selected).
-* `gemm_50x1600x720`: the selected setting was never traced: trace_picks.py traced only the gemm_sweep pick; the trace shown is of a non-selected candidate, splitN_s2g4_t32x224x256 (16,583 ns vs 10,898 ns selected).
-* `gemm_50x4096x720`: the selected setting was never traced: trace_picks.py traced only the gemm_sweep pick; the trace shown is of a non-selected candidate, splitN_s2g4_t32x256x256 (32,353 ns vs 17,081 ns selected).
-* `gemm_192x960x12288`: no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9).
-* `gemm_241x320x320`: no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9).
-* `gemm_241x320x960`: no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9).
-* `gemm_241x960x960`: no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9).
-* `gemm_241x960x2560`: no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9).
-* `gemm_241x2560x960`: tracing the selected setting failed or timed out.
-* `gemm_1024x768x768`: no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9).
-* `gemm_1024x768x3072`: no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9).
-* `gemm_1024x3072x768`: no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9).
-* `gemm_3072x768x768`: no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9).
-* `gemm_3072x768x3072`: no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9).
-* `gemm_3072x3072x768`: no trace: tracing livelocks scale-8 SUMMA groups (stage1-spec §4.3 item 9).
+* `gemm_50x32x720`: the selected setting was never traced: trace_picks.py traces the gemm_sweep pick, not the gemm_smallm_sweep one; the trace shown is of a non-selected candidate, Nosplit_s1g1_t64x32x256 (7,160 ns vs 3,059 ns selected).
+* `gemm_50x720x32`: the selected setting was never traced: trace_picks.py traces the gemm_sweep pick, not the gemm_smallm_sweep one; the trace shown is of a non-selected candidate, splitN_s2g2_t32x192x32 (3,279 ns vs 2,942 ns selected).
+* `gemm_50x720x720`: the selected setting was never traced: trace_picks.py traces the gemm_sweep pick, not the gemm_smallm_sweep one; the trace shown is of a non-selected candidate, splitN_s2g2_t32x192x256 (11,524 ns vs 6,018 ns selected).
+* `gemm_50x720x960`: the selected setting was never traced: trace_picks.py traces the gemm_sweep pick, not the gemm_smallm_sweep one; the trace shown is of a non-selected candidate, splitN_s2g4_t32x96x192 (12,497 ns vs 7,121 ns selected).
+* `gemm_50x720x1440`: the selected setting was never traced: trace_picks.py traces the gemm_sweep pick, not the gemm_smallm_sweep one; the trace shown is of a non-selected candidate, splitN_s2g4_t32x96x160 (18,509 ns vs 9,160 ns selected).
+* `gemm_50x720x2048`: the selected setting was never traced: trace_picks.py traces the gemm_sweep pick, not the gemm_smallm_sweep one; the trace shown is of a non-selected candidate, splitN_s2g4_t32x96x256 (21,832 ns vs 11,131 ns selected).
+* `gemm_50x960x720`: the selected setting was never traced: trace_picks.py traces the gemm_sweep pick, not the gemm_smallm_sweep one; the trace shown is of a non-selected candidate, splitN_s2g2_t32x256x256 (13,668 ns vs 7,132 ns selected).
+* `gemm_50x1600x720`: the selected setting was never traced: trace_picks.py traces the gemm_sweep pick, not the gemm_smallm_sweep one; the trace shown is of a non-selected candidate, splitN_s2g4_t32x224x256 (16,583 ns vs 10,898 ns selected).
+* `gemm_50x4096x720`: the selected setting was never traced: trace_picks.py traces the gemm_sweep pick, not the gemm_smallm_sweep one; the trace shown is of a non-selected candidate, splitN_s2g4_t32x256x256 (32,353 ns vs 17,081 ns selected).
 
 Runs that failed the output check but were faster than the selected setting (excluded by the pick rule; worth a look before trusting the pick):
 
