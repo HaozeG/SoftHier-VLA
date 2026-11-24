@@ -59,6 +59,9 @@ def main():
     final = {r["name"]: r for r in rd("final_h1.csv")}
     gsweep, asweep = rd("gemm_sweep_h1.csv"), rd("attn_sweep_h1.csv")
     ssweep = rd("gemm_smallm_h1.csv") if (HERE / "results/gemm_smallm_h1.csv").exists() else []
+    # upstream's own settings (gemm_upstream.py: soft_hier_je opt() ported), candidates like the sweeps'
+    usweep = [r for r in (rd("gemm_upstream_h1.csv") if (HERE / "results/gemm_upstream_h1.csv").exists() else [])
+              if r["status"] != "skipped_m_iter"]
     # transposed GEMM runs (gemm_transpose.py): candidates of the operator's shape, setting "T:<candidate>"
     tsweep = [dict(r, shape=r["orig_shape"], run_shape=r["shape"], cand="T:" + r["cand"])
               for r in (rd("gemm_transpose_h1.csv") if (HERE / "results/gemm_transpose_h1.csv").exists() else [])]
@@ -88,7 +91,7 @@ def main():
             f = final[fname]
             t, run_dir = int(f["time_ns"]), f["dir"]
             if kern == "gemm":
-                ok = [r for r in gsweep + ssweep + tsweep if r["shape"] == shape and r["status"] == "ok"]
+                ok = [r for r in gsweep + ssweep + usweep + tsweep if r["shape"] == shape and r["status"] == "ok"]
                 p = next(r for r in ok if r["cand"] == f["setting"])
                 ts = sorted(int(r["time_ns"]) for r in ok)
                 if "scale_x" in p and p.get("scale_x"):
@@ -103,6 +106,8 @@ def main():
                          if p["strategy"] == "splitK" else "bit-exact against the replay golden")
                 note = (f"fastest of {len(ok)} checked settings in the sweeps ({ts[0]:,} to {ts[-1]:,} ns, mixed builds; "
                         f"re-run on the recorded build: {t:,} ns); work {p['work_ratio']}x nominal; {check}")
+                if any(r is p for r in usweep):
+                    note += "; upstream's own setting (soft_hier_je gemm_auto.py opt(), gemm_upstream.py)"
                 if p["cand"].startswith("T:"):
                     note += ("; transposed: W^T is laid out offline, X^T and Z^T are activation layouts the "
                              "neighbouring operators must produce and accept (that cost is not in this time)")

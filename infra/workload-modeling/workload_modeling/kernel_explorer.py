@@ -27,7 +27,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import constants, md_to_html, render
+from . import constants, kernel_model, md_to_html, render
 from . import smolvla_ops as m
 
 REPO = Path(__file__).resolve().parents[3]
@@ -42,18 +42,14 @@ _ARCH_C = constants.load()                    # mesh size of ARCH from constants
 MESH_X = int(_ARCH_C.value(f"arch.{ARCH}.clusters_x"))
 MESH_Y = int(_ARCH_C.value(f"arch.{ARCH}.clusters_y"))
 NCL = MESH_X * MESH_Y
-# RedMulE timing rule of GVSoC LightRedmule (soft_hier/flex_cluster/light_redmule.cpp init_redmule_meta_data,
-# get_redmule_array_runtime): a call is timed in output blocks of ce_height rows x ce_width * (ce_pipe + 1) columns,
-# ce_pipe + 1 cycles per reduction element per block, whatever part of the block holds data; the last reduction
-# chunk is rounded up to whole ce_width * (ce_pipe + 1)-cycle units, i.e. to ce_width elements. The sizes come from
-# constants.yaml arch.<arch>.redmule_h / redmule_w / redmule_pipe (on H1: 32 x 64 blocks, reduction rounded to 32).
+# RedMulE timing rule and GEMM model: workload_modeling.kernel_model (the one model; the GEMM sweeps rank with it).
+KM_ARCH = kernel_model.arch(_ARCH_C, ARCH)
 
 
 def redmule_blocks(c: constants.Constants, arch: str = ARCH) -> tuple[int, int, int]:
     """(rows, columns, reduction granule) of one LightRedmule output block for an arch in constants.yaml."""
-    a = f"arch.{arch}."
-    h, w, pipe = (int(c.value(a + k)) for k in ("redmule_h", "redmule_w", "redmule_pipe"))
-    return h, w * (pipe + 1), w
+    A = kernel_model.arch(c, arch)
+    return A.blk_m, A.blk_n, A.blk_k
 PAGES = (("W1", None, "cameras one by one"), ("W1-b", m.STAGE1_LOWERING_W1B, "cameras batched"))
 
 
@@ -95,7 +91,7 @@ def redmule_array_eff(m: int, n: int, k: int, blk: tuple[int, int, int]) -> floa
     Z = X (m x k) . W (k x n) in GEMM naming; LightRedmule calls k its n and n its k. blk = redmule_blocks(); a
     partial block costs a full one. Shape padding (whole tiles) is counted in work_ratio, not here."""
     bm, bn, bk = blk
-    return (m * n * k) / (_up(m, bm) * _up(n, bn) * _up(k, bk))
+    return kernel_model.block_fill(m, n, k, kernel_model.Arch(1, 1, bm, bn, bk, 1, 1.0, 0.0, 0.0, 1.0))
 
 
 def gemm_setting(r: dict, blk: tuple[int, int, int], mac_per_ns: float) -> dict:
@@ -106,10 +102,7 @@ def gemm_setting(r: dict, blk: tuple[int, int, int], mac_per_ns: float) -> dict:
     mt, nt, kt = int(r["m_tile"]), int(r["n_tile"]), int(r["k_tile"])
     Mp, Np, Kp = int(r["m_size"]), int(r["n_size"]), int(r["k_size"])
     st = r["strategy"]
-    # iteration counts per cluster, SummaGEMM.h:142-144
-    m_it = -(-Mp // (sy * mt))
-    n_it = -(-(Np // g) // (sx * nt)) if st == "splitN" else -(-Np // (sx * nt))
-    k_it = -(-(Kp // g) // kt) if st == "splitK" else -(-Kp // kt)
+    m_it, n_it, k_it = kernel_model.iterations(Mp, Np, Kp, mt, nt, kt, sx, sy, g, st)   # SummaGEMM.h:142-144
     calls = m_it * n_it * k_it
     return dict(sx=sx, sy=sy, groups=g, strategy=st, mt=mt, nt=nt, kt=kt, Mp=Mp, Np=Np, Kp=Kp,
                 active=g * sx * sy, m_iter=m_it, n_iter=n_it, k_iter=k_it, redmule_calls=calls,
@@ -117,7 +110,8 @@ def gemm_setting(r: dict, blk: tuple[int, int, int], mac_per_ns: float) -> dict:
                 f_array=redmule_array_eff(mt, nt, kt, blk),
                 tile_blk=[_up(mt, blk[0]), _up(nt, blk[1]), _up(kt, blk[2])],   # the tile as the array times it
                 redmule_array_ns=calls * mt * nt * kt / redmule_array_eff(mt, nt, kt, blk) / mac_per_ns,
-                square=sx == sy)
+                square=sx == sy,
+                model_ns=round(kernel_model.gemm_ns(Mp, Np, Kp, mt, nt, kt, sx, sy, g, st, KM_ARCH)["est_ns"]))
 
 
 def f_pad_text(k: dict) -> str:
@@ -191,11 +185,12 @@ GEMM_TECHNIQUES = (
     ("splitN, square groups", "g groups of s x s, each owns N / g columns (exact)", "gemm_sweep.py"),
     ("splitN, non-square groups", "groups 1 or 2 clusters tall, up to 8 wide (M_iter = 1 only)", "gemm_smallm_sweep.py"),
     ("splitK, square groups", "groups own K blocks; partial sums added by the FlooNoC group reduction", "gemm_smallm_sweep.py"),
-    ("splitK, non-square groups", "as above, groups 1 or 2 clusters tall", "gemm_smallm_sweep.py"),
+    ("splitK, non-square groups", "as above, groups 1 or 2 clusters tall", "gemm_smallm_sweep.py, gemm_upstream.py"),
 )
 GEMM_NOT_SWEPT = (
-    ("splitK on M > 64 shapes", "in the kernel (summa_group_splitk); gemm_sweep.py left it out: the reduction "
-     "changes the summation order, so the bit-exact golden does not apply"),
+    ("splitK on M > 64 shapes, beyond upstream's setting", "in the kernel (summa_group_splitk); gemm_sweep.py left "
+     "it out (the reduction changes the summation order, so the bit-exact golden does not apply); only upstream "
+     "opt()'s own splitK setting runs (gemm_upstream.py)"),
     ("non-square groups on M > 64 shapes", "SummaGEMM.h:165 steps X along M by summa_group_x, wrong for M_iter > 1"),
     ("reshape on load / store (resha_x_from, resha_z_to)", "in the kernel config, never enabled"),
 )
@@ -223,6 +218,8 @@ class Explorer:
         self.tr = _rows(RES / "gemm_transpose_h1.csv") if (RES / "gemm_transpose_h1.csv").exists() else []
         self.elt = _rows(RES / "eltwise_pipeline_h1.csv") if (RES / "eltwise_pipeline_h1.csv").exists() else []
         self.rk = _rows(RES / "row_kernels_h1.csv")
+        # upstream's own settings (soft_hier_je opt(), gemm_upstream.py / attn_sweep.upstream_cand): candidates too
+        self.up = _rows(RES / "gemm_upstream_h1.csv") if (RES / "gemm_upstream_h1.csv").exists() else []
         # the stage-1 picks, frozen (reference only: constants.yaml now holds the W1 preset's fastest runs)
         f1 = RES / "final_h1_stage1.csv"
         self.final_s1 = {r["name"]: r for r in _rows(f1)} if f1.exists() else dict(self.final)
@@ -300,10 +297,13 @@ class Explorer:
 
     def _cand(self, r: dict, setting: dict, source: str, technique: str) -> dict:
         t = int(r["time_ns"]) if r.get("time_ns") else None
+        # est_ns: the shared model (kernel_model) for GEMM settings, recomputed here rather than the CSV column
+        # (older sweep rows carry the earlier rough model)
+        est = setting.get("model_ns") if "model_ns" in setting else (int(r["est_ns"]) if r.get("est_ns") else None)
         return dict(cand=r["cand"], source=source, technique=technique, setting=setting,
-                    work_ratio=float(r["work_ratio"]), time_ns=t, est_ns=int(r["est_ns"]) if r.get("est_ns") else None,
+                    work_ratio=float(r["work_ratio"]), time_ns=t, est_ns=est,
                     status=r["status"], bad=r.get("bad"), max_ulp=r.get("max_ulp"), run_dir=r.get("run_dir", ""),
-                    upstream_opt=r.get("upstream_opt") == "1", transposed=source == "gemm_transpose",
+                    upstream=source == "gemm_upstream", transposed=source == "gemm_transpose",
                     run_shape=r.get("shape"))
 
     def _gemm(self, k: dict) -> None:
@@ -318,6 +318,10 @@ class Explorer:
             if r["shape"] == shp:
                 s = gemm_setting(r, self.rm_blk, self.rm_mac_per_ns)
                 cands.append(self._cand(r, s, "gemm_smallm_sweep", gemm_technique(s)))
+        for r in self.up:
+            if r["shape"] == shp and r["status"] != "skipped_m_iter":
+                s = gemm_setting(r, self.rm_blk, self.rm_mac_per_ns)
+                cands.append(self._cand(r, s, "gemm_upstream", gemm_technique(s)))
         space = space_counts(gemm_square_space(self.G, M, N, K), True)
         if (M, N, K) in self.S.SHAPES:
             for t, n in space_counts(self.S.enumerate_all(M, N, K), False).items():
@@ -360,10 +364,11 @@ class Explorer:
         name = f"{h}x{sq}x{skv}x{d}"
         hq, hkv = self.A.SHAPES[name][0], self.A.SHAPES[name][1]
         cands = []
+        up = self.A.upstream_cand(name)["cand"]
         for r in self.at:
             if r["shape"] == name:
                 s = attn_setting(r, hq, hkv)
-                cands.append(self._cand(r, s, "attn_sweep", s["mode"]))
+                cands.append(dict(self._cand(r, s, "attn_sweep", s["mode"]), upstream=r["cand"] == up))
         space: dict[str, int] = {}
         for c in self.A.candidates(name):
             t = "async" if c["async_"] else "collective"
@@ -719,6 +724,16 @@ def render_options_md(ex: Explorer) -> list[str]:
                                      if k["kind"] == "gemm" and not any(c.get("transposed") for c in k["candidates"]))
                             or "none") + " (no block-fill loss, or only shape padding, which transposing moves to "
          "the other dimension).",
+         f"* **upstream's own settings** ({sum(c.get('upstream', False) for k in ex.kernels.values() for c in k['candidates'])} "
+         "runs, marked `(upstream opt())`): soft_hier_je's GEMM `opt()` (`gemm_auto.py`; one splitK and one splitN "
+         "setting per shape, `infra/kernel-runs/gemm_upstream.py`, `results/gemm_upstream_h1.csv`) and FlatAttention "
+         "`opt()` (`attn_auto.py`, `attn_sweep.upstream_cand`), ported rule for rule and padded where upstream asserts "
+         "divisibility. Upstream has no cost model: it simulates these settings and keeps the faster.",
+         "* **one GEMM model** (`workload_modeling.kernel_model`, estimate; parameters from constants.yaml arch.h1): "
+         "RedMulE calls timed in whole 32 x 64 output blocks plus a fitted per-call overhead, against SUMMA HBM "
+         "traffic at the HBM bandwidth. The GEMM sweeps rank candidates with it and the candidate tooltips show it; "
+         "over the checked runs its per-shape rank correlation with the measured times averages 0.84 (the earlier "
+         "rough ranking model: 0.47). Its absolute times are 1.1x (large shapes) to 13x (M = 50) too short.",
          "* **pipelined Eltwise** (`infra/kernel-runs/eltwise_pipeline.py`, `results/eltwise_pipeline_h1.csv`; "
          "config `pipeline = 1`): the kernel stores row j-1 and loads row j+1 while Spatz computes row j (three row "
          "buffers); output identical (bad 0, max_ulp 0). Part of the gain comes from the code generated, not the "

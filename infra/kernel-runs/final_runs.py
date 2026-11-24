@@ -18,7 +18,7 @@ it records (kernel_repo_commit.txt), except for the stage-1 rows kept from the f
 gemm_smallm_sweep.py picks of de53537 (aa57690 + the optional GEMM_CHECK_ABS_TOL check, BUILD2)."""
 import csv, os, subprocess, sys
 from pathlib import Path
-import gemm_sweep as G, gemm_smallm_sweep as S, gemm_transpose as T, row_kernels as R
+import gemm_sweep as G, gemm_smallm_sweep as S, gemm_transpose as T, gemm_upstream as U, row_kernels as R
 HERE = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("SHVLA_DATA", Path.home() / ".cache/softhier-vla")) / "stage1-h1"
 CSV = HERE / "results/final_h1.csv"
@@ -35,6 +35,7 @@ def jobs():
     """(kernel, name, setting, config, time in the sweep) of every pick."""
     rows = [dict(r, _set=r["cand"]) for r in _rows(G.CSV)]
     rows += [dict(r, _set=r["cand"]) for r in _rows(S.CSV)]
+    rows += [dict(r, _set=r["cand"]) for r in _rows(U.CSV) if r["status"] != "skipped_m_iter"]
     rows += [dict(r, shape=r["orig_shape"], _set="T:" + r["cand"]) for r in _rows(T.CSV)]
     for shape in sorted({r["shape"] for r in rows}, key=lambda s: [int(x) for x in s.split("x")]):
         b = min((r for r in rows if r["shape"] == shape and r["status"] == "ok"), key=lambda r: int(r["time_ns"]))

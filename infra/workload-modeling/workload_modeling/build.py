@@ -5,7 +5,8 @@
 Validates constants.yaml, runs the standalone model for the stage-1 workloads, and writes
 docs/analysis/stage-totals.md and .csv; the operator-graph pages (Markdown and CSV in docs/analysis/, HTML in
 infra/workload-modeling/build/, git-ignored) for the primary workload (smolvla-op-graph, W1), its cameras-batched
-variant (smolvla-op-graph-w1b, W1-b); and the kernel mapping page (kernel-mapping-h1, kernel_explorer.py). Re-running on a clean tree gives no diff.
+variant (smolvla-op-graph-w1b, W1-b); the kernel mapping page (kernel-mapping-h1, kernel_explorer.py); and the
+cost-model page (cost-model-h1, cost_model_doc.py). Re-running on a clean tree gives no diff.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import io
 import sys
 from pathlib import Path
 
-from . import constants, kernel_explorer, md_to_html, render
+from . import constants, cost_model_doc, kernel_explorer, md_to_html, render
 from . import smolvla_ops as m
 
 REPO = Path(__file__).resolve().parents[3]
@@ -141,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         md_to_html.write(md_path, HTML_DIR / f"{stem}.html", title)
         print(f"wrote {OUT_DIR.relative_to(REPO)}/{stem}.md, {stem}.csv; "
               f"{HTML_DIR.relative_to(REPO)}/{stem}.html (not committed)")
+    cost_model_doc.write(cost_model_doc.Data(c))
     ex = kernel_explorer.write(kernel_explorer.Explorer(c))
     bad = [k for k in ex.checks if not k["ok"]]
     print(f"wrote {kernel_explorer.OUT_MD.relative_to(REPO)}; {kernel_explorer.OUT_HTML.relative_to(REPO)} (not committed); "

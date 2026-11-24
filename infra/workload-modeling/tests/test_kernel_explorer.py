@@ -71,3 +71,18 @@ def test_mesh_comes_from_constants():
     c = constants.load()
     assert (kx.MESH_X, kx.MESH_Y) == (c.value("arch.h1.clusters_x"), c.value("arch.h1.clusters_y"))
     assert kx.NCL == c.clusters("h1")
+
+
+def test_kernel_model_is_the_explorer_model():
+    # one model: the GEMM sweeps' ranking (gemm_sweep.model_ns) and the explorer's settings use kernel_model
+    from workload_modeling import kernel_model as km
+    A = km.arch()
+    assert (A.blk_m, A.blk_n, A.blk_k, A.cyc_per_k) == (32, 64, 32, 2)
+    assert km.call_ns(128, 96, 128, A, overhead=False) == 4 * 2 * 128 * 2     # 96 columns time as two 64-column blocks
+    assert km.block_fill(128, 96, 128, A) == 0.75
+    G = kx._drivers()[0]
+    r = km.gemm_ns(1024, 768, 768, 128, 96, 128, 8, 8, 1, "Nosplit", A)
+    assert G.model_ns(1024, 768, 768, 128, 96, 128, 8, 8, 1, "Nosplit") == r["est_ns"]
+    ex = kx.Explorer()
+    c = next(c for c in ex.kernels["gemm_1024x768x768"]["candidates"] if c["cand"] == "Nosplit_s8g1_t128x96x128")
+    assert c["est_ns"] == round(r["est_ns"])

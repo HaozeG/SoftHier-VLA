@@ -358,7 +358,7 @@ function candPlot(k, host) {
     const g = sv("g", { style: "cursor:pointer" });
     g.append(sv("rect", { x: 0, y: y - rh / 2, width: W, height: rh, fill: cur ? css("--surface-2") : "transparent" }));
     const lab = sv("text", { x: L - 10, y: y + 4, "text-anchor": "end", class: sel ? "ink" : "" });
-    lab.textContent = (sel ? "★ " : "") + c.cand + (c.upstream_opt ? " (upstream opt)" : ""); lab.setAttribute("font-family", "ui-monospace, monospace"); lab.setAttribute("font-size", "11");
+    lab.textContent = (sel ? "★ " : "") + c.cand + (c.upstream ? " (upstream opt())" : ""); lab.setAttribute("font-family", "ui-monospace, monospace"); lab.setAttribute("font-size", "11");
     g.append(lab);
     const col = css(TECH_COLOR[c.technique] || "--s1");
     if (c.time_ns) {
@@ -380,7 +380,7 @@ function candTip(k, c) {
   else geo = `${s.mode}, group ${s.sx}x${s.sy}, ${s.active_groups} of ${s.groups} groups busy = ${s.active} clusters<br>block ${s.Br}x${s.Bc} (per cluster ${s.Br_s}x${s.Bc_s}), Tr ${s.Tr} · Tc ${s.Tc}, work ${c.work_ratio}x`;
   return `<b class="mono">${esc(c.cand)}</b>${c.cand === k.selected.cand ? " ★ selected" : ""}<br>${geo}<br>time ${c.time_ns ? us(c.time_ns) + " µs" : "–"} · status ${c.status}` +
     (c.transposed ? `<br><b>transposed</b>: Z<sup>T</sup> = W<sup>T</sup> X<sup>T</sup>, run as ${esc(c.run_shape)}; X<sup>T</sup> / Z<sup>T</sup> layout cost in the neighbouring operators not counted` : "") +
-    (c.est_ns ? `<br><span class="muted">driver's rough model ${us(c.est_ns)} µs (ranking only)</span>` : "") + (c.trace ? `<br>trace available` : "") + `<br><span class="muted">${esc(c.source)}</span>`;
+    (c.est_ns ? `<br><span class="muted">model (kernel_model, estimate) ${us(c.est_ns)} µs</span>` : "") + (c.trace ? `<br>trace available` : "") + `<br><span class="muted">${esc(c.source)}</span>`;
 }
 
 // ------------------------------------------------------------------ mesh
@@ -457,7 +457,7 @@ function renderDetail(keepScroll) {
     </div>
     ${k.candidates.length ? `<h3>Swept candidates (${k.candidates.length}), fastest first</h3>
       <div class="legend">${[...new Set(k.candidates.map(c => c.technique))].map(t => `<span><i style="background:var(${TECH_COLOR[t]})"></i>${esc(t)}</span>`).join("")}
-        <span>○ hollow = output check failed</span><span>★ selected</span>${k.candidates.some(c => c.transposed) ? `<span>T: transposed run (N x M x K)</span>` : ""}<span class="muted">click a row to draw its mapping</span></div>
+        <span>○ hollow = output check failed</span><span>★ selected</span>${k.candidates.some(c => c.transposed) ? `<span>T: transposed run (N x M x K)</span>` : ""}${k.candidates.some(c => c.upstream) ? `<span>(upstream opt()): soft_hier_je's own setting for this shape</span>` : ""}<span class="muted">click a row to draw its mapping</span></div>
       <div id="cands"></div>` : ""}
   `;
   if (k.candidates.length) candPlot(k, $("#cands"));

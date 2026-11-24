@@ -7,17 +7,17 @@ each simulated alone, and lists every operator of the call with its compute and 
 
 ## Results at a glance
 
-**27.77 ms per policy call, MFU 23.0 %** (estimate; premises below).
+**27.19 ms per policy call, MFU 23.5 %** (estimate; premises below).
 
 | stage | time, ms | share of time, % | GFLOP | MFU, % |
 | --- | ---: | ---: | ---: | ---: |
-| vision | 13.51 | 49 | 645.4 | 36.4 |
-| connector | 0.17 | 1 | 4.5 | 20.9 |
-| prefix | 2.98 | 11 | 79.6 | 20.4 |
-| expert | 11.12 | 40 | 107.5 | 7.4 |
-| **all** | **27.77** | 100 | 836.9 | **23.0** |
+| vision | 13.51 | 50 | 645.4 | 36.4 |
+| connector | 0.09 | 0 | 4.5 | 37.5 |
+| prefix | 2.54 | 9 | 79.6 | 23.9 |
+| expert | 11.05 | 41 | 107.5 | 7.4 |
+| **all** | **27.19** | 100 | 836.9 | **23.5** |
 
-By kind of operator: matrix products (GEMM) take 58 % of the time at MFU 33.1 %,
+By kind of operator: matrix products (GEMM) take 58 % of the time at MFU 34.3 %,
 attention 18 % at MFU 20.1 %, and row operators (norms, activations, elementwise; they
 run on the vector cores, not the matrix unit) 24 %. Judge row operators by their time, not their MFU:
 their few FLOP are divided by the matrix-unit peak, so their MFU (0.2 %) is near zero by construction.
@@ -74,10 +74,10 @@ transposes K on chip, so their time is counted on the `qk` row.
 | stage | GEMM, µs | attention, µs | row operators, µs | total, µs | GFLOP | MFU, % | done inside another operator's kernel | no kernel time |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | vision | 6,474.4 | 2,673.1 | 4,364.0 | 13,511.4 | 645.4 | 36.4 | `transpose_k`, `softmax`, `pv` (timed in `qk`) | none |
-| connector | 147.2 | 0.0 | 18.6 | 165.7 | 4.5 | 20.9 | none | none |
-| prefix | 2,218.0 | 274.1 | 484.4 | 2,976.4 | 79.6 | 20.4 | `softmax`, `pv` (timed in `qk`) | `lang_embed_scale` (host), `state_proj` (host), `bias_state` (host) |
-| expert | 7,398.2 | 2,003.0 | 1,716.3 | 11,117.5 | 107.5 | 7.4 | `self_pv`, `self_softmax` (timed in `self_qk`); `cross_pv`, `cross_softmax` (timed in `cross_qk`) | none |
-| **all** | 16,237.7 | 4,950.2 | 6,583.2 | **27,771.1** | 836.9 | **23.0** | | |
+| connector | 73.5 | 0.0 | 18.6 | 92.1 | 4.5 | 37.5 | none | none |
+| prefix | 1,781.9 | 274.1 | 484.4 | 2,540.4 | 79.6 | 23.9 | `softmax`, `pv` (timed in `qk`) | `lang_embed_scale` (host), `state_proj` (host), `bias_state` (host) |
+| expert | 7,328.2 | 2,003.0 | 1,716.3 | 11,047.5 | 107.5 | 7.4 | `self_pv`, `self_softmax` (timed in `self_qk`); `cross_pv`, `cross_softmax` (timed in `cross_qk`) | none |
+| **all** | 15,658.0 | 4,950.2 | 6,583.2 | **27,191.4** | 836.9 | **23.5** | | |
 
 ## Totals
 
@@ -187,7 +187,7 @@ the NoC broadcast and the transpose engine, which have no trace track and come f
 | op | layers | class | shape | count | GFLOP | memory traffic, MB | weights read, MB | FLOP per weight byte | PR1: unit | stage 1: hand-written kernel | stage 1: units | stage 1: time per call, µs |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | ---: |
 | `pixel_shuffle` | - | data | 3072 x 768 | 1 | 0.000 | 9.44 | 0.00 |  | Snitch cores and iDMA | Eltwise (pixel_shuffle) | iDMA only (one 2D copy per output row) | 16.35 |
-| `connector_proj` | - | gemm | M 192, N 960, K 12288 | 1 | 4.530 | 28.68 | 23.59 | 192 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 147.16 |
+| `connector_proj` | - | gemm | M 192, N 960, K 12288 | 1 | 4.530 | 28.68 | 23.59 | 192 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 73.49 |
 | `embed_scale` | - | elementwise | 192 x 960 | 1 | 0.000 | 0.74 | 0.00 |  | Snitch cores (scalar; Spatz off in PR1) | Eltwise (scale) | Spatz on 4 cores, data by iDMA | 2.22 |
 
 
@@ -207,21 +207,21 @@ the NoC broadcast and the transpose engine, which have no trace track and come f
 | `state_proj` | embed | gemm | M 1, N 960, K 32 | 1 | 0.000 | 0.06 | 0.06 | 1 | host (PR1 prepare step) | none |  |  |
 | `bias_state` | embed | elementwise | 1 x 960 | 1 | 0.000 | 0.01 | 0.00 | 0 | host (PR1 prepare step) | none |  |  |
 | `rmsnorm_attn` | 0-15 | norm | 241 x 960 | 16 | 0.015 | 14.84 | 0.03 | 482 | Snitch cores (scalar; Spatz off in PR1) | RMSNorm | Spatz on 1 core (upstream kernel), data by iDMA | 4.70 |
-| `q_proj` | 0-15 | gemm | M 241, N 960, K 960 | 16 | 7.107 | 44.30 | 29.49 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 14.77 |
-| `k_proj` | 0-15 | gemm | M 241, N 320, K 960 | 16 | 2.369 | 19.70 | 9.83 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 11.47 |
-| `v_proj` | 0-15 | gemm | M 241, N 320, K 960 | 16 | 2.369 | 19.70 | 9.83 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 11.47 |
+| `q_proj` | 0-15 | gemm | M 241, N 960, K 960 | 16 | 7.107 | 44.30 | 29.49 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 11.82 |
+| `k_proj` | 0-15 | gemm | M 241, N 320, K 960 | 16 | 2.369 | 19.70 | 9.83 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 8.21 |
+| `v_proj` | 0-15 | gemm | M 241, N 320, K 960 | 16 | 2.369 | 19.70 | 9.83 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 8.21 |
 | `rope_q` | 0-15 | elementwise | 241 x 960 | 16 | 0.011 | 14.81 | 0.00 |  | Snitch cores (scalar; Spatz off in PR1) | Eltwise (rope) | Spatz on 4 cores, data by iDMA | 3.27 |
 | `rope_k` | 0-15 | elementwise | 241 x 320 | 16 | 0.004 | 4.94 | 0.00 |  | Snitch cores (scalar; Spatz off in PR1) | Eltwise (rope) | Spatz on 4 cores, data by iDMA | 2.39 |
 | `qk` | 0-15 | attn | h 15, Sq 241, Skv 241, d 64 | 16 | 1.784 | 9.87 | 0.00 |  | RedMulE | FlatAttention; masking not supported | RedMulE (QK^T, P.V), Spatz (softmax); data by iDMA | 17.13 |
 | `softmax` | 0-15 | softmax | 3615 x 241 | 16 | 0.070 | 55.76 | 0.00 |  | Snitch cores (scalar; Spatz off in PR1) | FlatAttention (part of the QK^T call) | Spatz (vfredmax, vfexp), inside FlatAttention | timed in `qk` |
 | `pv` | 0-15 | attn | h 15, Sq 241, Skv 241, d 64 | 16 | 1.784 | 9.87 | 0.00 |  | RedMulE | FlatAttention; masking not supported | RedMulE (QK^T, P.V), Spatz (softmax); data by iDMA | timed in `qk` |
-| `o_proj` | 0-15 | gemm | M 241, N 960, K 960 | 16 | 7.107 | 44.30 | 29.49 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 14.77 |
+| `o_proj` | 0-15 | gemm | M 241, N 960, K 960 | 16 | 7.107 | 44.30 | 29.49 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 11.82 |
 | `residual_attn` | 0-15 | elementwise | 241 x 960 | 16 | 0.004 | 22.21 | 0.00 |  | Snitch cores (scalar; Spatz off in PR1) | Eltwise (add) | Spatz on 4 cores, data by iDMA | 3.10 |
 | `rmsnorm_mlp` | 0-15 | norm | 241 x 960 | 16 | 0.015 | 14.84 | 0.03 | 482 | Snitch cores (scalar; Spatz off in PR1) | RMSNorm | Spatz on 1 core (upstream kernel), data by iDMA | 4.70 |
-| `mlp_gate` | 0-15 | gemm | M 241, N 2560, K 960 | 16 | 18.953 | 105.79 | 78.64 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 27.59 |
-| `mlp_up` | 0-15 | gemm | M 241, N 2560, K 960 | 16 | 18.953 | 105.79 | 78.64 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 27.59 |
+| `mlp_gate` | 0-15 | gemm | M 241, N 2560, K 960 | 16 | 18.953 | 105.79 | 78.64 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 25.30 |
+| `mlp_up` | 0-15 | gemm | M 241, N 2560, K 960 | 16 | 18.953 | 105.79 | 78.64 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 25.30 |
 | `silu_mul` | 0-15 | acti | 241 x 2560 | 16 | 0.049 | 59.23 | 0.00 |  | Snitch cores (scalar; Spatz off in PR1) | Activation (SiLU + gate) | Spatz on 4 cores, data by iDMA | 8.73 |
-| `mlp_down` | 0-15 | gemm | M 241, N 960, K 2560 | 16 | 18.953 | 105.79 | 78.64 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 30.96 |
+| `mlp_down` | 0-15 | gemm | M 241, N 960, K 2560 | 16 | 18.953 | 105.79 | 78.64 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 20.73 |
 | `residual_mlp` | 0-15 | elementwise | 241 x 960 | 16 | 0.004 | 22.21 | 0.00 |  | Snitch cores (scalar; Spatz off in PR1) | Eltwise (add) | Spatz on 4 cores, data by iDMA | 3.10 |
 | `rmsnorm_final` | tail | norm | 241 x 960 | 1 | 0.001 | 0.93 | 0.00 | 482 | Snitch cores (scalar; Spatz off in PR1) | RMSNorm | Spatz on 1 core (upstream kernel), data by iDMA | 4.70 |
 
@@ -242,7 +242,7 @@ the NoC broadcast and the transpose engine, which have no trace track and come f
 | `cross_v_proj` | cross (1,3..15) | gemm | M 241, N 320, K 320 | 8 | 0.395 | 4.11 | 1.64 | 241 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 5.67 |
 | `action_in_proj` | embed | gemm | M 50, N 720, K 32 | 10 | 0.023 | 1.21 | 0.46 | 50 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 2.94 |
 | `bias_action_in` | embed | elementwise | 50 x 720 | 10 | 0.000 | 1.45 | 0.01 | 25 | Snitch cores (scalar; Spatz off in PR1) | Eltwise (bias) | Spatz on 4 cores, data by iDMA | 1.36 |
-| `time_mlp_in` | embed | gemm | M 50, N 720, K 1440 | 10 | 1.037 | 22.90 | 20.74 | 50 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 9.16 |
+| `time_mlp_in` | embed | gemm | M 50, N 720, K 1440 | 10 | 1.037 | 22.90 | 20.74 | 50 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 8.94 |
 | `bias_time_in` | embed | elementwise | 50 x 720 | 10 | 0.000 | 1.45 | 0.01 | 25 | Snitch cores (scalar; Spatz off in PR1) | Eltwise (bias) | Spatz on 4 cores, data by iDMA | 1.36 |
 | `time_silu` | embed | acti | 50 x 720 | 10 | 0.001 | 1.44 | 0.00 |  | Snitch cores (scalar; Spatz off in PR1) | Activation (SiLU) | Spatz on 4 cores, data by iDMA | 1.09 |
 | `time_mlp_out` | embed | gemm | M 50, N 720, K 720 | 10 | 0.518 | 11.81 | 10.37 | 50 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 6.02 |
@@ -263,7 +263,7 @@ the NoC broadcast and the transpose engine, which have no trace track and come f
 | `rmsnorm_mlp` | 0-15 | norm | 50 x 720 | 160 | 0.023 | 23.27 | 0.23 | 100 | Snitch cores (scalar; Spatz off in PR1) | RMSNorm | Spatz on 1 core (upstream kernel), data by iDMA | 1.61 |
 | `mlp_gateup` | 0-15 | gemm | M 50, N 4096, K 720 | 160 | 47.186 | 1,020.77 | 943.72 | 50 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 17.08 |
 | `silu_mul` | 0-15 | acti | 50 x 2048 | 160 | 0.082 | 98.30 | 0.00 |  | Snitch cores (scalar; Spatz off in PR1) | Activation (SiLU + gate) | Spatz on 4 cores, data by iDMA | 2.46 |
-| `mlp_down` | 0-15 | gemm | M 50, N 720, K 2048 | 160 | 23.593 | 516.15 | 471.86 | 50 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 11.13 |
+| `mlp_down` | 0-15 | gemm | M 50, N 720, K 2048 | 160 | 23.593 | 516.15 | 471.86 | 50 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 10.71 |
 | `residual_mlp` | 0-15 | elementwise | 50 x 720 | 160 | 0.006 | 34.56 | 0.00 |  | Snitch cores (scalar; Spatz off in PR1) | Eltwise (add) | Spatz on 4 cores, data by iDMA | 1.22 |
 | `rmsnorm_final` | out | norm | 50 x 720 | 10 | 0.001 | 1.45 | 0.01 | 100 | Snitch cores (scalar; Spatz off in PR1) | RMSNorm | Spatz on 1 core (upstream kernel), data by iDMA | 1.61 |
 | `action_out_proj` | out | gemm | M 50, N 32, K 720 | 10 | 0.023 | 1.21 | 0.46 | 50 | RedMulE (operands moved by iDMA) | SummaGEMM | RedMulE; operands by iDMA and NoC (SUMMA broadcast) | 3.06 |

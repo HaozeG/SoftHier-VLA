@@ -19,7 +19,8 @@ Candidates per shape: scale_y 1 (m_tile 64) or 2 (m_tile 32); scale_x 1, 2, 4, 8
   - L1 double buffers within 352 KiB; padded work at most 2.5x nominal.
 Two stages (each run about 20 s; all tiles of all structures would be about 4,000 runs): --mode struct runs one
 tile per group structure (group shape, groups, strategy) with at least 16 active clusters; --mode tiles runs every
-tile of chosen structures. The rough model is kept only as a column (est_ns), not for selection.
+tile of chosen structures. The model (workload_modeling.kernel_model, via gemm_sweep.model_ns) is kept only as a
+column (est_ns), not for selection.
 Raw results: results/gemm_smallm_h1.csv. Run folders: $SHVLA_DATA/stage1-h1/gemm/<shape>/<cand>/.
 """
 import argparse
@@ -28,7 +29,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from gemm_sweep import HERE, TEMPLATE, RUNS, TILES, L1_BUDGET, WORK_CAP, up, parse_run, shape_key
+from gemm_sweep import HERE, TEMPLATE, RUNS, TILES, L1_BUDGET, WORK_CAP, up, parse_run, shape_key, model_ns
 
 CSV = HERE / "results/gemm_smallm_h1.csv"
 ABS_TOL = 0.02
@@ -61,11 +62,7 @@ def make_cand(M, N, K, sy, sx, nt, kt, g, strategy):
     work = Mp * Np * Kp / (M * N * K)
     if work > WORK_CAP:
         return None
-    Ni = Np // (sx * nt) // (g if strategy == "splitN" else 1)
-    calls = Ni * (Kg // kt)
-    t_comp = calls * (mt * nt * kt / 1024.0 + 150.0) + (Ni * 300.0 if strategy == "splitK" else 0.0)
-    hbm = g * Ni * 2 * Kg * (sy * mt + sx * nt) + 2 * Mp * Np
-    est = max(t_comp, hbm / 200.0)
+    est = model_ns(Mp, Np, Kp, mt, nt, kt, sx, sy, g, strategy)
     c = dict(m_size=Mp, n_size=Np, k_size=Kp, m_tile=mt, n_tile=nt, k_tile=kt, scale_x=sx, scale_y=sy, groups=g,
              strategy=strategy, active=g * sx * sy, work_ratio=round(work, 3), est_ns=int(est))
     c["cand"] = f"{strategy}_x{sx}y{sy}g{g}_t{mt}x{nt}x{kt}"
@@ -114,15 +111,15 @@ def candidates(M, N, K, mode, min_active=16, structs=None):
 
 def write_cfg(path, M, N, K, c):
     s = TEMPLATE.read_text()
-    g, sk = c["groups"], c["strategy"] == "splitK"
+    g, sk, sn = c["groups"], c["strategy"] == "splitK", c["strategy"] == "splitN"
     vals = dict(m_size=c["m_size"], n_size=c["n_size"], k_size=c["k_size"], m_tile=c["m_tile"],
                 n_tile=c["n_tile"], k_tile=c["k_tile"], summa_scale_x=c["scale_x"], summa_scale_y=c["scale_y"],
                 summa_group_number=g, summa_group_reduce=1 if sk else 0, summa_group_splitk=1 if sk else 0,
-                summa_group_splitn=0 if sk else 1,
+                summa_group_splitn=1 if sn else 0,
                 # splitK (soft_hier_je opt()): group i reads K block i of X and W, Z offsets equal (reduced)
                 summa_group_gap_x=c["k_size"] // g * 2 if sk else 0,
-                summa_group_gap_w=(c["k_size"] // g * c["n_size"] * 2) if sk else c["n_size"] // g * 2,
-                summa_group_gap_z=0 if sk else c["n_size"] // g * 2)
+                summa_group_gap_w=(c["k_size"] // g * c["n_size"] * 2) if sk else (c["n_size"] // g * 2 if sn else 0),
+                summa_group_gap_z=c["n_size"] // g * 2 if sn else 0)
     for k, v in vals.items():
         s, n = re.subn(rf"(self\.{k}\s*=\s*)\S+", lambda m: m.group(1) + str(v), s)
         assert n == 1, k
