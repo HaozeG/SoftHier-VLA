@@ -23,7 +23,7 @@ import subprocess
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-KREPO = Path(os.environ.get("KREPO", Path.home() / "softhier/.claude/worktrees/gelu-layernorm"))
+KREPO = Path(os.environ.get("KREPO", HERE.parents[1] / "third_party/softhier-kernels"))  # kernel source (submodule)
 TEMPLATE = KREPO / "implementation/config/kernels/attn.py"
 DATA = Path(os.environ.get("SHVLA_DATA", Path.home() / ".cache/softhier-vla"))
 RUNS = DATA / "stage1-h1/attn"

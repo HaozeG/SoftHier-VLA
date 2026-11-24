@@ -2,10 +2,28 @@
 
 Stage-1 hand-written kernel runs on H1 (`arch/arch_h1.py`), following the measurement protocol of
 [`docs/designs/stage1-spec.md`](../../docs/designs/stage1-spec.md) §4.3. Each run builds the kernel from
-the kernel-repo worktree (`KREPO`, default `~/softhier/.claude/worktrees/gelu-layernorm`) and runs it once on
+the kernel source (`KREPO`, default the submodule `third_party/softhier-kernels`, see below) and runs it once on
 the patched GVSoC tree (`infra/softhier/require_sim.sh`: stamp check, tree lock, `MALLOC_PERTURB_`), one run at
 a time. Run folders live under `~/.cache/softhier-vla/stage1-h1/` (outside git); this folder keeps the
 drivers and the results tables.
+
+## Kernel source
+
+The hand-written kernels (SummaGEMM, FlatAttention, RMSNorm, LayerNorm, Activation, Eltwise) are in
+`implementation/` of the GVSoC fork [`HaozeG/gvsoc`](https://github.com/HaozeG/gvsoc/tree/gelu-layernorm-kernels/implementation),
+branch `gelu-layernorm-kernels`. This repo pins it as the submodule `third_party/softhier-kernels`, currently at
+`de53537` (the stage-1 kernels: frozen build `aa57690` plus the optional `GEMM_CHECK_ABS_TOL` check).
+
+```bash
+git submodule update --init third_party/softhier-kernels   # shallow; its own submodules are not needed
+# to use newer kernels: commit them on gelu-layernorm-kernels, push, then
+git submodule update --remote third_party/softhier-kernels && git add third_party/softhier-kernels
+```
+
+Only `implementation/` is used, against the patched simulator tree (`$SOFTHIER_HOME`); the fork's own simulator
+code is not built. Builds write generated headers and `preload.elf` into the submodule's tree (ignored as dirty).
+Set `KREPO` to use another checkout. The arch file comes from this folder (`arch/arch_h1.py`), not the kernel
+repo.
 
 | File | What it does |
 | --- | --- |
