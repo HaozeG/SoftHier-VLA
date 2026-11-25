@@ -99,6 +99,8 @@ class Lowering:
     kv_proj_per_step: bool = True    # False: cross-attention K/V projection once per call
     time_in_split: bool = False      # True: time half of time_mlp_in as a one-row product
     batch_cameras: bool = False      # True: all cameras in one vision-encoder call (weights read once)
+    split_fused: bool = False        # True: expert qkv_proj as q, k, v products and mlp_gateup as gate, up
+    #                                  (upstream's deployment plan; stage1-spec §3.3)
 
 
 def pr1_lowering(prefix_rows: int) -> Lowering:
@@ -371,7 +373,12 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
     add(_ew("expert", "embed", "bias_time_out", "elementwise", "bias", Q, He, S, weight_elems=He))
     add(_ew("expert", La, "rmsnorm_attn", "norm", "rmsnorm", Q, He, d.e_layers * S, weight_elems=He))
     qw = d.t_heads * hd
-    add(_gemm("expert", Ls, "qkv_proj", Q, qw + 2 * kv, He, n_self * S))
+    if lowering.split_fused:
+        add(_gemm("expert", Ls, "self_q_proj", Q, qw, He, n_self * S))
+        add(_gemm("expert", Ls, "self_k_proj", Q, kv, He, n_self * S))
+        add(_gemm("expert", Ls, "self_v_proj", Q, kv, He, n_self * S))
+    else:
+        add(_gemm("expert", Ls, "qkv_proj", Q, qw + 2 * kv, He, n_self * S))
     add(_gemm("expert", Lc, "q_proj", Q, qw, He, n_cross * S))
     add(_ew("expert", La, "rope_q", "elementwise", "rope", Q, qw, d.e_layers * S))
     add(_ew("expert", Ls, "rope_k", "elementwise", "rope", Q, kv, n_self * S))
@@ -388,7 +395,11 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
     add(_gemm("expert", La, "o_proj", Q, He, qw, d.e_layers * S))
     add(_ew("expert", La, "residual_attn", "elementwise", "add", Q, He, d.e_layers * S, n_in=2))
     add(_ew("expert", La, "rmsnorm_mlp", "norm", "rmsnorm", Q, He, d.e_layers * S, weight_elems=He))
-    add(_gemm("expert", La, "mlp_gateup", Q, 2 * d.e_mlp, He, d.e_layers * S))
+    if lowering.split_fused:
+        add(_gemm("expert", La, "mlp_gate", Q, d.e_mlp, He, d.e_layers * S))
+        add(_gemm("expert", La, "mlp_up", Q, d.e_mlp, He, d.e_layers * S))
+    else:
+        add(_gemm("expert", La, "mlp_gateup", Q, 2 * d.e_mlp, He, d.e_layers * S))
     add(_ew("expert", La, "silu_mul", "acti", "silu_mul", Q, d.e_mlp, d.e_layers * S, n_in=2))
     add(_gemm("expert", La, "mlp_down", Q, He, d.e_mlp, d.e_layers * S))
     add(_ew("expert", La, "residual_mlp", "elementwise", "add", Q, He, d.e_layers * S, n_in=2))
