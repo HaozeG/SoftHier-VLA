@@ -14,6 +14,11 @@ Labels follow the wiki's: `measured`, `estimate`, `inference`. Constants keys re
 
 ## 1. Scope
 
+**Goal (owner, 2026-11-25).** Deploy and profile the SmolVLA model we study on SoftHier with
+upstream's existing kernel-selection strategy and whole-graph HBM configuration strategy (gvsoc
+`soft_hier_je`; §4.3 item 3), and give expected performance numbers. They are the reference for
+estimating later efficiency strategies and a first expectation for this kind of workload.
+
 Stage 1 has two workloads and one hardware configuration:
 
 | ID | Role | Section |
@@ -185,6 +190,9 @@ top of the stage-1 lowering.
 | Time-MLP split | `concat(action, time) @ W = action @ W_a + time @ W_t`. The action half is 50 x 720 x 720; the time half is one row, the same for all 50 tokens, folded into a per-step bias on the host. | expert 107.5 -> 107.0 GFLOP; one device product fewer per step | yes | recorded, not applied | PR1 (`softhier-mlir@b11cd5f frontend/smolvla_expert.py`) |
 | Pad to tile multiples | prefix rows 241 -> 256; expert keys aligned to 32 (self 291 -> 320, cross 241 -> 256) (PR1's padding; a kernel's own padding depends on its tile or block) | prefix 79.6 -> 84.7 GFLOP; expert 107.5 -> 108.2 GFLOP | no: adds work | **required by today's SummaGEMM and FlatAttention** for correct output (§4.2); the model rows stay unpadded, and each measured time includes its kernel's padding, with the ratio recorded (§4.3) | PR1 (`runtime/sh_expert.inc.c:83`); kernel code |
 
+| Expert `qkv_proj` split | 50 x 1600 x 720 -> q 50 x 960 x 720 and k, v 50 x 320 x 720 each, so Q and K/V go to their own spaces (§4.3 item 3) | FLOP unchanged; two device products more per self-attention layer and step | yes | **in the stage-1 lowering (2026-11-25)** | upstream plan (separate q, k, v projections) |
+| RoPE pair order | upstream's RoPE kernel rotates adjacent pairs (2i, 2i+1); SmolVLA rotates halves (i, i + d/2). The same per-head column permutation of W_q and W_k, applied offline, maps one onto the other; QK^T is unchanged | none | yes | **in the stage-1 lowering (2026-11-25)** | upstream RoPE kernel |
+
 New rewrites are added to this table before a number that uses them is reported.
 
 --------------------------------------------------------------------------------
@@ -193,14 +201,15 @@ New rewrites are added to this table before a number that uses them is reported.
 
 ### 4.1 Kernels and the operators they must cover
 
-Every device operator of W1 maps to one of six kernels in the kernel repo's `implementation/sw/`. Host
+Every device operator of W1 maps to one of seven kernels in the kernel repo's `implementation/sw/`. Host
 operators (`lang_embed_scale`, `state_proj`, `bias_state`) are out of scope.
 
 | Kernel | Operators of W1 | Unique shapes | Same shape measured on the kernel-repo arch |
 | --- | --- | ---: | ---: |
 | SummaGEMM | every matrix product | 18 | 12 |
 | FlatAttention | QK^T, softmax and P.V in one call; K transposed on chip | 4 | 1 |
-| Eltwise | bias, residual add, RoPE, scale, Euler axpy, pixel shuffle | 10 | 6 |
+| Eltwise | bias, residual add, RoPE (candidate), scale, Euler axpy, pixel shuffle | 10 | 6 |
+| RoPE | RoPE on head-major Q and K (upstream's kernel, view mode; added 2026-11-25) | 4 | 0 |
 | Activation | GELU (tanh form), SiLU, SiLU x gate | 4 | 3 |
 | LayerNorm | SigLIP ln1, ln2, ln_post | 1 | 1 |
 | RMSNorm | VLM and expert rmsnorm | 2 | 1 |
@@ -303,25 +312,69 @@ A kernel time counts as a stage-1 `measured` value only if all of the following 
     Eltwise add 1024 x 768 timed 15.55 us that way, while the slowest cluster finished at 21.5 us in
     the trace. FlatAttention already had the barrier. The value is the simulator's `[Performance Counter]` line in ns.
     Data starts and ends in HBM; preload and boot are excluded.
-3.  **HBM placement.** Every kernel preload uses one shared layout (`scripts/utils/hbm_layout.py` in the
-    kernel repo) and is written as a 64-bit ELF. Rule (owner, 2026-11-19): only the edge matters, since
-    each edge's controller scrambles a tensor over its 8 channels.
+3.  **HBM placement and layout: upstream's deployment plan (owner, 2026-11-25; replaces the
+    2026-11-19 rule).** The stage-1 baseline is deployed the way upstream deploys an LLM
+    (gvsoc `soft_hier_je` 4610405, `implementation/scripts/llm/normal_llm_plan.py`), so the baseline
+    is a result aligned with upstream's method. Every kernel preload still uses the shared layout
+    (`scripts/utils/hbm_layout.py`, 64-bit ELF); only the edge matters, since each edge's controller
+    scrambles a tensor over its 8 channels.
 
-    | Kernel | West | South |
-    | --- | --- | --- |
-    | SummaGEMM | input X, output Z | weights W, golden |
-    | FlatAttention | Q, output O | K, V, golden |
-    | Eltwise | input, golden | second operand Z, output |
-    | Activation | input, golden | gate, bias, output |
-    | LayerNorm | input, golden | gamma, beta, output |
-    | RMSNorm | input, golden | output |
+    *   **One address per tensor.** As in upstream's `hbm_plan`, each tensor has one place, and its
+        producer and consumer use the same address, so adjacent operators never disagree on the edge.
+        Tensors are aligned to 64 KiB (upstream `align_addr`).
+    *   **Two spaces by role.** Space A holds activations (scratch); space B holds weights, the
+        residual stream, K and V, and the RoPE tables. With two HBM edges, upstream maps A to the first
+        edge and B to the second (`reoffset_hbm_plans`): on H1, **A = west, B = south**.
+    *   **Head-major attention operands without copies.** FlatAttention reads Q, K, V and writes O head
+        by head, `(head, seq, d)`; GEMMs use rows `(seq, head x d)`. As upstream does, `q/k/v_proj` write
+        head-major through `GEMM_RESHA_Z_TO` (TALL, `resha_z_to_m = rows x heads`, so the chunk is d = 64)
+        and `o_proj` reads attention's output through `GEMM_RESHA_X_FROM` (TALL); `cross_k/v_proj` read
+        the head-major prefix K/V the same way. The head-block stride is the GEMM's padded M
+        (`GEMM_M_SIZE`), so it must equal the attention's per-head padded length (vision 1024, prefix
+        256, expert 64). No reshape operator is added.
+    *   **KV concatenation is not modelled,** as in upstream (its decode attention reads
+        `seq + cached` keys from a tensor sized for `seq`): expert self-attention reads its 291 keys
+        from one buffer and no copy of the 50 new keys into it is counted.
 
-    RedMulE kernels keep the original layout (activations west, weights south, output with the input).
-    Spatz kernels put the output on south too, so reads and writes use both edges. The golden sits on
-    whichever edge the output does not use; it is read only after the timer stops. Why the shared
-    layout: the original preloads were 32-bit ELFs, so arrays at or above 4 GiB (every south address)
-    were truncated onto west addresses. The Spatz kernels therefore kept all arrays on west, and the
-    SummaGEMM and FlatAttention weights were preloaded onto X or Q (their old runs used placeholder data).
+    Per operator (A = west, B = south). Rows marked *ext* have no counterpart in upstream's plan and
+    extend its rule (owner confirmed, 2026-11-25).
+
+    | Operator | Reads | Writes | Origin |
+    | --- | --- | --- | --- |
+    | LayerNorm / RMSNorm | residual (B); gamma, beta (B) | A | upstream (gamma, beta: ext) |
+    | `q_proj` | X (A), W (B) | Q head-major (A) | upstream |
+    | `k_proj`, `v_proj` | X (A), W (B) | K, V head-major (B) | upstream |
+    | `cross_k/v_proj` | prefix K, V head-major (B), W (B) | B, head-major | ext |
+    | vision `bias_q/k/v` | in place; bias, full-size head-major (B) | in place | ext |
+    | RoPE on Q / K | in place (A / B); cos, sin on the other edge; positions (A) | in place | upstream |
+    | FlatAttention | Q (A), K, V (B) | O (A) | upstream |
+    | `o_proj` | O head-major (A), W (B) | A | upstream |
+    | `bias_o`, `bias_up`, `bias_down` | A; bias (B) | A | ext |
+    | residual add | residual (B) in place, addend (A) | B | upstream |
+    | `mlp_up`, `mlp_gate`, GELU, SiLU x gate, `mlp_down` | A; W (B) | A | upstream |
+    | `patch_embed`, `bias_patch`, `pos_embed_add` | A; W, bias, position table (B) | residual (B) | ext |
+    | `ln_post`, pixel shuffle, `connector_proj`, `embed_scale` | A; W (B) | prefix residual (B) | ext |
+    | expert time MLP, `action_in/out_proj`, Euler update | A; W (B) | A; action state (B) | ext |
+
+    Golden arrays (output check only) sit on whichever edge the output does not use; they are read
+    after the timer stops.
+
+    **Kernel and setting per operator: upstream's selection rule (owner, 2026-11-25).** The baseline
+    numbers use upstream's choices: GEMM settings from `gemm_auto.py` `opt()` (its one or two
+    settings, simulated, the faster kept, as `softhier_engine.py` does); FlatAttention's one setting
+    from `attn_auto.py` `opt()`; the kernels upstream's plan names (residual add as Activation `none`
+    with a full-size bias, RoPE kernel, separate gate and up products). Where upstream's rule gives no
+    valid run, the smallest change to that rule is made and recorded: reshaped products shrink the tile
+    to the reshape chunk (64; `opt()`'s fixed 128 violates the asserts), and a setting that fails the
+    output check falls back to the nearest valid setting of the same rule. Operators upstream has no
+    kernel for (LayerNorm, GELU, bias, scale, axpy, pixel shuffle) use our kernel at its default
+    parameters. **Our sweeps are reported next to the baseline** as a comparison (fastest checked
+    setting, tuned kernels such as the pipelined Eltwise): the gap estimates what kernel tuning gains.
+
+    *Superseded rule (2026-11-19 to 2026-11-25):* per kernel, inputs west, second operands south,
+    Spatz outputs south, RedMulE outputs west. Times measured under it are not reused for operators
+    whose edges change; operators whose edges stay the same (most GEMMs, every FlatAttention) are
+    re-run once to confirm.
 4.  **One operator instance per run.** The composed time multiplies each time by the operator's
     `count`.
 5.  **Sweeps** (SummaGEMM tiles, FlatAttention blocks and modes):
@@ -388,7 +441,8 @@ A kernel time counts as a stage-1 `measured` value only if all of the following 
 
 The stage-1 composed estimate for W1 on H1 is the sum over operators of `count` x the measured time
 per call, as `render.kernel_sums` computes it. It is labelled **estimate** and states its assumptions:
-no overlap between kernels, no layout change between kernels, every kernel starting and ending in HBM.
+no overlap between kernels, every kernel starting and ending in HBM, and tensors placed and laid out
+by upstream's deployment plan (§4.3 item 3), so no layout copy between kernels.
 
 **Result (2026-11-20, estimate).** W1: **29.0 ms** per policy call (GEMM 58 %, attention 17 %, row
 operators 24 %); W1-b: 27.9 ms. The first composition gave 35.2 ms and 34.1 ms; the small-M GEMM sweep
@@ -418,8 +472,16 @@ Decided by the owner (2026-11-19):
 
 *   **HBM:** 16 channels on the same edges as the kernel-repo arch: 8 west, 8 south; one controller
     per edge spreading a tensor over its 8 channels (§2.1).
-*   **HBM placement:** the shared rule in §4.3 item 3: inputs west, second operands south, Spatz
-    kernel outputs south, RedMulE kernel outputs west.
+*   **HBM placement and layout (2026-11-25, replaces the 2026-11-19 per-kernel rule):** upstream's
+    deployment plan (§4.3 item 3): space A (activations) west, space B (weights, residual, K/V, tables)
+    south, one address per tensor; head-major attention operands through the GEMM reshape options;
+    KV concatenation not modelled. Scope (owner, 2026-11-25): the plan level is upstream's, while each
+    operator's kernel and setting follow upstream's selection rule (§4.3 item 3), and our sweeps are
+    reported next to it as a comparison; the fused expert `qkv_proj` and `mlp_gateup` are split into
+    separate products as in upstream's plan (fused `mlp_gateup` with `RESHA_Z_TO` is a comparison);
+    vision q/k/v bias is an Activation `none` with a full-size head-major bias; RoPE uses upstream's
+    RoPE kernel (view mode), with Eltwise RoPE as a comparison; transposed GEMM settings are dropped
+    (their X^T and Z^T layouts would need copies). The explorer's W1 preset is replaced by the result.
 *   **Thor alignment:** none for now; the baseline comes first.
 *   **Carried-over rows:** clock, instruction memory, NoC and the data-mover core are confirmed.
 
