@@ -38,6 +38,14 @@
   --g-a: #1c5cab; --g-b: #104281; --sel: #f0efec;
 }
 * { box-sizing: border-box; }
+.panes { display: grid; grid-template-columns: repeat(var(--ncol, 2), minmax(0, 1fr)); gap: 14px; align-items: start; }
+@media (max-width: 900px) { .panes { grid-template-columns: minmax(0, 1fr); } }
+.pane { min-width: 0; }
+.pane > .card { margin: 0 0 14px; }
+.pane-head { border-top: 4px solid var(--s1); } .pane.c1 .pane-head { border-top-color: var(--s2); }
+.pane-head .big { font-size: 24px; font-weight: 600; }
+.panes[style*="--ncol: 2"] .split, .panes[style*="--ncol:2"] .split { grid-template-columns: minmax(0, 1fr); }
+.planbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .cmp-head { display: grid; grid-template-columns: repeat(var(--ncol, 2), minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
 @media (max-width: 720px) { .cmp-head { grid-template-columns: minmax(0, 1fr); } }
 .cmp-col { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface-2); min-width: 0; }
@@ -120,31 +128,26 @@ details summary { cursor: pointer; color: var(--text-secondary); }
         W1 and W1-b are deployed with upstream's whole-graph HBM plan and kernel-selection rule (<code>constants.yaml h1_plan</code>, <code>h1_plan_w1b</code>); the comparison on each is the plan-constrained sweep of the same plan (<code>h1_psweep</code>, <code>h1_psweep_w1b</code>). Every time comes from a run under the plan.
         Companion to <code>docs/analysis/kernel-mapping-h1.md</code>.</div>
     </div>
-    <div class="seg chips" id="viewSeg" title="pick up to two plans to compare side by side"></div>
     <div class="seg" id="themeSeg"><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
   </div>
 
   <div class="card" id="serverNote"></div>
 
-  <div class="card" id="compare" style="margin-top:14px">
-    <h2>Side by side: up to two plans</h2>
-    <p class="sec" style="margin-top:0">Pick up to two plans in the header (a third click replaces the older pick). Left column first; x = right / left. Rows line up by stage and by run key. Every time is a sum of measured kernel times under the deployment plan (estimate, no overlap). The cards below follow the left plan's page.</p>
-    <div class="cmp-head" id="cmpHead"></div>
-    <div class="scroll"><table id="cmpStages"></table></div>
-    <div class="row" style="margin:14px 0 6px;align-items:center"><h2 class="grow" style="margin:0">Per run key</h2><div class="seg" id="cmpKind"></div></div>
-    <div class="scroll" style="max-height:520px"><table id="cmpKernels"></table></div>
+  <div class="card">
+    <h2>Plans</h2>
+    <p class="sec" style="margin-top:0">Each plan is one set of run results: its own operator split, run keys, kernel settings and times, loaded as a whole. Pick up to two to see side by side (a third pick replaces the older one); each column has its own tables, sorting, kernel detail and mesh, nothing is aligned between them, so plans that split or map operators differently compare as they are. Every time is a sum of measured kernel times under the plan's deployment (estimate, no overlap).</p>
+    <div class="planbar"><div class="seg chips" id="viewSeg"></div>
+      <label class="btn" style="cursor:pointer">Load plan results… <input type="file" id="loadPlan" accept=".json" multiple hidden></label>
+      <label class="sec" title="selecting a run key in one column selects the same key in the other, when that plan has it"><input type="checkbox" id="linkSel"> link kernel selection by run key</label></div>
+    <div id="loadNote" class="sec" style="margin-top:6px"></div>
   </div>
 
-  <div class="tiles" id="tiles" style="margin-top:14px"></div>
+  <div class="panes" id="panes"></div>
 
   <div class="card" id="checkLine"></div>
 
   <div class="card">
-    <h2>Per stage, per policy call</h2>
-    <p class="sec">Time and MFU as on the operator-graph pages (sums of measured kernel times, estimate). Weight footprint: the checkpoint's parameters at 2 B
-      (token embedding and state_proj are host-side, lm_head is never called). Weight reads and HBM traffic per call: op model on logical shapes, plan padding not included (estimate). GB/s = traffic / time.</p>
-    <div class="scroll"><table id="stageTable"></table></div>
-    <h3 style="margin-top:14px">What each stage hands to the next <span class="muted" style="font-weight:400">(inference, from op shapes)</span></h3>
+    <h2>What each stage hands to the next <span class="muted" style="font-weight:400">(inference, from op shapes; the same for every plan of this workload)</span></h2>
     <div class="scroll"><table id="flowTable"></table></div>
   </div>
 
@@ -160,24 +163,6 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     <details open><summary><h2 style="display:inline">Glossary</h2> <span class="muted">names, suffixes and columns used on this page</span></summary>
       <div class="scroll" style="margin-top:8px"><table id="glossary"></table></div></details>
   </div>
-
-  <div class="card">
-    <h2>Where the time goes, per stage <span class="muted" style="font-weight:400">(estimate)</span></h2>
-    <p class="sec">Each matrix kernel's time is split into <b>ideal</b> (true FLOP at the 131.1 TFLOP/s peak), <b>padding</b> (padded FLOP at the same rate: shape padding to whole tiles, plus for GEMM RedMulE block fill: RedMulE times whole output blocks, 32 x 64 on H1, so a 128 x 96 tile runs as 128 x 128),
-      <b>idle clusters</b> (padded FLOP on only the clusters the mapping uses), <b>HBM floor</b> (extra time if the operator's unique bytes need longer at
-      1,024 GB/s, DRAMSys's peak: 16 channels x 64 GB/s) and <b>rest beyond roofline</b> (tiling re-reads, NoC, synchronisation, per-call overhead, HBM below peak). Row operators run on the vector cores and count whole. MFU = all FLOP at peak / time, as on the whole page (row-operator FLOP included, a small share).</p>
-    <div class="legend" id="budgetLegend"></div>
-    <svg id="budget" width="100%" height="190"></svg>
-  </div>
-
-  <div class="card">
-    <div class="row"><h2 class="grow">Kernels in this call</h2>
-      <div class="seg" id="kindSeg"></div></div>
-    <p class="sec">One row per kernel shape. Time = calls per policy call x time per call. Click a row for its mapping space, sweep, mesh and trace.</p>
-    <div class="scroll"><table id="kernelTable"></table></div>
-  </div>
-
-  <div class="card" id="detail"></div>
 
   <div class="card">
     <h2>Checks on the baseline</h2>
@@ -213,7 +198,10 @@ const TECH_COLOR = { "Nosplit": "--s1", "splitN, square groups": "--s2", "splitN
 const BUDGET = [["ideal", "ideal", "--s1"], ["padding", "padding", "--s2"], ["idle", "idle clusters", "--s3"],
   ["hbm", "HBM floor", "--s6"], ["rest", "rest beyond roofline", "--s4"], ["row", "row operators", "--s5"]];
 
-const state = { page: 0, views: ["W1:upstream", "W1:constrained"], cmpKind: "all", kind: "all", kernel: null, cand: null, overlay: "redmule", sort: "total", server: false };
+const PLANS = DATA.plans.slice();
+const newPaneState = () => ({ kind: "all", kernel: null, cand: null, overlay: "redmule", sort: "total", sortRev: false, meshMode: null });
+const state = { views: ["W1:upstream", "W1:constrained"], panes: [newPaneState(), newPaneState()], link: false, server: false };
+const planById = id => PLANS.find(p => p.id === id);
 
 // ------------------------------------------------------------------ server detection (traces need serve_traces.py)
 async function detectServer() {
@@ -228,87 +216,26 @@ async function detectServer() {
 }
 
 // ------------------------------------------------------------------ header
-function pageData() { return DATA.pages[state.page]; }
 function renderSegs() {
   const vs = $("#viewSeg"); vs.innerHTML = "";
-  DATA.views.forEach(v => { const j = state.views.indexOf(v.id);
-    const b = el("button", {}, (j >= 0 ? `<span class="k" style="background:var(--s${j + 1})"></span>` : "") + esc(v.label));
+  PLANS.forEach(v => { const j = state.views.indexOf(v.id);
+    const b = el("button", { title: v.note || "" }, (j >= 0 ? `<span class="k" style="background:var(--s${j + 1})"></span>` : "") + esc(v.label) + (v.loaded ? ` <span class="muted">(loaded)</span>` : ""));
     if (j >= 0) b.className = "on";
     b.onclick = () => { const i = state.views.indexOf(v.id);
-      if (i >= 0) { if (state.views.length > 1) state.views.splice(i, 1); }
-      else { state.views.push(v.id); if (state.views.length > 2) state.views.shift(); }
-      state.page = viewById(state.views[0]).page; renderAll(); };
+      if (i >= 0) { if (state.views.length > 1) { state.views.splice(i, 1); state.panes.splice(i, 1); } }
+      else { state.views.push(v.id); state.panes.push(newPaneState()); if (state.views.length > 2) { state.views.shift(); state.panes.shift(); } }
+      renderAll(); };
     vs.append(b); });
-  const ks = $("#kindSeg"); ks.innerHTML = "";
-  [["all", "All"], ["gemm", "GEMM"], ["attn", "Attention"], ["row", "Row ops"]].forEach(([k, l]) => {
-    const b = el("button", {}, l); if (k === state.kind) b.className = "on"; b.onclick = () => { state.kind = k; renderSegs(); renderKernels(); }; ks.append(b); });
+  $("#linkSel").checked = state.link; $("#linkSel").onchange = e => { state.link = e.target.checked; };
   const ts = $("#themeSeg"); const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   ts.querySelectorAll("button").forEach(b => { b.className = b.dataset.t === cur ? "on" : ""; b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; renderAll(); }; });
 }
 
-function viewById(id) { return DATA.views.find(v => v.id === id); }
-function renderCompare() {
-  const V = state.views.map(viewById).filter(Boolean); const two = V.length === 2;
-  const H = $("#cmpHead"); H.style.setProperty("--ncol", V.length); H.innerHTML = "";
-  V.forEach((v, j) => {
-    const d = two && j === 1 ? ` <span class="sec">x ${(v.total_ms / V[0].total_ms).toFixed(2)} vs left</span>` : "";
-    H.append(el("div", { class: `cmp-col c${j}` }, `<div><b>${esc(v.label)}</b> <span class="muted">${esc(v.desc)}; <code>${esc(v.group)}</code></span></div>
-      <div style="margin-top:6px"><span class="big">${fmt(v.total_ms, 2)} ms</span>${d}</div>
-      <div class="sec">MFU ${fmt(v.mfu, 1)} % · ${v.kernels.length} run keys</div>`)); });
-  const gh = (j, n, t) => `<th class="n gh${j}${j && !n ? "" : ""}${n === 0 && j === 1 ? " gs" : ""}">${t}</th>`;
-  // stages
-  const cols = [["ms", "ms", 3], ["mfu", "MFU, %", 1], ["gemm_ms", "GEMM", 2], ["attn_ms", "attn", 2], ["row_ms", "row", 2]];
-  let h = `<tr><th>stage</th>` + V.map((v, j) => cols.map(([, t], n) => gh(j, n, `${t}`)).join("")).join("") + (two ? `<th class="n gs">x (right / left)</th>` : "") + `</tr>`;
-  h += V[0].stages.map((s0, r) => `<tr><td><b>${esc(s0.stage)}</b></td>` + V.map((v, j) => cols.map(([c, , dd], n) =>
-      `<td class="n${n === 0 && j === 1 ? " gs" : ""}">${fmt(v.stages[r][c], dd)}</td>`).join("")).join("") +
-    (two ? `<td class="n gs">${(V[1].stages[r].ms / s0.ms).toFixed(2)}</td>` : "") + `</tr>`).join("");
-  h += `<tr><td><b>call</b></td>` + V.map((v, j) => `<td class="n${j === 1 ? " gs" : ""}"><b>${fmt(v.total_ms, 2)}</b></td><td class="n">${fmt(v.mfu, 1)}</td>` +
-    ["gemm_ms", "attn_ms", "row_ms"].map(c => `<td class="n">${fmt(v.stages.reduce((a, s) => a + s[c], 0), 2)}</td>`).join("")).join("") +
-    (two ? `<td class="n gs"><b>${(V[1].total_ms / V[0].total_ms).toFixed(2)}</b></td>` : "") + `</tr>`;
-  $("#cmpStages").innerHTML = `<caption class="sec" style="text-align:left;caption-side:top;padding-bottom:4px">ms per policy call; GEMM / attn / row = time in matrix products, attention calls and row operators</caption>` + h;
-  // kernels, union of keys in order
-  const ks = $("#cmpKind"); ks.innerHTML = "";
-  [["all", "All"], ["gemm", "GEMM"], ["attn", "Attention"], ["row", "Row ops"], ["diff", "Differs"]].forEach(([k, l]) => {
-    const b = el("button", {}, l); if (k === state.cmpKind) b.className = "on"; b.onclick = () => { state.cmpKind = k; renderCompare(); }; ks.append(b); });
-  const keys = []; V.forEach(v => v.kernels.forEach(k => { if (!keys.includes(k.key)) keys.push(k.key); }));
-  const SO = ["vision", "connector", "prefix", "expert"]; keys.sort((a, b) => SO.indexOf(a.split(".")[0]) - SO.indexOf(b.split(".")[0]) || a.localeCompare(b));
-  const get = (v, key) => v.kernels.find(k => k.key === key);
-  const runs = k => k ? `${k.n_runs.upstream} + ${k.n_runs.sweep}` : "";
-  let t = `<tr><th>run key</th><th class="n">calls</th>` + (two ? `<th class="n">x (right / left)</th>` : "") + V.map((v, j) => `<th class="gh${j} gs">setting <span class="muted">(@ padded sizes if not upstream's)</span></th><th class="n gh${j}">µs</th><th class="n gh${j}">ms</th>`).join("") + `<th class="n" title="simulated runs of this key: upstream rule + plan-constrained sweep">runs</th></tr>`;
-  for (const key of keys) {
-    const K = V.map(v => get(v, key)); const k0 = K.find(Boolean);
-    if (state.cmpKind === "diff" ? !(two && K[0] && K[1] && (K[0].cand !== K[1].cand || K[0].pad !== K[1].pad)) : state.cmpKind !== "all" && k0.kind !== state.cmpKind) continue;
-    t += `<tr><td class="mono">${esc(key)}</td><td class="n">${K.map(k => k ? k.calls : "–").join(" / ").replace(/^(\d+) \/ \1$/, "$1")}</td>` +
-      (two ? `<td class="n">${K[0] && K[1] ? (K[1].ns / K[0].ns).toFixed(2) : "–"}</td>` : "") +
-      K.map((k, j) => k ? `<td class="mono gs" style="white-space:nowrap">${esc(k.cand)}${k.pad ? ` <span class="muted">@${esc(k.pad)}</span>` : ""}</td><td class="n">${us(k.ns)}</td><td class="n">${fmt(k.total_ms, 3)}</td>`
-      : `<td class="gs muted" colspan="3">–</td>`).join("") + `<td class="n muted">${runs(k0)}</td></tr>`;
-  }
-  $("#cmpKernels").innerHTML = t;
-}
-
-function renderTiles() {
-  const p = pageData(); const b = p.budget; const sum = k => b.reduce((a, x) => a + x[k], 0);
-  const tot = BUDGET.reduce((a, [k]) => a + sum(k), 0);
-  const t = $("#tiles"); t.innerHTML = "";
-  const tile = (v, l) => t.append(el("div", { class: "tile" }, `<div class="v">${v}</div><div class="l">${l}</div>`));
-  tile(`${p.total_ms} ms`, `${esc(p.name)}, upstream rule: per policy call (estimate: sum of measured kernel times, no overlap); these tiles and the cards below are for this plan`);
-  tile(`${p.mfu} %`, "MFU of the call");
-  tile(`${fmt(sum("ideal") / 1e6, 2)} ms`, "ideal: all matrix FLOP at peak");
-  tile(`${fmt(sum("hbm") / 1e6, 2)} ms`, "HBM floor (unique bytes at 1,024 GB/s)");
-  tile(`${fmt(sum("rest") / 1e6, 2)} ms`, "rest beyond roofline (largest loss)");
-  tile(`${fmt(sum("row") / 1e6, 2)} ms`, "row operators on vector cores");
-  const ctot = parseFloat(String(p.total_ms).replace(/,/g, ""));
-  if (p.compare_ms) { /* the plan-constrained comparison is in the side-by-side card */ }
-  else if (p.stage1_ms > ctot + 1e-6) tile(`${fmt(p.stage1_ms, 2)} ms`, `with the stage-1 picks (estimate; ${esc(p.ratio_label)} = ×${(p.stage1_ms / ctot).toFixed(2)})`);
-}
-
 function renderContext() {
-  const p = pageData(), C = DATA.context;
+  const C = DATA.context; const p = DATA.pages.find(x => x.name === (planById(state.views[0]) || {}).page_name) || DATA.pages[0];
   const nf = DATA.checks.filter(x => !x.ok).length;
   $("#checkLine").innerHTML = `<span class="badge ${nf ? "fail" : "ok"}">checks: ${DATA.checks.length - nf} of ${DATA.checks.length} pass</span> <span class="sec">pick, constants, placement vs trace and sums; the list is at the bottom of the page.</span>`;
   const n = (x, d) => `<td class="n">${x == null ? "" : fmt(x, d)}</td>`;
-  $("#stageTable").innerHTML = `<tr><th>stage</th><th class="n">time, ms</th><th class="n">share</th><th class="n">kernel calls</th><th class="n">MFU, %</th><th class="n">weight footprint, MB</th><th class="n">weight reads, MB</th><th class="n">HBM traffic, MB</th><th class="n">GB/s</th></tr>` +
-    p.stages.map(r => `<tr${r.kind === "stage" ? "" : ' class="sub"'}><td>${r.kind === "stage" ? `<b>${esc(r.label)}</b>` : `<span class="muted">↳</span> ${esc(r.label)}`}</td>${n(r.ms, 3)}<td class="n">${r.share == null ? "" : pct(r.share) + " %"}</td>${n(r.calls, 0)}${n(100 * r.mfu, 1)}${n(r.footprint_mb, 1)}${n(r.weights_mb, 1)}${n(r.traffic_mb, 1)}${n(r.gbps, 0)}</tr>`).join("");
   $("#flowTable").innerHTML = `<tr><th>from</th><th>to</th><th>what</th><th class="n">MB</th><th>when</th></tr>` +
     C.dataflow.map(d => `<tr><td>${d.src}</td><td>${d.dst}</td><td class="sec">${esc(d.what)}</td><td class="n">${fmt(d.bytes / 1e6, 3)}</td><td class="sec">${esc(d.when)}</td></tr>`).join("");
   const md = t => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>");
@@ -329,15 +256,50 @@ function renderChecks() {
     c.map(x => `<tr><td>${x.kind}</td><td class="mono">${esc(x.what)}</td><td><span class="badge ${x.ok ? "ok" : "fail"}">${x.ok ? "pass" : "fail"}</span></td><td class="sec">${esc(x.detail)}</td></tr>`).join("");
 }
 
+// ------------------------------------------------------------------ plan panes (one per picked plan, nothing shared)
+// P = { j, plan, st, root, q(sel) }: everything a pane draws comes from its own plan bundle and its own state
+function panes() {
+  return state.views.map((id, j) => { const plan = planById(id); const root = document.querySelector(`.pane[data-j="${j}"]`);
+    return { j, plan, st: state.panes[j], root, q: s => root.querySelector(s) }; });
+}
+function buildPanes() {
+  const host = $("#panes"); host.style.setProperty("--ncol", state.views.length); host.innerHTML = "";
+  state.views.forEach((id, j) => host.append(el("div", { class: `pane c${j}`, "data-j": j }, `
+    <div class="card pane-head"></div>
+    <div class="card"><h3 style="margin-top:0">Per stage, per policy call</h3>
+      <p class="sec" style="margin-top:0">Sums of this plan's measured kernel times (estimate). Weight reads and traffic: op model on logical shapes.</p>
+      <div class="scroll"><table class="stageTable"></table></div></div>
+    <div class="card"><h3 style="margin-top:0">Where the time goes <span class="muted" style="font-weight:400">(estimate)</span></h3>
+      <p class="sec" style="margin-top:0">Matrix kernels split into ideal (true FLOP at peak), padding, idle clusters, HBM floor (unique bytes at ${fmt(DATA.arch.bw / 1e9, 0)} GB/s) and the rest beyond the roofline; row operators whole.</p>
+      <div class="legend budgetLegend"></div><svg class="budget" width="100%" height="190"></svg></div>
+    <div class="card"><div class="row"><h3 class="grow" style="margin:0">Kernels in this plan</h3><div class="seg kindSeg"></div></div>
+      <p class="sec">One row per run key of this plan; click a header to sort, a row for its detail. x = ${esc((planById(id) || {}).ratio_label || "")}.</p>
+      <div class="scroll" style="max-height:560px"><table class="kernelTable"></table></div></div>
+    <div class="card detail"></div>`)));
+}
+function renderPaneHead(P) {
+  const v = P.plan; const other = panes().find(x => x.j !== P.j);
+  const rel = other && other.plan ? ` <span class="sec">x ${(v.total_ms / other.plan.total_ms).toFixed(2)} vs ${P.j ? "left" : "right"}</span>` : "";
+  P.q(".pane-head").innerHTML = `<div><b>${esc(v.label)}</b> <span class="muted">${esc(v.desc)}; <code>${esc(v.group)}</code></span></div>
+    <div style="margin-top:6px"><span class="big">${fmt(v.total_ms, 2)} ms</span>${rel}</div>
+    <div class="sec">MFU ${fmt(v.mfu, 1)} % · ${Object.keys(v.kernels).length} run keys · ${esc(v.note || "")}</div>`;
+}
+function renderStages(P) {
+  const n = (x, d) => `<td class="n">${x == null ? "" : fmt(x, d)}</td>`;
+  P.q(".stageTable").innerHTML = `<tr><th>stage</th><th class="n">ms</th><th class="n">share</th><th class="n">calls</th><th class="n">MFU, %</th><th class="n">weights read, MB</th><th class="n">traffic, MB</th><th class="n">GB/s</th></tr>` +
+    P.plan.stages.map(r => `<tr${r.kind === "stage" ? "" : ' class="sub"'}><td>${r.kind === "stage" ? `<b>${esc(r.label)}</b>` : `<span class="muted">↳</span> ${esc(r.label)}`}</td>${n(r.ms, 3)}<td class="n">${r.share == null ? "" : pct(r.share) + " %"}</td>${n(r.calls, 0)}${n(100 * r.mfu, 1)}${n(r.weights_mb, 1)}${n(r.traffic_mb, 1)}${n(r.gbps, 0)}</tr>`).join("");
+}
+
 // ------------------------------------------------------------------ budget chart (horizontal stacked bars)
-function renderBudget() {
-  const svg = $("#budget"); svg.innerHTML = "";
-  $("#budgetLegend").innerHTML = BUDGET.map(([, l, c]) => `<span><i style="background:var(${c})"></i>${l}</span>`).join("");
-  const b = pageData().budget; const W = svg.clientWidth || 1000, L = 90, R = 150, rowH = 34, top = 8;
+function renderBudget(P) {
+  const svg = P.q(".budget"); svg.innerHTML = "";
+  P.q(".budgetLegend").innerHTML = BUDGET.map(([, l, c]) => `<span><i style="background:var(${c})"></i>${l}</span>`).join("");
+  const b = P.plan.budget; const W = svg.clientWidth || 600, L = 80, R = 130, rowH = 34, top = 8;
   const totals = b.map(x => BUDGET.reduce((a, [k]) => a + x[k], 0)); const max = Math.max(...totals);
   const sx = v => (W - L - R) * v / max;
   svg.setAttribute("height", top + b.length * rowH + 26);
-  for (let t = 0; t <= max / 1e6; t += 2) { const x = L + sx(t * 1e6);
+  const step = max / 1e6 > 12 ? 5 : 2;
+  for (let t = 0; t <= max / 1e6; t += step) { const x = L + sx(t * 1e6);
     svg.append(sv("line", { x1: x, x2: x, y1: top, y2: top + b.length * rowH, stroke: css("--grid") }));
     const tx = sv("text", { x, y: top + b.length * rowH + 16, "text-anchor": "middle" }); tx.textContent = `${t} ms`; svg.append(tx); }
   b.forEach((r, i) => {
@@ -349,46 +311,55 @@ function renderBudget() {
       const rect = sv("rect", { x, y, width: Math.max(w - (last ? 0 : 2), 0.5), height: 20, fill: css(c), rx: last ? 4 : 0 });
       hover(rect, `<b>${r.stage}: ${l}</b><br>${fmt(r[k] / 1e6, 3)} ms (${pct(r[k] / totals[i])} % of the stage)`);
       svg.append(rect); x += w; });
-    const t = sv("text", { x: x + 8, y: y + 14 }); t.innerHTML = `<tspan class="ink">${fmt(totals[i] / 1e6, 2)} ms</tspan> · MFU ${pageData().stage_mfu[r.stage]} %`; svg.append(t);
+    const t = sv("text", { x: x + 8, y: y + 14 }); t.innerHTML = `<tspan class="ink">${fmt(totals[i] / 1e6, 2)} ms</tspan> · MFU ${P.plan.stage_mfu[r.stage]} %`; svg.append(t);
   });
 }
 
 // ------------------------------------------------------------------ kernel table
-function kernelRows() {
-  const p = pageData(); const by = {};
-  for (const o of p.ops) { if (!o.kernel) continue; const k = DATA.kernels[o.kernel];
+function kernelRows(P) {
+  const st = P.st; const by = {};
+  for (const o of P.plan.ops) { if (!o.kernel) continue; const k = P.plan.kernels[o.kernel];
     const r = by[o.kernel] = by[o.kernel] || { k, calls: 0, ops: [] }; r.calls += o.count; r.ops.push(`${o.stage}.${o.op}`); }
   const tot = Object.values(by).reduce((a, r) => a + r.calls * r.k.time_ns, 0);
   let rows = Object.values(by).map(r => ({ ...r, total: r.calls * r.k.time_ns, share: r.calls * r.k.time_ns / tot }));
-  if (state.kind !== "all") rows = rows.filter(r => r.k.kind === state.kind);
+  if (st.kind !== "all") rows = rows.filter(r => r.k.kind === st.kind);
   // natural direction first (largest first for numbers, a-z for text); a second click on the header reverses it
   const NA = 1e18, TR = { selected: 0, other: 1, none: 2 };
+  const runs = r => r.k.n_runs ? r.k.n_runs.upstream + r.k.n_runs.sweep : r.k.candidates.length;
   const key = { name: r => r.k.name, calls: r => -r.calls, time: r => -r.k.time_ns, total: r => -r.total, share: r => -r.share,
     mfu: r => r.k.kind === "row" ? NA : -r.k.mfu, fac: r => r.k.kind === "row" ? NA : r.k.f_rest,
-    bound: r => r.k.kind === "row" ? "z" : r.k.bound, roof: r => r.k.kind === "row" ? NA : -r.k.time_ns / r.k.roof_ns, cand: r => r.k.kind === "row" ? "~" : r.k.selected.cand,
-    trace: r => TR[r.k.trace_status], opt: r => r.k.stage1 ? -r.k.stage1.speedup : NA }[state.sort];
-  const dir = state.sortRev ? -1 : 1;
+    bound: r => r.k.kind === "row" ? "z" : r.k.bound, roof: r => r.k.kind === "row" ? NA : -r.k.time_ns / r.k.roof_ns, cand: r => r.k.selected.cand || "~",
+    runs: r => -runs(r), trace: r => TR[r.k.trace_status], opt: r => r.k.stage1 ? r.k.stage1.speedup : NA }[st.sort];
+  const dir = st.sortRev ? -1 : 1;
   rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * dir || (b.total - a.total); });
   return rows;
 }
 const TRACE_BADGE = { selected: ["ok", "selected"], other: ["warn", "other setting"], none: ["fail", "none"] };
-function renderKernels() {
-  const t = $("#kernelTable"); const rows = kernelRows();
-  const th = (k, l, n, title) => `<th class="sort ${n ? "n" : ""}" data-s="${k}"${title ? ` title="${title}"` : ""}>${l}${state.sort === k ? (state.sortRev ? " ▴" : " ▾") : ""}</th>`;
-  t.innerHTML = `<tr>${th("name", "kernel")}<th>operators</th>${th("calls", "calls", 1)}${th("time", "µs per call", 1)}${th("total", "ms per policy call", 1)}${th("share", "share", 1)}${th("mfu", "MFU, %", 1)}${th("fac", "f_pad · f_occ · f_rest", 0, "sorts by f_rest, lowest first")}${th("bound", "roofline bound", 0, "the larger lower limit: true FLOP at peak (compute) or unique bytes at HBM peak (HBM)")}${th("roof", "× roofline", 1, "measured time / roofline limit; large = latency, sync or overhead dominate")}${th("cand", "selected setting")}${th("opt", pageData().ratio_label, 0, "comparison time / this page's time for the same operator; below 1: this page is slower; largest first")}${th("trace", "trace", 0, "selected setting traced first")}</tr>`;
-  t.querySelectorAll("th.sort").forEach(h => h.onclick = () => { state.sortRev = state.sort === h.dataset.s ? !state.sortRev : false; state.sort = h.dataset.s; renderKernels(); });
+function renderKernels(P) {
+  const st = P.st; const ks = P.q(".kindSeg"); ks.innerHTML = "";
+  [["all", "All"], ["gemm", "GEMM"], ["attn", "Attention"], ["row", "Row ops"]].forEach(([k, l]) => {
+    const b = el("button", {}, l); if (k === st.kind) b.className = "on"; b.onclick = () => { st.kind = k; renderKernels(P); }; ks.append(b); });
+  const t = P.q(".kernelTable"); const rows = kernelRows(P);
+  const th = (k, l, n, title) => `<th class="sort ${n ? "n" : ""}" data-s="${k}"${title ? ` title="${title}"` : ""}>${l}${st.sort === k ? (st.sortRev ? " ▴" : " ▾") : ""}</th>`;
+  t.innerHTML = `<tr>${th("name", "run key")}${th("calls", "calls", 1)}${th("time", "µs", 1)}${th("total", "ms", 1)}${th("share", "share", 1)}${th("mfu", "MFU, %", 1)}${th("fac", "f_pad · f_occ · f_rest", 0, "sort by f_rest")}${th("bound", "bound")}${th("roof", "x roofline", 1)}${th("cand", "selected")}${th("runs", "runs", 1, "simulated runs of this key (upstream rule + plan-constrained sweep)")}${th("opt", "x other selection", 1, P.plan.ratio_label)}${th("trace", "trace")}</tr>`;
+  t.querySelectorAll("th.sort").forEach(h => h.onclick = () => { st.sortRev = st.sort === h.dataset.s ? !st.sortRev : false; st.sort = h.dataset.s; renderKernels(P); });
   for (const r of rows) {
-    const k = r.k; const tr = el("tr", { class: "click" + (state.kernel === k.name ? " on" : "") });
-    const fac = k.kind === "row" ? `<span class="muted">vector cores; MFU n/a</span>` :
+    const k = r.k; const tr = el("tr", { class: "click" + (st.kernel === k.name ? " on" : "") });
+    const fac = k.kind === "row" ? `<span class="muted">vector cores</span>` :
       `<span class="mono">${k.f_pad.toFixed(2)} · ${k.f_occ.toFixed(2)} · ${k.f_rest.toFixed(2)}</span>`;
-    const tb = TRACE_BADGE[k.trace_status];
-    tr.innerHTML = `<td class="mono">${esc(k.name)}</td><td class="sec" style="max-width:260px">${esc([...new Set(r.ops)].join(", "))}</td>
+    const tb = TRACE_BADGE[k.trace_status]; const n = k.n_runs;
+    tr.innerHTML = `<td class="mono" title="${esc([...new Set(r.ops)].join(", "))}">${esc(k.name)}</td>
       <td class="n">${r.calls}</td><td class="n">${us(k.time_ns)}</td><td class="n">${fmt(r.total / 1e6, 3)}</td><td class="n">${pct(r.share)} %</td>
       <td class="n">${k.kind === "row" ? "–" : pct(k.mfu)}</td><td>${fac}</td><td>${k.kind === "row" ? "–" : k.bound}</td><td class="n">${k.kind === "row" ? "–" : fmt(k.time_ns / k.roof_ns, 1)}</td>
-      <td class="mono">${esc(k.kind === "row" ? "" : k.selected.cand)}</td><td>${optCell(k)}</td><td><span class="badge ${tb[0]}">${tb[1]}</span></td>`;
-    tr.onclick = () => { state.kernel = k.name; state.cand = null; renderKernels(); renderDetail(); $("#detail").scrollIntoView({ behavior: "smooth", block: "start" }); };
+      <td class="mono">${esc(k.selected.cand || "")}</td><td class="n" title="${n ? `upstream ${n.upstream} (${n.upstream_ok} ok) + constrained ${n.sweep} (${n.sweep_ok} ok), ${n.variants} padding(s)` : ""}">${n ? `${n.upstream} + ${n.sweep}` : k.candidates.length}</td><td>${optCell(k)}</td><td><span class="badge ${tb[0]}">${tb[1]}</span></td>`;
+    tr.onclick = () => selectKernel(P, k.name);
     t.append(tr);
   }
+}
+function selectKernel(P, name) {
+  P.st.kernel = name; P.st.cand = null; renderKernels(P); renderDetail(P);
+  if (state.link) panes().forEach(Q => { if (Q.j !== P.j && Q.plan.kernels[name]) { Q.st.kernel = name; Q.st.cand = null; renderKernels(Q); renderDetail(Q, true); } });
+  P.q(".detail").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ------------------------------------------------------------------ detail
@@ -469,8 +440,10 @@ function ifaceTable(k) {
 function planNote(k) {
   const fix = k.selected.fix || k.plan_fix;
   const failed = k.failed || [];
-  let h = `<div class="note">Upstream deployment plan: ${k.kind === "row" ? "kernel at default parameters with the plan's shape and HBM placement" : "upstream's candidates simulated, the fastest that passed the output check kept"}.`;
-  if (fix) h += `<br><b>Recorded fix:</b> ${esc(fix)}`;
+  const cons = k.plan_sel === "constrained";
+  let h = `<div class="note">${cons ? "Plan-constrained sweep: same deployment plan; the fastest run of this key that passed the output check, over upstream's runs and the sweep's candidates (any head padding of the selected combination)" :
+    `Upstream deployment plan: ${k.kind === "row" ? "kernel at default parameters with the plan's shape and HBM placement" : "upstream's candidates simulated, the fastest that passed the output check kept"}`}.`;
+  if (fix && !cons) h += `<br><b>Recorded fix:</b> ${esc(fix)}`;
   if (failed.length) h += `<br><b>Failed the output check:</b> ${failed.map(f => `<code>${esc(f.cand)}</code>${f.bad ? ` (${Number(f.bad).toLocaleString()} bad)` : ` (${esc(f.status)})`}`).join(", ")}`;
   if ((k.skipped || []).length) h += `<br><span class="muted">Not runnable: ${k.skipped.map(x => `${esc(x.cand)} (${esc(x.status)})`).join(", ")}</span>`;
   return h + `</div>`;
@@ -479,7 +452,7 @@ function notSwept(k) {
   return k.not_swept.length ? `<details style="margin-top:6px"><summary>In the kernel but never swept</summary><ul>${k.not_swept.map(x => `<li><b>${esc(x.name)}</b>: <span class="sec">${esc(x.why)}</span></li>`).join("")}</ul></details>` : "";
 }
 
-function candPlot(k, host) {
+function candPlot(P, k, host) {
   host.innerHTML = "";
   if (!k.candidates.length) return;
   const cs = [...k.candidates].sort((a, b) => (a.time_ns ?? 1e12) - (b.time_ns ?? 1e12));
@@ -490,13 +463,13 @@ function candPlot(k, host) {
   const ticks = niceTicks(max);
   ticks.forEach(t => { const x = sx(t); svg.append(sv("line", { x1: x, x2: x, y1: top - 4, y2: top + cs.length * rh, stroke: css("--grid") }));
     const tx = sv("text", { x, y: top - 8, "text-anchor": "middle" }); tx.textContent = `${fmt(t / 1e3, 0)} µs`; svg.append(tx); });
-  const curCand = state.cand || k.selected.cand;
+  const curCand = P.st.cand || k.selected.cand;
   cs.forEach((c, i) => {
     const y = top + i * rh + rh / 2; const sel = c.cand === k.selected.cand; const cur = c.cand === curCand;
     const g = sv("g", { style: "cursor:pointer" });
     g.append(sv("rect", { x: 0, y: y - rh / 2, width: W, height: rh, fill: cur ? css("--surface-2") : "transparent" }));
     const lab = sv("text", { x: L - 10, y: y + 4, "text-anchor": "end", class: sel ? "ink" : "" });
-    lab.textContent = (sel ? "★ " : "") + c.cand + (k.plan ? ((c.origin || "").startsWith("fallback") ? " (fallback)" : (c.origin || "").startsWith("plan-constrained") ? (c.constrained_pick ? " ◆ constrained pick" : " (constrained)") : c.fix ? " (fixed)" : "") : (c.upstream ? " (upstream opt())" : "")); lab.setAttribute("font-family", "ui-monospace, monospace"); lab.setAttribute("font-size", "11");
+    lab.textContent = (sel ? "★ " : "") + c.cand + (k.plan ? ((c.origin || "").startsWith("fallback") ? " (fallback)" : (c.origin || "").startsWith("plan-constrained") ? (c.constrained_pick ? " ◆" : " (c)") : c.fix ? " (fixed)" : "") : (c.upstream ? " (upstream opt())" : "")); lab.setAttribute("font-family", "ui-monospace, monospace"); lab.setAttribute("font-size", "11");
     g.append(lab);
     const col = css(TECH_COLOR[c.technique] || "--s1");
     if (c.time_ns) {
@@ -506,7 +479,7 @@ function candPlot(k, host) {
       const v = sv("text", { x: sx(c.time_ns) + 9, y: y + 4 }); v.textContent = filled ? us(c.time_ns) : `${us(c.time_ns)} ${c.status}`; g.append(v);
     } else { const v = sv("text", { x: L + 4, y: y + 4 }); v.textContent = c.status; g.append(v); }
     hover(g, () => candTip(k, c));
-    g.addEventListener("click", () => { state.cand = c.cand; renderDetail(true); });
+    g.addEventListener("click", () => { P.st.cand = c.cand; renderDetail(P, true); });
     svg.append(g);
   });
 }
@@ -523,10 +496,10 @@ function candTip(k, c) {
 }
 
 // ------------------------------------------------------------------ mesh
-function meshSvg(k, c, overlayTrace) {
+function meshSvg(k, c, overlayTrace, overlay) {
   const N = 8, cell = 40, pad = 30; const W = pad + N * cell + 10, H = N * cell + pad + 24;
   const svg = sv("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}` });
-  const mesh = c ? c.mesh : null; const busy = overlayTrace ? overlayTrace.busy_frac[state.overlay] : null;
+  const mesh = c ? c.mesh : null; const busy = overlayTrace ? overlayTrace.busy_frac[overlay] : null;
   const active = overlayTrace ? new Set(overlayTrace.active_clusters) : null;
   const qs = ["--q1", "--q2", "--q3", "--q4", "--q5"].map(css);
   for (let id = 0; id < 64; id++) {
@@ -536,7 +509,7 @@ function meshSvg(k, c, overlayTrace) {
       const b = busy[id]; const on = b > 0;
       fill = on ? qs[Math.min(4, Math.floor(b * 5))] : css("--idle");  // absolute: 0-20-40-60-80-100 %
       label = on ? Math.round(100 * b) : ""; ink = on ? (qs.indexOf(fill) >= 3 ? "#fff" : css("--text-primary")) : ink;
-      info += `<br>${state.overlay} busy ${pct(b)} % of the kernel window`;
+      info += `<br>${overlay} busy ${pct(b)} % of the kernel window`;
     }
     if (mesh) { const m = mesh[id];
       if (!busy) { if (m.g >= 0) { fill = css(m.g % 2 ? "--g-b" : "--g-a"); ink = css("--text-primary"); label = "g" + m.g; } }
@@ -560,13 +533,13 @@ function gemmCellInfo(k, c, m) {
   return `<br>group owns ${own}<br>Z tile per step: rows +${m.cy * s.mt}, cols +${m.cx * s.nt} (${s.mt}x${s.nt}), ${s.redmule_calls} RedMulE calls`;
 }
 
-function renderDetail(keepScroll) {
+function renderDetail(P, keepScroll) {
   if (DATA.pages) setTimeout(writeHash, 0);
-  const d = $("#detail"); const k = DATA.kernels[state.kernel];
+  const d = P.q(".detail"); const k = P.plan.kernels[P.st.kernel];
   if (!k) { d.innerHTML = `<h2>Kernel detail</h2><p class="sec">Pick a kernel in the table above.</p>`; return; }
-  const p = pageData(); const uses = k.uses.filter(u => u.page === p.name);
+  const p = { name: P.plan.label }; const uses = k.uses;
   const calls = uses.reduce((a, u) => a + u.count, 0);
-  const cand = k.kind === "row" ? null : (k.candidates.find(c => c.cand === (state.cand || k.selected.cand)) || k.selected);
+  const cand = k.kind === "row" ? null : (k.candidates.find(c => c.cand === (P.st.cand || k.selected.cand)) || k.selected);
   const tr = k.trace;
   d.innerHTML = `
     <div class="row"><h2 class="grow mono" style="font-size:17px">${esc(k.name)}</h2>
@@ -591,31 +564,31 @@ function renderDetail(keepScroll) {
       </div>
       <div>
         <h3>Spatial mapping on the ${DATA.arch.mesh[0]} x ${DATA.arch.mesh[1]} mesh</h3>
-        <div id="meshCtl" class="row" style="margin-bottom:6px"></div>
-        <div class="row" style="align-items:flex-start"><div id="mesh"></div><div id="meshSide" class="grow sec" style="min-width:200px;font-size:13px"></div></div>
+        <div class="meshCtl" class="row" style="margin-bottom:6px"></div>
+        <div class="row" style="align-items:flex-start"><div class="mesh"></div><div class="meshSide grow sec" style="min-width:200px;font-size:13px"></div></div>
         <h3>Trace</h3>
-        <div id="traceBox"></div>
+        <div class="traceBox"></div>
       </div>
     </div>
     ${k.candidates.length ? `<h3>${k.plan ? "Plan runs" : "Swept candidates"} (${k.candidates.length}), fastest first</h3>
       <div class="legend">${[...new Set(k.candidates.map(c => c.technique))].map(t => `<span><i style="background:var(${TECH_COLOR[t]})"></i>${esc(t)}</span>`).join("")}
-        <span>○ hollow = output check failed</span><span>★ selected</span>${k.candidates.some(c => c.transposed) ? `<span>T: transposed run (N x M x K)</span>` : ""}${!k.plan && k.candidates.some(c => c.upstream) ? `<span>(upstream opt()): soft_hier_je's own setting for this shape</span>` : ""}${k.plan ? `<span>(fixed): upstream's setting with a recorded fix · (fallback): fastest passing earlier sweep setting</span>` : ""}<span class="muted">click a row to draw its mapping</span></div>
-      <div id="cands"></div>` : ""}
+        <span>○ hollow = output check failed</span><span>★ selected in this plan</span>${k.plan ? `<span>(c) plan-constrained sweep run</span><span>◆ plan-constrained pick</span>` : ""}${k.candidates.some(c => c.transposed) ? `<span>T: transposed run (N x M x K)</span>` : ""}${!k.plan && k.candidates.some(c => c.upstream) ? `<span>(upstream opt()): soft_hier_je's own setting for this shape</span>` : ""}${k.plan ? `<span>(fixed): upstream's setting with a recorded fix · (fallback): fastest passing earlier sweep setting</span>` : ""}<span class="muted">click a row to draw its mapping</span></div>
+      <div class="cands"></div>` : ""}
   `;
-  if (k.candidates.length) candPlot(k, $("#cands"));
+  if (k.candidates.length) candPlot(P, k, P.q(".cands"));
   // mesh + overlay
   const candTrace = cand && cand.trace ? (k.traces.find(t => t.name === cand.trace) || null) : null;
   const rowTrace = k.kind === "row" && tr && tr.busy_frac ? tr : null;
   const ovTrace = candTrace || rowTrace;
-  const ctl = $("#meshCtl");
+  const ctl = P.q(".meshCtl");
   const modes = [["map", "mapping (kernel source)"]].concat(ovTrace ? [["redmule", "RedMulE busy"], ["idma", "iDMA busy"], ["spatz", "Spatz busy"]] : []);
-  let mode = state.meshMode && modes.find(m => m[0] === state.meshMode) ? state.meshMode : (k.kind === "row" ? (ovTrace ? "idma" : "map") : "map");
-  const seg = el("div", { class: "seg" }); modes.forEach(([m, l]) => { const b = el("button", {}, l); if (m === mode) b.className = "on"; b.onclick = () => { state.meshMode = m; renderDetail(true); }; seg.append(b); });
+  let mode = P.st.meshMode && modes.find(m => m[0] === P.st.meshMode) ? P.st.meshMode : (k.kind === "row" ? (ovTrace ? "idma" : "map") : "map");
+  const seg = el("div", { class: "seg" }); modes.forEach(([m, l]) => { const b = el("button", {}, l); if (m === mode) b.className = "on"; b.onclick = () => { P.st.meshMode = m; renderDetail(P, true); }; seg.append(b); });
   ctl.append(seg);
-  if (mode !== "map") state.overlay = mode;
-  const mesh = $("#mesh");
-  mesh.append(meshSvg(k, cand, mode === "map" ? null : ovTrace));
-  const side = $("#meshSide");
+  if (mode !== "map") P.st.overlay = mode;
+  const mesh = P.q(".mesh");
+  mesh.append(meshSvg(k, cand, mode === "map" ? null : ovTrace, P.st.overlay));
+  const side = P.q(".meshSide");
   if (k.kind === "row") side.innerHTML = `${esc(k.row_note)}.<br><br>${ovTrace ? `${ovTrace.active_clusters.length} clusters active in the trace window; ${k.shape[0]} rows.` : "No trace."}`;
   else { const s = cand.setting;
     side.innerHTML = `<div class="mono" style="margin-bottom:6px">${esc(cand.cand)}${cand.cand === k.selected.cand ? " ★" : ""}</div>` +
@@ -625,11 +598,11 @@ function renderDetail(keepScroll) {
       : `${s.groups} groups of ${s.sx} x ${s.sy}; ${s.active_groups} busy (${k.hkv} KV heads, ${s.heads_per_group} per group) = <b>${s.active}</b> clusters. ${s.mode} mode.
         <br>Block ${s.Br} x ${s.Bc}, per cluster ${s.Br_s} x ${s.Bc_s}; Tr ${s.Tr} x Tc ${s.Tc} blocks (q padded to ${s.q_pad}, kv to ${s.kv_pad}; work ${cand.work_ratio}x).`) +
       `<br><br><span class="muted">Placement from <code>flex_group_barrier.h:43</code>: cluster id = x + 8y, groups tile the mesh row-major, group id &lt; groups works. y = 0 drawn at the bottom; HBM channels on the west and south edges (arch_h1.py). ${mode === "map" ? "" : "Numbers: busy % in the kernel window (shade steps of 20 %); outlined cells are the mapping's active clusters."}</span>` +
-      (cand.cand !== k.selected.cand ? `<br><br><button class="btn" id="backSel">back to selected</button>` : "");
-    const bs = $("#backSel"); if (bs) bs.onclick = () => { state.cand = null; renderDetail(true); };
+      (cand.cand !== k.selected.cand ? `<br><br><button class="btn" class="btn backSel">back to selected</button>` : "");
+    const bs = P.q(".backSel"); if (bs) bs.onclick = () => { P.st.cand = null; renderDetail(P, true); };
   }
   // trace box
-  const tb = $("#traceBox");
+  const tb = P.q(".traceBox");
   const show = candTrace || (k.kind === "row" ? rowTrace : null);
   const statusLine = k.kind === "row" ? (rowTrace ? `<span class="badge ok">trace of this run</span>` : `<span class="badge fail">no trace</span>`)
     : `<span class="badge ${TRACE_BADGE[k.trace_status][0]}">selected setting: ${k.trace_status === "selected" ? "traced" : "no trace"}</span> <span class="sec">${esc(k.trace_note)}</span>`;
@@ -646,24 +619,46 @@ function renderDetail(keepScroll) {
   if (!keepScroll) d.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function renderAll() { renderSegs(); renderCompare(); renderTiles(); renderContext(); renderChecks(); renderBudget(); renderKernels(); renderDetail(true); writeHash(); }
-// deep links: #page=W1-b&k=gemm_50x720x720&cand=...&mode=redmule
+function renderPane(P) { renderPaneHead(P); renderStages(P); renderBudget(P); renderKernels(P); renderDetail(P, true); }
+function renderAll() {
+  renderSegs(); buildPanes(); renderContext(); renderChecks();
+  panes().forEach(renderPane); writeHash();
+}
+// loading more plans: a bundle (build/plans/<id>.json, kernel_explorer.write) or a file with {plans: [...]}
+$("#loadPlan").onchange = async e => {
+  const msgs = [];
+  for (const f of e.target.files) {
+    try {
+      const j = JSON.parse(await f.text()); const list = Array.isArray(j.plans) ? j.plans : [j];
+      for (const b of list) {
+        if (!b || !b.kernels || !b.ops || !b.label) { msgs.push(`${esc(f.name)}: not a plan bundle`); continue; }
+        let id = b.id || f.name; while (planById(id)) id += "'";
+        PLANS.push({ ...b, id, loaded: true }); msgs.push(`loaded <b>${esc(b.label)}</b> from ${esc(f.name)}`);
+        state.views.push(id); state.panes.push(newPaneState()); if (state.views.length > 2) { state.views.shift(); state.panes.shift(); }
+      }
+    } catch (err) { msgs.push(`${esc(f.name)}: ${esc(err.message)}`); }
+  }
+  $("#loadNote").innerHTML = msgs.join(" · ") + (msgs.length ? `. <span class="muted">Loaded plans live in this tab only; the mesh drawing assumes the ${DATA.arch.mesh[0]} x ${DATA.arch.mesh[1]} arch of this page.</span>` : "");
+  e.target.value = ""; renderAll();
+};
+// deep links: #v=W1:upstream,W1:constrained&k0=<run key>&k1=...&c0=<candidate>
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
-  const pi = DATA.pages.findIndex(p => p.name === h.get("page")); if (pi >= 0) { state.page = pi; state.views = [`${DATA.pages[pi].name}:upstream`, `${DATA.pages[pi].name}:constrained`].filter(viewById); }
-  const vv = (h.get("v") || "").split(",").filter(viewById); if (vv.length) { state.views = vv.slice(0, 2); state.page = viewById(vv[0]).page; }
-  if (h.get("k") && DATA.kernels[h.get("k")]) state.kernel = h.get("k");
-  if (h.get("cand")) state.cand = h.get("cand");
-  if (h.get("mode")) state.meshMode = h.get("mode");
+  const pg = DATA.pages.find(p => p.name === h.get("page")); if (pg) state.views = [`${pg.name}:upstream`, `${pg.name}:constrained`].filter(planById);
+  const vv = (h.get("v") || "").split(",").filter(planById); if (vv.length) state.views = vv.slice(0, 2);
+  state.panes = state.views.map(newPaneState);
+  state.views.forEach((id, j) => { const st = state.panes[j], P = planById(id);
+    const kk = h.get("k" + j) || (j === 0 ? h.get("k") : null); if (kk && P.kernels[kk]) st.kernel = kk;
+    if (h.get("c" + j)) st.cand = h.get("c" + j); if (h.get("m" + j)) st.meshMode = h.get("m" + j); });
 }
 function writeHash() {
-  const h = new URLSearchParams({ page: pageData().name, v: state.views.join(",") }); if (state.kernel) h.set("k", state.kernel);
-  if (state.cand) h.set("cand", state.cand); if (state.meshMode) h.set("mode", state.meshMode);
+  const h = new URLSearchParams({ v: state.views.filter(id => !planById(id).loaded).join(",") });
+  state.panes.forEach((st, j) => { if (st.kernel) h.set("k" + j, st.kernel); if (st.cand) h.set("c" + j, st.cand); if (st.meshMode) h.set("m" + j, st.meshMode); });
   history.replaceState(null, "", "#" + h.toString());
 }
 readHash();
-detectServer().then(() => { renderAll(); if (state.kernel) $("#detail").scrollIntoView({ block: "start" }); });
-addEventListener("resize", () => { renderBudget(); if (state.kernel) renderDetail(true); });
+detectServer().then(() => { renderAll(); const P = panes().find(P => P.st.kernel); if (P) P.q(".detail").scrollIntoView({ block: "start" }); });
+addEventListener("resize", () => panes().forEach(P => { renderBudget(P); if (P.st.kernel) renderDetail(P, true); }));
 </script>
 </body>
 </html>

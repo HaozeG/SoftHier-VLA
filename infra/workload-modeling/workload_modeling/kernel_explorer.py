@@ -291,6 +291,7 @@ class Explorer:
         self.pages = [self._page(*p) for p in PAGES]
         for k in self.kernels.values():
             self._finish_kernel(k)
+            self._finish_wrong(k)
         self._check_sums()
         self.stage_tables = {p["name"]: self._stage_table(p) for p in self.pages}
 
@@ -387,6 +388,10 @@ class Explorer:
             self._plan_kernel(k)
         else:
             {"gemm": self._gemm, "attn": self._attn, "row": self._row}[k["kind"]](k)
+        self._factors(k)
+
+    def _factors(self, k: dict) -> None:
+        """MFU, roofline and the f_pad x f_occ x f_rest split of a kernel from its time and selected setting."""
         f = k["flop_call"]
         t = k["time_ns"] * 1e-9
         k["mfu"] = f / (t * self.peak)
@@ -396,7 +401,6 @@ class Explorer:
         k["roof_ns"] = max(k["t_ideal_ns"], k["t_hbm_min_ns"])
         k["bound"] = "compute" if k["t_ideal_ns"] >= k["t_hbm_min_ns"] else "HBM"
         if k["kind"] != "row":
-            self._wrong_faster(k)
             s = k["selected"]["setting"]
             # f_pad = shape padding (whole tiles, work_ratio) x RedMulE array padding (whole 32 x 64 output blocks).
             # Both are work the mapping fixes before the kernel runs: zeros or empty block slots that cost full
@@ -408,6 +412,10 @@ class Explorer:
             k["f_pad_text"] = f_pad_text(k)
             k["f_occ"] = s["active"] / NCL
             k["f_rest"] = k["mfu"] / (k["f_pad"] * k["f_occ"])
+
+    def _finish_wrong(self, k: dict) -> None:
+        if k["kind"] != "row":
+            self._wrong_faster(k)
 
     def _trace(self, name: str) -> dict | None:
         t = self.traces.get(name)
@@ -541,8 +549,7 @@ class Explorer:
             sel = next(c for c in cands if c["cand"] == best["cand"])
             sel = dict(sel, time_final_ns=sel["time_ns"])
             ts = sorted({c["technique"] for c in cands})
-            techs = [(t, "upstream's candidates (opt() / attn_auto), recorded fixes, and the plan-constrained "
-                         "sweep's candidates", "plan_runs.py, plan_sweep.py") for t in ts]
+            techs = [(t, "upstream rule and plan-constrained sweep runs", "plan_runs.py, plan_sweep.py") for t in ts]
         space = {t: sum(c["technique"] == t for c in cands) for t, _, _ in techs}
         k["n_runs"] = dict(upstream=len(rows), upstream_ok=len(ok), sweep=len(sw),
                            sweep_ok=sum(r["status"] == "ok" for r in sw),
@@ -553,7 +560,7 @@ class Explorer:
                                                for r in mine if r not in rows],
                  failed=[dict(cand=r["cand"], status=r["status"], bad=r["bad"], time_ns=r["time_ns"], fix=r["fix"])
                          for r in rows if r["status"] != "ok"])
-        self._interface(k, PLAN_KDIR[kern], [r["run_dir"] for r in rows], best["run_dir"])
+        self._interface(k, PLAN_KDIR[kern], [r["run_dir"] for r in rows + sw], best["run_dir"])
         k.update(traces=[], trace=None, trace_status="none", trace_note="plan runs are not traced")
         # comparison: the plan-constrained sweep's pick for this key (first page that has one)
         alt = next((a for a in k.get("alt", {}).values() if a["time_ns"]), None)
@@ -760,7 +767,7 @@ class Explorer:
                         f"sum over operators of count x kernel time = {tot:.3f} ms; operator-graph page {want:.2f} ms")
 
     # ----------------------------------------------------------------- per-stage table
-    def _stage_table(self, page: dict) -> list[dict]:
+    def _stage_table(self, page: dict, check: bool = True) -> list[dict]:
         """Per stage: time, share, kernel calls, MFU (the operator-graph definition), weight footprint, weight
         reads and HBM traffic per call (op model, logical shapes, operators that run as their own kernel); the
         expert also per denoising step and once per call. Checks that the expert split adds up."""
@@ -792,22 +799,24 @@ class Explorer:
             names = {o["op"] for o in per_call}
             t_exp = sum(o["count"] * o["ns"] for o in ops)
             t_split = S * out[-2]["ms"] * 1e6 + out[-1]["ms"] * 1e6
-            self._check("sum", f"{page['name']} expert per step",
-                        names == {"cross_k_proj", "cross_v_proj"} and abs(t_split - t_exp) < 1.0,
-                        f"once-per-call operators {sorted(names)}; {S} x per step + once per call = "
-                        f"{t_split / 1e6:.3f} ms; expert stage {t_exp / 1e6:.3f} ms")
+            if check:
+                self._check("sum", f"{page['name']} expert per step",
+                            names == {"cross_k_proj", "cross_v_proj"} and abs(t_split - t_exp) < 1.0,
+                            f"once-per-call operators {sorted(names)}; {S} x per step + once per call = "
+                            f"{t_split / 1e6:.3f} ms; expert stage {t_exp / 1e6:.3f} ms")
         return out
 
     # ----------------------------------------------------------------- time budget (estimate)
-    def budget(self, page: dict) -> list[dict]:
+    def budget(self, page: dict, kernels: dict | None = None) -> list[dict]:
         """Per stage: ideal compute, padding, idle clusters, HBM floor, rest of the matrix kernels' time, row operators."""
+        kernels = kernels or self.kernels
         out = []
         for st in m.STAGES:
             b = dict(stage=st, ideal=0.0, padding=0.0, idle=0.0, hbm=0.0, rest=0.0, row=0.0)
             for o in page["ops"]:
                 if o["stage"] != st or o["kernel"] is None:
                     continue
-                k = self.kernels[o["kernel"]]
+                k = kernels[o["kernel"]]
                 n = o["count"]
                 t = k["time_ns"]
                 if k["kind"] == "row":
@@ -862,9 +871,75 @@ class Explorer:
                         ratio_label=RATIO_LABEL[p["group"] != m.SWEEP_GROUP],
                         stage1_ms=self.stage1_total(p) if p["group"] == m.SWEEP_GROUP else None,
                         compare_ms=p.get("compare_ms"), compare_label=p.get("compare_label")) for p in self.pages],
-            kernels=kernels, checks=self.checks,
+            checks=self.checks,
             context=dict(glossary=glossary(self), dataflow=dataflow(self), limits=LIMITS),
-            views=self.views())
+            views=self.views(), plans=self.plan_bundles(kernels))
+
+    def plan_bundles(self, kernels: dict) -> list[dict]:
+        """One self-contained bundle per plan (page x selection): its operators, kernels (selected setting, time,
+        factors, candidates), per-stage table and budget. The visualizer shows any two side by side and can load
+        more bundles (build/plans/<id>.json); it assumes nothing shared between two plans (operator split, run keys
+        and mapping may differ)."""
+        import copy
+        out = []
+        for p in self.pages:
+            for sel in ("upstream", "constrained"):
+                if sel == "constrained" and not p.get("compare_ms"):
+                    continue
+                ops = copy.deepcopy(p["ops"])
+                ks = {}
+                for o in ops:
+                    if not o["kernel"]:
+                        continue
+                    if o["kernel"] not in ks:
+                        k = copy.deepcopy(kernels[o["kernel"]])
+                        k["uses"] = [u for u in k["uses"] if u["page"] == p["name"]]
+                        up = dict(cand=k["selected"]["cand"], time_ns=k["time_ns"])
+                        a = k.get("alt", {}).get(p["name"])
+                        if sel == "constrained":
+                            k["time_ns"] = a["time_ns"]
+                            if k["kind"] != "row":
+                                c = next(c for c in k["candidates"] if c["cand"] == a["cand"] and c.get("vid") == a["vid"])
+                                k["selected"] = dict(c, time_final_ns=c["time_ns"])
+                                self._factors(k)
+                            else:
+                                k["selected"] = dict(k["selected"], cand=a["cand"], time_ns=int(a["time_ns"]))
+                                k["config"] = k["config"] + ("; pipeline = 1" if a["cand"] == "pipeline" else "")
+                                k["pipelined"] = a["cand"] == "pipeline"
+                                self._factors(k)
+                            k["stage1"] = dict(label="upstream rule (same page)", setting=up["cand"], time_ns=int(up["time_ns"]),
+                                               speedup=up["time_ns"] / k["time_ns"])
+                            k["constants_key"] = k["constants_key"].replace(p["group"] + ".", p["compare_group"] + ".", 1)
+                            for t in k.get("techniques", []):
+                                t["selected"] = t["technique"] == k["selected"].get("technique")
+                            k["selected"]["fix"] = ""
+                        elif a and a["time_ns"]:
+                            k["stage1"] = dict(label="plan-constrained sweep (same page)", setting=a["cand"],
+                                               time_ns=int(a["time_ns"]), speedup=a["time_ns"] / k["time_ns"])
+                        k["plan_sel"] = sel
+                        for u in k["uses"]:
+                            u["total_ns"] = u["count"] * k["time_ns"]
+                        ks[o["kernel"]] = k
+                    o["ns"] = ks[o["kernel"]]["time_ns"]
+                sums = p["sums"] if sel == "upstream" else p["compare_sums"]
+                page = dict(name=p["name"], ops=ops)
+                f = lambda v: float(str(v).replace(",", ""))
+                tot = sum(o["count"] * o["ns"] for o in ops if o["kernel"] and o["ns"] is not None)
+                self._check("sum", f"plan bundle {p['name']}:{sel}", abs(tot / 1e6 - f(sums["total_ms"])) < 0.006,
+                            f"sum of count x time over the bundle's operators {tot / 1e6:.3f} ms; page total {sums['total_ms']} ms")
+                out.append(dict(
+                    id=f"{p['name']}:{sel}", page_name=p["name"], sel=sel,
+                    label=f"{p['name']} · {'upstream rule' if sel == 'upstream' else 'plan-constrained sweep'}",
+                    desc=p["desc"].split(";")[0], group=p["group"] if sel == "upstream" else p["compare_group"],
+                    total_ms=f(sums["total_ms"]), mfu=f(sums["total"]["mfu"]),
+                    stage_mfu={s_["stage"]: s_["mfu"] for s_ in sums["stages"]},
+                    stages=self._stage_table(page, check=False), budget=self.budget(page, ks),
+                    ops=ops, kernels=ks,
+                    ratio_label="other selection ÷ this plan",
+                    note=("upstream's kernel-selection rule under its whole-graph HBM plan" if sel == "upstream" else
+                          "the same plan with the free kernel knobs searched (attention settings and padding for the "
+                          "whole graph, GEMM tiles / groups / strategy, Eltwise schedule)")))
+        return out
 
     def views(self) -> list[dict]:
         """One view per page x selection (upstream rule, plan-constrained sweep) for the side-by-side comparison:
@@ -1422,16 +1497,27 @@ def render_options_md(ex: Explorer) -> list[str]:
 
 
 # ------------------------------------------------------------------------------------------- HTML
-def render_html(ex: Explorer) -> str:
-    data = json.dumps(ex.data(), separators=(",", ":")).replace("</", "<\\/")
+def render_html(ex: Explorer, data: dict | None = None) -> str:
+    data = json.dumps(data or ex.data(), separators=(",", ":")).replace("</", "<\\/")
     return TEMPLATE.read_text().replace("/*__DATA__*/null", data)
 
 
+PLANS_DIR = OUT_HTML.parent / "plans"
+
+
 def write(ex: Explorer | None = None) -> Explorer:
+    """The Markdown page, the HTML explorer, and one JSON bundle per plan (build/plans/<id>.json): the explorer's
+    "Load plan results" takes such a file, so results of another plan (other operator split, mapping, arch run)
+    can be compared side by side with these."""
     ex = ex or Explorer()
     OUT_MD.write_text(render_md(ex))
     OUT_HTML.parent.mkdir(parents=True, exist_ok=True)
-    OUT_HTML.write_text(render_html(ex))
+    data = ex.data()
+    OUT_HTML.write_text(render_html(ex, data))
+    PLANS_DIR.mkdir(exist_ok=True)
+    for b in data["plans"]:
+        (PLANS_DIR / (b["id"].replace(":", "_") + ".json")).write_text(json.dumps(dict(b, arch=data["arch"]),
+                                                                            separators=(",", ":")))
     return ex
 
 

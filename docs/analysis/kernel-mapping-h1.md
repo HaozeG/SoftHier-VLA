@@ -431,37 +431,37 @@ Parsed from the kernel sources (`workload_modeling/kernel_interface.py`: descrip
 
 | kernel | parameter | kind | values over all H1 runs | upstream |
 | --- | --- | --- | --- | --- |
-| SummaGEMM | `GEMM_K_TILE` | mapping | 128, 32, 120, 64, 90, 45, 4, 96 | same |
-| SummaGEMM | `GEMM_M_TILE` | mapping | 128, 50, 96, 32 | same |
-| SummaGEMM | `GEMM_N_TILE` | mapping | 96, 32, 64, 128, 80 | same |
+| SummaGEMM | `GEMM_K_TILE` | mapping | 64, 256, 192, 128, 32, 96, 224, 160 (12 values) | same |
+| SummaGEMM | `GEMM_M_TILE` | mapping | 32, 128, 64, 192, 96, 72, 50, 256 (12 values) | same |
+| SummaGEMM | `GEMM_N_TILE` | mapping | 64, 96, 32, 128, 192, 256, 160, 80 (9 values) | same |
 | SummaGEMM | `GEMM_RESHAPE_X_FROM_K` | layout | 64 (never swept) | same |
 | SummaGEMM | `GEMM_RESHAPE_Z_TO_N` | layout | 64 (never swept) | same |
 | SummaGEMM | `GEMM_RESHA_X_FROM_ENABLE` | layout | 0, 1 | same |
-| SummaGEMM | `GEMM_RESHA_X_FROM_M` | layout | 128, 2048, 12288, 4096, 36864 | same |
+| SummaGEMM | `GEMM_RESHA_X_FROM_M` | layout | 128, 1440, 2048, 36864, 12288, 1280, 1024, 3840 (11 values) | same |
 | SummaGEMM | `GEMM_RESHA_X_FROM_TALL` | layout | not defined, defined | same |
 | SummaGEMM | `GEMM_RESHA_X_FROM_THIN` | layout | not defined (never swept) | same |
 | SummaGEMM | `GEMM_RESHA_Z_TO_ENABLE` | layout | 0, 1 | same |
-| SummaGEMM | `GEMM_RESHA_Z_TO_M` | layout | 2048, 16384, 12288, 4096, 1536, 49152, 36864, 400 (9 values) | same |
+| SummaGEMM | `GEMM_RESHA_Z_TO_M` | layout | 2048, 2304, 49152, 16384, 1024, 4096, 400, 12288 (12 values) | same |
 | SummaGEMM | `GEMM_RESHA_Z_TO_TALL` | layout | not defined, defined | same |
 | SummaGEMM | `GEMM_RESHA_Z_TO_THIN` | layout | not defined (never swept) | same |
-| SummaGEMM | `GEMM_SUMMA_GROUP_GAP_W` | mapping | 0, 491520, 524288, 184320, 196608, 2048, 6291456, 122880 (22 values) | same |
-| SummaGEMM | `GEMM_SUMMA_GROUP_GAP_X` | mapping | 0, 32768, 180, 480, 90, 240, 131072, 6144 (13 values) | same |
-| SummaGEMM | `GEMM_SUMMA_GROUP_GAP_Z` | mapping | 0, 1280, 2048 | same |
-| SummaGEMM | `GEMM_SUMMA_GROUP_NUMBER` | mapping | 1, 8, 4, 16, 2, 32 | same |
-| SummaGEMM | `GEMM_SUMMA_GROUP_REDUCE` | mapping | 1, 0 | same |
-| SummaGEMM | `GEMM_SUMMA_GROUP_SPLITK` | mapping | 1, 0 | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_GAP_W` | mapping | 0, 512, 196608, 1536, 256, 98304, 393216, 294912 (35 values) | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_GAP_X` | mapping | 0, 384, 192, 16384, 180, 480, 32768, 512 (19 values) | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_GAP_Z` | mapping | 0, 512, 1572864, 1536, 65536, 524288, 131072, 73728 (16 values) | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_NUMBER` | mapping | 4, 1, 8, 16, 2, 32 | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_REDUCE` | mapping | 0, 1 | same |
+| SummaGEMM | `GEMM_SUMMA_GROUP_SPLITK` | mapping | 0, 1 | same |
 | SummaGEMM | `GEMM_SUMMA_GROUP_SPLITN` | mapping | 0, 1 | same |
-| SummaGEMM | `GEMM_SUMMA_SCALE_X` | mapping | 8, 4, 1 | same |
-| SummaGEMM | `GEMM_SUMMA_SCALE_Y` | mapping | 8, 2, 1 | same |
-| FlatAttention | `ATTN_FLATTEN_ASYNC` | schedule | 0 (never swept) | same |
-| FlatAttention | `ATTN_FLATTEN_SCALE_X` | mapping | 2, 8, 4 | same |
-| FlatAttention | `ATTN_FLATTEN_SCALE_Y` | mapping | 4, 2, 8 | same |
-| FlatAttention | `ATTN_FLATTEN_SHAPE_X` | mapping | 256, 1024, 384 | same |
-| FlatAttention | `ATTN_FLATTEN_SHAPE_Y` | mapping | 384, 1024, 256, 192, 128 | same |
+| SummaGEMM | `GEMM_SUMMA_SCALE_X` | mapping | 8, 4, 2, 1 | same |
+| SummaGEMM | `GEMM_SUMMA_SCALE_Y` | mapping | 8, 4, 2, 1 | same |
+| FlatAttention | `ATTN_FLATTEN_ASYNC` | schedule | 0, 1 | same |
+| FlatAttention | `ATTN_FLATTEN_SCALE_X` | mapping | 8, 4, 2, 1 | same |
+| FlatAttention | `ATTN_FLATTEN_SCALE_Y` | mapping | 1, 4, 2, 8 | same |
+| FlatAttention | `ATTN_FLATTEN_SHAPE_X` | mapping | 256, 1024, 96, 384, 128, 64, 512, 32 | same |
+| FlatAttention | `ATTN_FLATTEN_SHAPE_Y` | mapping | 192, 1024, 384, 64, 256, 768, 512, 128 | same |
 | FlatAttention | `ATTN_FLATTEN_SWCOLL` | schedule | – | upstream only |
 | FlatAttention | `ATTN_FLATTEN_SWCOLL_PIPELINE` | schedule | – | upstream only |
 | Activation | `ACTI_BIAS_ENABLE` | fusion | 1, 0 | same |
-| Eltwise | `ELT_PIPELINE` | schedule | not defined (never swept) | – |
+| Eltwise | `ELT_PIPELINE` | schedule | not defined, 1 | – |
 | RoPE | `ROPE_VIEW_ENABLE` | layout | 1 (never swept) | – |
 | RoPE | `ROPE_VIEW_N` | layout | 64 (never swept) | – |
 
