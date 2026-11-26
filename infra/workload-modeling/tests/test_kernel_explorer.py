@@ -26,7 +26,9 @@ def test_all_baseline_checks_pass():
     bad = [c for c in ex.checks if not c["ok"]]
     assert not bad, bad
     kinds = {c["kind"] for c in ex.checks}
-    assert kinds == {"pick", "constants", "placement", "sum"}
+    # every page is under the deployment plan: no sweep-preset kernels, so no constants / placement checks
+    assert {"pick", "sum"} <= kinds <= {"pick", "sum", "constrained <= upstream"}
+    assert all(k["plan"] for k in ex.kernels.values())
 
 
 def test_redmule_constants_match_h1_arch_file():
@@ -63,7 +65,7 @@ def test_f_pad_includes_array_padding():
              if c["cand"] == "Nosplit_x8y8g1_t128x96x128")
     assert c["setting"]["f_array"] == 0.75 and c["setting"]["tile_blk"][:2] == [128, 128]
     # 50x32x720 (splitK tile 32x32x32): the 32 output columns fill half of a 64-column block
-    k = ex.kernels["gemm_50x32x720"]
+    k = ex.kernels["expert.gemm_50x32x720"]
     assert k["f_pad_array"] == 0.5
     assert k["f_pad_text"].endswith("x block fill 0.50 (tile 32x32 runs as 32x64)")
 
@@ -121,10 +123,10 @@ def test_glossary_covers_every_name_on_the_page():
     for n in names:
         for suf in re.findall(r"_p(?:[A-Z][ws])+$", n.rsplit(".", 1)[-1]):
             assert f"`{suf}`" in text, suf
-    for token in ("_zto", "_xfrom", "addi", "head-major", "TALL", "W1-b", "h1_plan", "h1_kernels", "x<X>y<Y>g<G>",
-                  "s<S>", "attn_s<sx>x<sy>", "roofline", "f_pad"):
+    for token in ("_zto", "_xfrom", "addi", "head-major", "TALL", "W1-b", "h1_plan", "h1_psweep", "x<X>y<Y>g<G>",
+                  "attn_s<sx>x<sy>", "roofline", "f_pad"):
         assert token in text, token
-    assert any(re.search(r"_x\d+y\d+g\d+_t", n) for n in names) and any(re.search(r"_s\d+g\d+_t", n) for n in names)
+    assert any(re.search(r"_x\d+y\d+g\d+_t", n) for n in names)
 
 
 def test_stage_table_expert_split_and_one_mfu():

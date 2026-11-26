@@ -315,6 +315,8 @@ def render(d: Data) -> str:
     for name in At.SHAPES:
         u = At.upstream_cand(name)
         ok = [r for r in at if r["shape"] == name and r["status"] == "ok"]
+        if not ok:          # shapes added for the plan runs only (W1-b 36-head call): not in attn_sweep_h1.csv
+            continue
         b = min(ok, key=lambda r: int(r["time_ns"]))
         ur = next((r for r in at if r["shape"] == name and r["cand"] == u["cand"]), None)
         if u["skip"]:

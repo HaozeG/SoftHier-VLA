@@ -52,10 +52,14 @@ def redmule_blocks(c: constants.Constants, arch: str = ARCH) -> tuple[int, int, 
     """(rows, columns, reduction granule) of one LightRedmule output block for an arch in constants.yaml."""
     A = kernel_model.arch(c, arch)
     return A.blk_m, A.blk_n, A.blk_k
-# W1: the stage-1 baseline, upstream's deployment plan (kernel times h1_plan); W1-b: cameras batched, not yet run under
-# the plan, so it reads the sweep preset (h1_kernels). The group follows the lowering (smolvla_ops.kernel_set).
+# Both pages: the stage-1 baseline, upstream's deployment plan and kernel-selection rule (h1_plan, h1_plan_w1b); the
+# comparison on each is the plan-constrained sweep of the same lowering (h1_psweep, h1_psweep_w1b): the same plan,
+# free knobs searched. Every number on the pages comes from runs under the plan (smolvla_ops.PLAN_GROUPS).
 PAGES = (("W1", m.PLAN_LOWERING, "cameras one by one; upstream deployment plan (baseline)"),
-         ("W1-b", m.STAGE1_LOWERING_W1B, "cameras batched; sweep preset, not yet run under the plan"))
+         ("W1-b", m.PLAN_LOWERING_W1B, "cameras batched; upstream deployment plan (baseline)"))
+COMPARE_LABEL = ("with the plan-constrained sweep: the same deployment plan (placement, head-major reshapes, head "
+                 "padding carried through), free knobs searched (attention settings and padding for the whole graph, "
+                 "GEMM tiles / groups / strategy, Eltwise schedule)")
 # kernel directory of a deploy_plan kernel
 PLAN_KDIR = {"gemm": "SummaGEMM", "attn": "FlatAttention", "elt": "Eltwise", "acti": "Activation",
              "lnorm": "LayerNorm", "norm": "RMSNorm", "rope": "RoPE"}
@@ -264,7 +268,17 @@ class Explorer:
         self.final_s1 = {r["name"]: r for r in _rows(f1)} if f1.exists() else dict(self.final)
         self.traces = json.loads((RES / "trace_summary_h1.json").read_text())
         # the upstream deployment plan (W1 baseline): its run list and every run (also those that failed the check)
-        self.plan_runs = deploy_plan.Plan(c=self.c).runs()
+        self.plan_runs = {}
+        for _, low, _ in PAGES:
+            for k, run in deploy_plan.Plan(c=self.c, lowering=low).runs().items():
+                assert self.plan_runs.setdefault(k, run)["cfg"] == run["cfg"], k     # shared keys run the same
+        # the plan-constrained sweep: every run, and per page the selected run of each key
+        ps = RES / "plan_sweep_h1.csv"
+        self.ps = _rows(ps) if ps.exists() else []
+        self.ps_pick = {}
+        for name, _, _ in PAGES:
+            f = RES / f"plan_sweep_pick_{name.lower().replace('-', '')}_h1.csv"
+            self.ps_pick[name] = {r["key"]: r for r in _rows(f)} if f.exists() else {}
         self.pr = _rows(RES / "plan_runs_h1.csv")
         # kernel parameter interfaces parsed from the kernel sources; upstream's frozen (kernel_interface --freeze)
         self.iface = kernel_interface.interface()
@@ -310,15 +324,37 @@ class Explorer:
                 k["weights_call"] = r.weights_read_bytes / r.count
             ops.append(op)
         p = dict(name=name, desc=desc, ops=ops, group=ks.group, sums=render.kernel_sums(self.c, wid, rows, ks.group))
-        if ks.group != m.SWEEP_GROUP:
-            # comparison: the same call with the sweep preset (per-kernel placement, fastest checked run per shape
-            # over every sweep), on the unsplit stage-1 lowering the sweeps ran
-            r0 = m.annotate(m.build(self.c, wid, m.STAGE1_LOWERING))
-            p["compare_ms"] = float(render.kernel_sums(self.c, wid, r0, m.SWEEP_GROUP)["total_ms"].replace(",", ""))
-            p["compare_label"] = ("with the sweep preset: the same call on the lowering the sweeps ran (q/k/v and gate/up fused, "
-                                  "no head padding), fastest checked run per shape, placement per kernel; inter-kernel "
-                                  "layout and placement free, so not a deployable plan")
+        # comparison: the same call, same lowering and plan, with the plan-constrained sweep's picks
+        cg = m.kernel_set(wid, low, "constrained").group
+        p["compare_group"] = cg
+        if any(e.startswith(cg + ".") for e in self.c.entries):
+            cs = render.kernel_sums(self.c, wid, rows, cg)
+            p["compare_ms"] = float(cs["total_ms"].replace(",", ""))
+            p["compare_label"] = COMPARE_LABEL
+            p["compare_sums"] = cs
+            pick = self.ps_pick[name]
+            by_op = {(r.stage, r.op): r for r in rows}
+            for o in ops:
+                if o["kernel"]:
+                    alt = m.hand_kernel_ns(self.c, wid, by_op[(o["stage"], o["op"])], cg)
+                    o["alt_ns"] = alt
+                    k = self.kernels[o["kernel"]]
+                    pr = pick.get(o["kernel"], {})
+                    k.setdefault("alt", {})[name] = dict(time_ns=alt, cand=pr.get("cand", ""), vid=pr.get("vid", ""),
+                                                         source=pr.get("source", ""))
+                    # same padded run as upstream's: the constrained pick includes upstream's run, so never slower
+                    if alt is not None and pr.get("vid") == self._vid(o["kernel"]):
+                        self._check("constrained <= upstream", f"{name} {o['kernel']}", alt <= o["ns"],
+                                    f"plan-constrained {alt:,.0f} ns, upstream rule {o['ns']:,.0f} ns (same padding)")
+            up_ms = float(p["sums"]["total_ms"].replace(",", ""))
+            self._check("constrained <= upstream", f"{name} call total", p["compare_ms"] <= up_ms + 1e-9,
+                        f"{p['compare_ms']:.3f} ms vs {up_ms:.3f} ms (upstream's combination is a candidate)")
         return p
+
+    def _vid(self, key: str) -> str:
+        """plan_sweep.vid of the upstream plan's run of a key (key @ padded sizes)."""
+        cfg = self.plan_runs[key]["cfg"]
+        return key + "@" + "x".join(str(cfg[k]) for k in ("m_size", "n_size", "k_size", "q_pad", "kv_pad") if k in cfg)
 
     def _new_kernel(self, kname: str, r: m.OpRow, ns: float, key: str, group: str) -> dict:
         kind = "gemm" if r.cls == "gemm" else "attn" if r.cls == "attn" else "row"
@@ -327,14 +363,7 @@ class Explorer:
                  constants_key=key, constants_source=e.source, constants_note=e.note or "", uses=[], group=group,
                  plan=group != m.SWEEP_GROUP)
         if k["plan"]:
-            # the sweep preset's time for the same operator and shape, where the sweeps ran it (comparison)
-            sk = m.hand_kernel_key(r, m.SWEEP_GROUP)
             k["kernel_label"] = PLAN_KDIR[self.plan_runs[kname]["kernel"]]
-            k["sweep"] = None
-            if sk and sk in self.c.entries:
-                sn = sk.split(".", 2)[2]
-                k["sweep"] = dict(key=sk, time_ns=float(self.c.get(sk).value),
-                                  setting=self.final.get(sn, {}).get("setting", ""))
         return k
 
     # ----------------------------------------------------------------- per kernel: space, candidates, checks
@@ -491,9 +520,10 @@ class Explorer:
                          for r in rows if r["status"] != "ok"])
         self._interface(k, PLAN_KDIR[kern], [r["run_dir"] for r in rows], best["run_dir"])
         k.update(traces=[], trace=None, trace_status="none", trace_note="plan runs are not traced")
-        sw = k.get("sweep")
-        k["stage1"] = None if not sw else dict(label="sweep preset", setting=sw["setting"], time_ns=int(sw["time_ns"]),
-                                               speedup=sw["time_ns"] / k["time_ns"])
+        # comparison: the plan-constrained sweep's pick for this key (first page that has one)
+        alt = next((a for a in k.get("alt", {}).values() if a["time_ns"]), None)
+        k["stage1"] = None if not alt else dict(label="plan-constrained sweep", setting=alt["cand"],
+                                                time_ns=int(alt["time_ns"]), speedup=alt["time_ns"] / k["time_ns"])
 
     def _stage1(self, k: dict) -> None:
         """The stage-1 pick of this kernel (final_h1_stage1.csv), when the selected run differs from it."""
@@ -853,27 +883,29 @@ def glossary(ex) -> list[dict]:
     wl = c.primary_workload
     dims = ex.dims
     d0 = deploy_plan.DEFAULTS
-    plan_name = next(p for p in ex.pages if p["group"] != m.SWEEP_GROUP)["name"]
-    sweep_names = ", ".join(p["name"] for p in ex.pages if p["group"] == m.SWEEP_GROUP)
     suf = placement_suffixes(ex.plan_runs)
     G = [
         ("W1", f"one policy call of `{wl.id}` with its {wl.cameras} cameras encoded one by one ({wl.cameras} passes "
                "through the vision encoder); deployed under the upstream deployment plan. The stage-1 baseline."),
-        ("W1-b", "the same call with the cameras batched into one vision pass and q/k/v and gate/up fused; reads "
-                 "the sweep preset, not yet run under the upstream plan. Differs from W1 in batching, fusion and "
-                 "kernel selection at once."),
+        ("W1-b", f"the same call with the {wl.cameras} cameras batched into one vision pass, under the same "
+                 "upstream deployment plan (q/k/v and gate/up separate products, as on W1); vision attention runs "
+                 f"as one call over cameras x heads ({wl.cameras * dims.v_heads} heads). Differs from W1 in camera "
+                 "batching only."),
         ("upstream deployment plan (`h1_plan`)",
          "upstream soft_hier_je's whole-graph HBM layout and kernel-selection rule applied to SmolVLA: activations "
          f"in space A ({d0['gemm']['X_addr']} HBM edge), weights, residual stream and K/V in space B "
          f"({d0['gemm']['W_addr']} edge); attention operands head-major; GEMM settings from upstream's `opt()`, "
          "attention from `attn_auto`, row kernels at default parameters; the fastest run that passes the output "
-         f"check is kept. Times: `constants.yaml h1_plan`. Page {plan_name}."),
-        ("sweep preset (`h1_kernels`)",
-         "per kernel shape, the fastest checked run over all our sweeps, with HBM placement chosen per kernel and no "
-         f"reshape. Times: `constants.yaml h1_kernels`. Pages {sweep_names}, and the comparison on {plan_name}."),
-        ("× (comparison)", "comparison time / this page's time, for the whole call (tile) and per kernel (column). "
-                           "Below 1: this page is slower than the comparison. On W1 the comparison is the sweep "
-                           "preset; on W1-b it is the frozen stage-1 pick."),
+         "check is kept. Times: `constants.yaml h1_plan` (W1), `h1_plan_w1b` (W1-b). The baseline on both pages."),
+        ("plan-constrained sweep (`h1_psweep`)",
+         "the same deployment plan (placement, head-major reshapes, head padding carried by every kernel that "
+         "touches a head-major tensor), with the free knobs searched instead of upstream's rule: attention settings "
+         "and with them the head padding, chosen for the whole graph (expert self and cross attention share Q, the "
+         "prefix K/V feed the expert's cross projections); GEMM tile, group shape and strategy fitted to the plan; "
+         "Eltwise schedule. Upstream's own runs are candidates too. Times: `constants.yaml h1_psweep` (W1), "
+         "`h1_psweep_w1b` (W1-b); runs `results/plan_sweep_h1.csv`. The comparison on both pages."),
+        ("× (comparison)", "plan-constrained sweep time / upstream-rule time, for the whole call (tile) and per "
+                           "kernel (column), same lowering and plan. Below 1: the searched knobs are faster."),
         ("run key", "`<stage>.<kernel>_<shape>[_zto|_xfrom][_p<placement>]`: one plan run per key, e.g. "
                     f"`{next(k for k in ex.plan_runs if '_zto' in k)}`. Shape is M x N x K for GEMM, "
                     "heads x q rows x kv rows x d for attention, rows x columns for row kernels."),
@@ -950,13 +982,12 @@ def assumptions(ex, page_sums: dict) -> list[str]:
         "Attention is unmasked (stage1-spec §4.2): dense FLOP and time, no causal or padding savings.",
         "Expert self-attention's KV concatenation is not modelled (as upstream's plan).",
         f"Host-side, not timed: {page_sums['total_uncovered']}.",
-        "W1's plan runs are not traced (no per-cluster busy data); W1-b is not run under the plan.",
-        "The sweep preset (W1-b, and the comparison on W1) is not a deployable plan: each kernel run had its inputs "
-        "preloaded in the layout and HBM edge it wants (attention reads q/k/v head-major and padded to its blocks; "
-        "GEMMs write row-major, unpadded), so splitting the fused q/k/v output, converting to head-major and back, "
-        "propagating head padding and keeping producer and consumer on the same edge are all free there. The "
-        "upstream plan pays for them inside its kernels (GEMM reshape on store / load, padded GEMM rows, placement "
-        "overrides).",
+        "Plan runs and plan-constrained sweep runs are not traced (no per-cluster busy data).",
+        "Every time on these pages comes from a run under the deployment plan: inputs and outputs in the layout and "
+        "HBM edge the neighbouring kernels use (GEMM reshape on store / load, padded GEMM rows, placement "
+        "overrides). The earlier sweep preset (`constants.yaml h1_kernels`: each kernel with its inputs preloaded "
+        "as it wants them, so splitting, head-major conversion, padding and placement were free) is not a "
+        "deployable plan and is not shown; it stays in constants.yaml for the cost-model fit.",
     ]
 
 
@@ -971,7 +1002,7 @@ LIMITS = [
 
 
 # column / tile label of the comparison ratio, per page kind (False: sweep page, True: plan page)
-RATIO_LABEL = {True: "sweep preset ÷ plan", False: "stage-1 pick ÷ selected"}
+RATIO_LABEL = {True: "constrained ÷ upstream rule", False: "stage-1 pick ÷ selected"}
 
 
 # ------------------------------------------------------------------------------------------- Markdown
@@ -1005,13 +1036,12 @@ def render_md(ex: Explorer) -> str:
     for c in ex.checks:
         C.append(f"| {c['kind']} | `{c['what']}` | {'pass' if c['ok'] else '**FAIL**'} | {c['detail']} |")
     C += ["",
-          "* **pick**: W1 (upstream deployment plan, `h1_plan`): the selected run is the fastest with a passing output "
-          "check among the plan runs of its key (upstream's candidates and the recorded fixes, "
-          "`results/plan_runs_h1.csv`), and its time is the one in `constants.yaml`. W1-b (sweep preset, "
-          "`h1_kernels`): the selected setting is the fastest checked run over every result set of the shape "
-          "(`gemm_sweep_h1.csv`, `gemm_smallm_h1.csv`, `gemm_transpose_h1.csv`; row kernels: `row_kernels_h1.csv`, "
-          "`eltwise_pipeline_h1.csv`).",
-          "* **constants** (sweep preset): the re-run time in `final_h1.csv` is the time in `constants.yaml` (`h1_kernels`).",
+          "* **pick**: per run key (upstream deployment plan, `h1_plan` / `h1_plan_w1b`): the selected run is the "
+          "fastest with a passing output check among the plan runs of its key (upstream's candidates and the "
+          "recorded fixes, `results/plan_runs_h1.csv`), and its time is the one in `constants.yaml`.",
+          "* **constrained <= upstream**: the plan-constrained sweep's call total is not above the upstream rule's "
+          "(upstream's padding combination and runs are candidates), and per key not above it where the selected "
+          "combination keeps upstream's padding (same run variant).",
           "* **placement**: for every traced setting, the clusters the kernel's group placement makes active "
           "(`placement()`, from `flex_group_barrier.h:43` and `SummaGEMM.h:131-138`) are exactly the clusters with "
           "RedMulE activity in the kernel window of the trace (`results/trace_summary_h1.json`). Coverage: the "
@@ -1056,6 +1086,8 @@ def render_md(ex: Explorer) -> str:
     ks = sorted((k for k in ex.kernels.values() if k["kind"] != "row"), key=lambda k: (k["kind"], k["shape"]))
     for plan in (True, False):
         pg = ", ".join(p["name"] for p in ex.pages if (p["group"] != m.SWEEP_GROUP) == plan)
+        if not pg:
+            continue
         runs = "plan runs (ok)" if plan else "swept (ok) | valid space"
         L += [f"### {pg}: {'upstream deployment plan' if plan else 'sweep preset'}", "",
               "| kernel | used by | selected setting | technique | active | time | MFU, % | f_pad | f_occ | f_rest | "
@@ -1145,7 +1177,6 @@ def render_md(ex: Explorer) -> str:
             extra = "- | - | -"
         L.append(f"| `{k['name']}` | {uses} | {_f(k['time_ns'] / 1e3, 2)} | {_f(k['hbm_eff_bw'] / 1e9, 0)} | {extra} |")
     L.append("")
-    L += render_options_md(ex)
     L += render_interfaces_md(ex)
     L += C
     return "\n".join(L)
@@ -1185,35 +1216,42 @@ def render_context_md(ex: Explorer) -> list[str]:
 
 
 def render_plan_md(ex: Explorer) -> list[str]:
-    """W1 under the upstream deployment plan: per run key, the selected run, the sweep preset's time for the same
-    operator (comparison), the recorded fixes and the runs that failed the output check."""
-    p = next(p for p in ex.pages if p["group"] != m.SWEEP_GROUP)
-    L = ["## W1 under the upstream deployment plan", "",
-         f"The stage-1 baseline (decision 2026-11-25): upstream's whole-graph HBM plan (activations west, weights, "
-         f"residual and K/V south; head-major attention operands written and read by the GEMMs) and its kernel "
-         f"selection (GEMM `opt()` candidates, both simulated, the faster passing one kept; FlatAttention "
-         f"`attn_auto`; row kernels at default parameters). Composed W1 call: {p['sums']['total_ms']} ms, MFU "
-         f"{p['sums']['total']['mfu']} % (estimate); {p['compare_ms']:.2f} ms {p['compare_label']}. Times in µs per "
-         "call; *sweep preset* = the time in `h1_kernels` for the same operator and shape, where the sweeps ran it "
-         "(placement per kernel, no reshape); x = sweep preset / plan.", "",
-         "| run key | calls | selected | µs | sweep preset, µs | x | recorded fix | failed the output check |",
-         "| --- | ---: | --- | ---: | ---: | ---: | --- | --- |"]
-    for o in sorted({o["kernel"] for o in p["ops"] if o["kernel"]},
-                    key=lambda n: (m.STAGES.index(n.split(".")[0]), n)):
-        k = ex.kernels[o]
-        calls = sum(u["count"] for u in k["uses"] if u["page"] == p["name"])
-        sw = k.get("sweep")
-        fix = k["selected"].get("fix") or ""
-        bad = "; ".join(f"`{f['cand']}` ({int(f['bad']):,} bad)" if f["bad"] else f"`{f['cand']}` ({f['status']})"
-                        for f in k["failed"])
-        L.append(f"| `{k['name']}` | {calls} | `{k['selected']['cand']}` | {_f(k['time_ns'] / 1e3, 2)} | "
-                 f"{_f(sw['time_ns'] / 1e3, 2) if sw else '–'} | "
-                 f"{sw['time_ns'] / k['time_ns']:.2f} | " if sw else
-                 f"| `{k['name']}` | {calls} | `{k['selected']['cand']}` | {_f(k['time_ns'] / 1e3, 2)} | – | – | ")
-        L[-1] += f"{fix or '–'} | {bad or '–'} |"
-    L += ["", "Sweep preset missing (–): the plan's operator has no sweep run at that shape (split q / k / v and "
-          "gate / up products, residual adds on Activation, RoPE on its own kernel), or the shape differs (head padding).",
-          ""]
+    """Per page, under the upstream deployment plan: per run key, the selected run (upstream's rule), the
+    plan-constrained sweep's pick for the same key (comparison), the recorded fixes and the runs that failed the
+    output check."""
+    L = []
+    for p in ex.pages:
+        cmp_ = f"; {p['compare_ms']:.2f} ms {p['compare_label']}" if p.get("compare_ms") else \
+            "; plan-constrained sweep not yet composed"
+        L += [f"## {p['name']} under the upstream deployment plan", "",
+              f"{p['desc']}. Upstream's whole-graph HBM plan (activations west, weights, residual and K/V south; "
+              "head-major attention operands written and read by the GEMMs) and its kernel selection (GEMM `opt()` "
+              "candidates, both simulated, the faster passing one kept; FlatAttention `attn_auto`; row kernels at "
+              f"default parameters). Composed call: {p['sums']['total_ms']} ms, MFU {p['sums']['total']['mfu']} % "
+              f"(estimate){cmp_}. Times in µs per call; *constrained* = the plan-constrained sweep's run for the same "
+              "key (padded sizes may differ: the attention padding is chosen for the whole graph); x = constrained / "
+              "upstream rule.", "",
+              "| run key | calls | upstream rule | µs | constrained | µs | x | recorded fix | failed the output check |",
+              "| --- | ---: | --- | ---: | --- | ---: | ---: | --- | --- |"]
+        for o in sorted({o["kernel"] for o in p["ops"] if o["kernel"]},
+                        key=lambda n: (m.STAGES.index(n.split(".")[0]), n)):
+            k = ex.kernels[o]
+            calls = sum(u["count"] for u in k["uses"] if u["page"] == p["name"])
+            alt = k.get("alt", {}).get(p["name"])
+            fix = k["selected"].get("fix") or ""
+            bad = "; ".join(f"`{f['cand']}` ({int(f['bad']):,} bad)" if f["bad"] else f"`{f['cand']}` ({f['status']})"
+                            for f in k["failed"])
+            if alt and alt["time_ns"]:
+                pad = alt["vid"].split("@", 1)[1] if "@" in alt["vid"] else ""
+                same = alt["vid"] == ex._vid(k["name"])
+                ac = f"`{alt['cand']}`" + ("" if same else f" @{pad}")
+                altc = f"{ac} | {_f(alt['time_ns'] / 1e3, 2)} | {alt['time_ns'] / k['time_ns']:.2f}"
+            else:
+                altc = "– | – | –"
+            L.append(f"| `{k['name']}` | {calls} | `{k['selected']['cand']}` | {_f(k['time_ns'] / 1e3, 2)} | {altc} | "
+                     f"{fix or '–'} | {bad or '–'} |")
+        L += ["", "`@<sizes>` after a constrained setting: that run uses other padded sizes than upstream's (the "
+              "selected attention padding combination).", ""]
     return L
 
 

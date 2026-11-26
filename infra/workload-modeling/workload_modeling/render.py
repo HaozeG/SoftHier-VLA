@@ -174,6 +174,18 @@ KERNEL_PAGES = {
         "platform": "It is on H1 with DRAMSys HBM, not PR1's arch with ideal HBM.",
     },
 }
+# The other deployment-plan groups: same plan and kernels; selection and lowering differ.
+KERNEL_PAGES["h1_plan_w1b"] = KERNEL_PAGES["h1_plan"]
+_PSWEEP = dict(KERNEL_PAGES["h1_plan"], intro=(
+    "the plan-constrained sweep: the same upstream whole-graph HBM plan (placement, head-major reshapes, head "
+    "padding carried by every kernel), with the free knobs searched instead of upstream's kernel-selection rule: "
+    "attention settings and with them the head padding (one setting per attention call, chosen for the whole graph), "
+    "GEMM tile / group shape / strategy fitted to the plan, Eltwise schedule; kernel repo branch "
+    "`upstream-deployment-plan`, H1, GVSoC with the SoftHier-VLA patch series, DRAMSys HBM; runs and selection: "
+    "`infra/kernel-runs/plan_sweep.py` (upstream's own runs are candidates too)"))
+_PSWEEP["kernels"] = [(k, ops, chk, "plan-constrained sweep: fastest checked candidate per run variant, attention "
+                       "padding combination chosen for the whole graph") for k, ops, chk, _ in KERNEL_PAGES["h1_plan"]["kernels"]]
+KERNEL_PAGES["h1_psweep"] = KERNEL_PAGES["h1_psweep_w1b"] = _PSWEEP
 
 
 def context(c, workload_id: str, lowering: m.Lowering | None = None, variant: str = "") -> dict:

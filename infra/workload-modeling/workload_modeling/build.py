@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"wrote {OUT_DIR.relative_to(REPO)}/stage-totals.md, stage-totals.csv")
     wid = c.primary_workload.id
     pages = [("smolvla-op-graph", wid, None, ""),
-             ("smolvla-op-graph-w1b", wid, m.STAGE1_LOWERING_W1B, "W1-b: cameras batched")]
+             ("smolvla-op-graph-w1b", wid, m.PLAN_LOWERING_W1B, "W1-b: cameras batched")]
     for stem, w, low, variant in pages:
         md_path = OUT_DIR / f"{stem}.md"
         md_path.write_text(render.render_md(c, w, low, variant))

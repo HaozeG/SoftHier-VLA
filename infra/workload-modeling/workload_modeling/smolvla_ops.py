@@ -494,20 +494,34 @@ PLAN_LOWERING_W1B = Lowering(kv_proj_per_step=False, split_fused=True, batch_cam
 KERNEL_SETS = {
     "vlabench-3cam": KernelSet("h1_plan", "h1", PLAN_LOWERING),  # H1, upstream deployment plan (stage-1 spec §4)
 }
-# Any other lowering of a workload in KERNEL_SETS (W1-b, the unsplit stage-1 lowering) reads the sweep preset:
-# per kernel shape the fastest checked run over every sweep, placement per kernel (the comparison).
+# Every page number comes from runs under the deployment plan: group -> (lowering, selection). "upstream": upstream's
+# kernel-selection rule (plan_runs.py, the baseline); "constrained": the plan-constrained sweep (plan_sweep.py: the
+# plan's placement, reshapes and head padding kept, free knobs searched, attention padding chosen for the graph).
+PLAN_GROUPS = {
+    "h1_plan": (PLAN_LOWERING, "upstream"),
+    "h1_psweep": (PLAN_LOWERING, "constrained"),
+    "h1_plan_w1b": (PLAN_LOWERING_W1B, "upstream"),
+    "h1_psweep_w1b": (PLAN_LOWERING_W1B, "constrained"),
+}
+# The sweep preset (per kernel shape the fastest checked run over the stage-1 sweeps, placement per kernel, inter-
+# kernel layout free): not a deployable plan; kept for the cost-model fit and history, for the unsplit stage-1
+# lowerings only. No page reports it as performance.
 SWEEP_GROUP = "h1_kernels"
 
 
-def kernel_set(workload_id: str, lowering: Lowering | None = None) -> KernelSet:
-    """Kernel times of a workload under a lowering (default: the workload's own); KeyError for workloads without
-    simulated kernels (pr1-1cam, libero-2cam, ...)."""
+def kernel_set(workload_id: str, lowering: Lowering | None = None, selection: str = "upstream") -> KernelSet:
+    """Kernel times of a workload under a lowering (default: the workload's own) and selection ("upstream" rule or
+    "constrained" sweep); KeyError for workloads without simulated kernels (pr1-1cam, libero-2cam, ...)."""
     if workload_id not in KERNEL_SETS:
         raise KeyError(f"no hand-kernel times for workload {workload_id!r}; kernel sets: {sorted(KERNEL_SETS)}")
     ks = KERNEL_SETS[workload_id]
-    if lowering is None or lowering == ks.lowering:
-        return ks
-    return KernelSet(SWEEP_GROUP, ks.arch, lowering)
+    low = lowering or ks.lowering
+    for g, (l, sel) in PLAN_GROUPS.items():
+        if l == low and sel == selection:
+            return KernelSet(g, ks.arch, low)
+    if low.split_fused:
+        raise KeyError(f"no plan group for lowering {low} / {selection}")
+    return KernelSet(SWEEP_GROUP, ks.arch, low)        # unsplit stage-1 lowerings: the sweep preset (history)
 
 
 @functools.lru_cache(maxsize=None)
@@ -518,12 +532,12 @@ def plan_keys(workload_id: str = "vlabench-3cam", lowering: Lowering | None = No
 
 
 def hand_kernel_key(row: OpRow, group: str = "h1_kernels") -> str | None:
-    """constants key of the row's simulated kernel: <group>.<stage>.<kernel>_<row shape> (sweep preset), or
-    <group>.<stage>.<plan run key> for the deployment-plan group h1_plan."""
+    """constants key of the row's simulated kernel: <group>.<stage>.<plan run key> for the deployment-plan groups
+    (PLAN_GROUPS), or <group>.<stage>.<kernel>_<row shape> for the sweep preset."""
     if row.op in HOST_OPS or (row.stage, row.op) in INCLUDED_IN:
         return None
-    if group == KERNEL_SETS["vlabench-3cam"].group:
-        k = plan_keys().get((row.stage, row.op))
+    if group in PLAN_GROUPS:
+        k = plan_keys("vlabench-3cam", PLAN_GROUPS[group][0]).get((row.stage, row.op))
         return f"{group}.{row.stage}.{k}" if k else None
     shape = "x".join(map(str, row.shape))
     if row.cls == "gemm":
