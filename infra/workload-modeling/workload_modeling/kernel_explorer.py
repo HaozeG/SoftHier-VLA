@@ -24,11 +24,12 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import re
 import sys
 from pathlib import Path
 
-from . import constants, deploy_plan, kernel_interface, kernel_model, md_to_html, render
+from . import constants, deploy_plan, fixtures, kernel_interface, kernel_model, md_to_html, render
 from . import smolvla_ops as m
 
 REPO = Path(__file__).resolve().parents[3]
@@ -271,10 +272,13 @@ class Explorer:
         self.iface_up = json.loads(up.read_text()) if up.exists() else None
         self.kernels: dict[str, dict] = {}
         self.checks: list[dict] = []
+        self.dims = m.load_dims(self.c.primary_workload)
+        self.footprint = weight_footprint(self.c)
         self.pages = [self._page(*p) for p in PAGES]
         for k in self.kernels.values():
             self._finish_kernel(k)
         self._check_sums()
+        self.stage_tables = {p["name"]: self._stage_table(p) for p in self.pages}
 
     # ----------------------------------------------------------------- operators -> kernels
     def _page(self, name: str, low, desc: str) -> dict:
@@ -688,6 +692,45 @@ class Explorer:
             self._check("sum", p["name"], abs(tot - want) < 0.006,
                         f"sum over operators of count x kernel time = {tot:.3f} ms; operator-graph page {want:.2f} ms")
 
+    # ----------------------------------------------------------------- per-stage table
+    def _stage_table(self, page: dict) -> list[dict]:
+        """Per stage: time, share, kernel calls, MFU (the operator-graph definition), weight footprint, weight
+        reads and HBM traffic per call (op model, logical shapes, operators that run as their own kernel); the
+        expert also per denoising step and once per call. Checks that the expert split adds up."""
+        S = self.dims.steps
+        tot_ns = sum(o["count"] * o["ns"] for o in page["ops"] if o["ns"] is not None)
+
+        def agg(label, ops, stage, div=1, kind="stage"):
+            ops = [o for o in ops if o["kernel"] and o["ns"] is not None]
+            t = sum(o["count"] * o["ns"] for o in ops) / div
+            flop = sum(o["flop"] for o in ops) / div
+            traffic = sum(o["traffic"] for o in ops) / div
+            return dict(label=label, stage=stage, kind=kind, ms=t / 1e6, share=t * div / tot_ns if kind == "stage" else None,
+                        calls=sum(o["count"] for o in ops) // div, mfu=flop / (self.peak * t / 1e9) if t else 0.0,
+                        footprint_mb=self.footprint.get(stage, 0) / 1e6 if kind == "stage" else None,
+                        weights_mb=sum(o["weights"] for o in ops) / div / 1e6, traffic_mb=traffic / 1e6,
+                        gbps=traffic / t if t else 0.0)
+        out = []
+        for st in m.STAGES:
+            ops = [o for o in page["ops"] if o["stage"] == st]
+            out.append(agg(st, ops, st))
+            if st != "expert":
+                continue
+            ops = [o for o in ops if o["kernel"] and o["ns"] is not None]
+            per_call = [o for o in ops if o["count"] % S]
+            per_step = [o for o in ops if not o["count"] % S]
+            out.append(agg(f"expert, per denoising step (x {S})", per_step, st, S, "step"))
+            out.append(agg("expert, once per call (" + ", ".join(sorted({o["op"] for o in per_call})) + ")",
+                           per_call, st, 1, "call"))
+            names = {o["op"] for o in per_call}
+            t_exp = sum(o["count"] * o["ns"] for o in ops)
+            t_split = S * out[-2]["ms"] * 1e6 + out[-1]["ms"] * 1e6
+            self._check("sum", f"{page['name']} expert per step",
+                        names == {"cross_k_proj", "cross_v_proj"} and abs(t_split - t_exp) < 1.0,
+                        f"once-per-call operators {sorted(names)}; {S} x per step + once per call = "
+                        f"{t_split / 1e6:.3f} ms; expert stage {t_exp / 1e6:.3f} ms")
+        return out
+
     # ----------------------------------------------------------------- time budget (estimate)
     def budget(self, page: dict) -> list[dict]:
         """Per stage: ideal compute, padding, idle clusters, HBM floor, rest of the matrix kernels' time, row operators."""
@@ -747,9 +790,180 @@ class Explorer:
             arch=dict(peak=self.peak, peak_cluster=self.peak_cl, bw=self.bw, mesh=[MESH_X, MESH_Y], rm_blk=list(self.rm_blk)),
             pages=[dict(name=p["name"], desc=p["desc"], ops=p["ops"], budget=self.budget(p),
                         total_ms=p["sums"]["total_ms"], mfu=p["sums"]["total"]["mfu"], group=p["group"],
+                        stage_mfu={s["stage"]: s["mfu"] for s in p["sums"]["stages"]},
+                        stages=self.stage_tables[p["name"]], assumptions=assumptions(self, p["sums"]),
+                        ratio_label=RATIO_LABEL[p["group"] != m.SWEEP_GROUP],
                         stage1_ms=self.stage1_total(p) if p["group"] == m.SWEEP_GROUP else None,
                         compare_ms=p.get("compare_ms"), compare_label=p.get("compare_label")) for p in self.pages],
-            kernels=kernels, checks=self.checks)
+            kernels=kernels, checks=self.checks,
+            context=dict(glossary=glossary(self), dataflow=dataflow(self), limits=LIMITS))
+
+
+# ------------------------------------------------------------------------------------------- reader context
+# Glossary, per-stage table, stage dataflow, assumptions and limits: built here from code and data, rendered by both
+# the Markdown page and the HTML template (one source).
+DTYPE_BYTES = 2            # the kernels run fp16 (stage1-spec §4); the checkpoint stores BF16 / F32
+_PART_STAGE = {"vision": "vision", "connector": "connector", "llm": "prefix", "expert": "expert"}
+_EDGE = {"w": "west", "s": "south"}
+
+
+def _stage_of_tensor(name: str) -> str | None:
+    """Stage a checkpoint tensor's weights serve; None: host-side (token embedding, state_proj) or never called."""
+    part = m.part_of(name)
+    if part == "io":
+        return None if name.startswith("model.state_proj.") else "expert"
+    return _PART_STAGE.get(part)
+
+
+def weight_footprint(c) -> dict[str, int]:
+    """Bytes of weights per stage at DTYPE_BYTES per parameter, from the checkpoint header (fixtures)."""
+    wl = c.primary_workload
+    _, header = fixtures.load(wl.repo, wl.revision)
+    out: dict[str, int] = {}
+    for name, t in header.items():
+        if not isinstance(t, dict) or "shape" not in t:
+            continue
+        st = _stage_of_tensor(name)
+        if st:
+            out[st] = out.get(st, 0) + math.prod(t["shape"]) * DTYPE_BYTES
+    return out
+
+
+def placement_suffixes(plan_runs: dict) -> list[dict]:
+    """Every _p<...> suffix the plan run keys use, decoded per kernel (deploy_plan._sig: array initial + edge
+    initial, only the arrays whose edge differs from the kernel's default in deploy_plan.DEFAULTS)."""
+    seen = {}
+    for key, r in plan_runs.items():
+        last = key.rsplit(".", 1)[-1]
+        mt = re.search(r"_p((?:[A-Z][ws])+)$", last)
+        if not mt:
+            continue
+        d = deploy_plan.DEFAULTS[r["kernel"]]
+        over = {a: e for a, e in r["place"].items() if d[a] != e}
+        seen.setdefault((r["kernel"], mt.group(1)), dict(
+            suffix="_p" + mt.group(1), kernel=PLAN_KDIR[r["kernel"]],
+            arrays=", ".join(f"{a} {d[a]} -> {e}" for a, e in sorted(over.items())), example=key))
+    return [seen[k] for k in sorted(seen)]
+
+
+def glossary(ex) -> list[dict]:
+    c = ex.c
+    wl = c.primary_workload
+    dims = ex.dims
+    d0 = deploy_plan.DEFAULTS
+    plan_name = next(p for p in ex.pages if p["group"] != m.SWEEP_GROUP)["name"]
+    sweep_names = ", ".join(p["name"] for p in ex.pages if p["group"] == m.SWEEP_GROUP)
+    suf = placement_suffixes(ex.plan_runs)
+    G = [
+        ("W1", f"one policy call of `{wl.id}` with its {wl.cameras} cameras encoded one by one ({wl.cameras} passes "
+               "through the vision encoder); deployed under the upstream deployment plan. The stage-1 baseline."),
+        ("W1-b", "the same call with the cameras batched into one vision pass and q/k/v and gate/up fused; reads "
+                 "the sweep preset, not yet run under the upstream plan. Differs from W1 in batching, fusion and "
+                 "kernel selection at once."),
+        ("upstream deployment plan (`h1_plan`)",
+         "upstream soft_hier_je's whole-graph HBM layout and kernel-selection rule applied to SmolVLA: activations "
+         f"in space A ({d0['gemm']['X_addr']} HBM edge), weights, residual stream and K/V in space B "
+         f"({d0['gemm']['W_addr']} edge); attention operands head-major; GEMM settings from upstream's `opt()`, "
+         "attention from `attn_auto`, row kernels at default parameters; the fastest run that passes the output "
+         f"check is kept. Times: `constants.yaml h1_plan`. Page {plan_name}."),
+        ("sweep preset (`h1_kernels`)",
+         "per kernel shape, the fastest checked run over all our sweeps, with HBM placement chosen per kernel and no "
+         f"reshape. Times: `constants.yaml h1_kernels`. Pages {sweep_names}, and the comparison on {plan_name}."),
+        ("× (comparison)", "comparison time / this page's time, for the whole call (tile) and per kernel (column). "
+                           "Below 1: this page is slower than the comparison. On W1 the comparison is the sweep "
+                           "preset; on W1-b it is the frozen stage-1 pick."),
+        ("run key", "`<stage>.<kernel>_<shape>[_zto|_xfrom][_p<placement>]`: one plan run per key, e.g. "
+                    f"`{next(k for k in ex.plan_runs if '_zto' in k)}`. Shape is M x N x K for GEMM, "
+                    "heads x q rows x kv rows x d for attention, rows x columns for row kernels."),
+        ("GEMM setting name", "`<technique>_x<X>y<Y>g<G>_t<M>x<N>x<K>` (plan runs): G groups of X x Y clusters, "
+                              "tile M x N x K. The sweeps write square groups as `s<S>` (= `x<S>y<S>`), e.g. "
+                              "`Nosplit_s8g1` = `Nosplit_x8y8g1`."),
+        ("Nosplit / splitN / splitK", "SUMMA GEMM on cluster groups. Nosplit: one group computes the whole "
+                                      "product. splitN: each of the G groups owns N / G output columns. splitK: "
+                                      "each group owns a block of K; the partial sums are added by a NoC "
+                                      "reduction."),
+        ("attention setting name", "`attn_s<sx>x<sy>_b<Br>x<Bc>`: FlatAttention with one group of sx x sy clusters "
+                                   "per KV head (groups take the KV heads in turn), row block Br, column block Bc."),
+        ("`_zto` (RESHA_Z_TO)", "the GEMM writes its output Z reshaped (SummaGEMM option GEMM_RESHA_Z_TO, TALL); "
+                                f"with the chunk = head dim {dims.head_dim} this stores q/k/v head-major for "
+                                "FlatAttention."),
+        ("`_xfrom` (RESHA_X_FROM)", "the GEMM reads its input X from a reshaped (head-major) layout: o_proj reads "
+                                    "the attention output, and the expert's cross K/V projections read the "
+                                    "prefix K/V."),
+        ("TALL / THIN", "the two reshape directions (gemm_config.py): TALL (target rows > M) cuts the columns into "
+                        "chunks and stacks them vertically; THIN (target rows < M) puts row blocks side by side."),
+        ("head-major", f"(heads, rows per head, d = {dims.head_dim}): the layout FlatAttention reads and writes. "
+                       "Rows per head are padded to the attention row tile, which is why plan GEMM shapes can be "
+                       "larger than the logical ones (work ratio)."),
+        ("`_p<placement>` suffix", "HBM placement that differs from the kernel's default: each pair is an array "
+                                   "initial and an edge initial (w = west, s = south). Used here: "
+                                   + "; ".join(f"`{s['suffix']}` ({s['kernel']}: {s['arrays']})" for s in suf) + "."),
+        ("`addi`", "residual add as upstream's plan runs it: the Activation kernel with function 'none' and a "
+                   "full-size bias (the residual stream)."),
+        ("(fixed) / (fallback)", "plan runs: upstream's setting with a recorded fix (it failed the output check or "
+                                 "could not run as given) / upstream's settings all failed, so the fastest passing "
+                                 "earlier sweep setting is used."),
+        ("f_pad · f_occ · f_rest", f"MFU factors of a matrix kernel: true / padded FLOP (shape padding x RedMulE "
+                                   f"block fill) · active clusters / {NCL} · the matrix units' busy share inside the "
+                                   "active clusters (everything else: data movement, sync, overhead)."),
+        ("roofline bound / × roofline", f"which lower limit is larger, true FLOP at {ex.peak / 1e12:.1f} TFLOP/s "
+                                        f"or the operator's unique bytes at {ex.bw / 1e9:,.0f} GB/s, and how many "
+                                        "times that limit the measured time is. A large × roofline means latency, "
+                                        "sync or overhead dominate, whatever the bound says."),
+        ("MFU", f"all FLOP of the stage or call (row-operator FLOP included) at the {ex.peak / 1e12:.1f} TFLOP/s "
+                "RedMulE peak / time. One definition on every tile and table of this page."),
+    ]
+    return [dict(term=t, meaning=s) for t, s in G]
+
+
+def dataflow(ex) -> list[dict]:
+    """What each stage hands to the next (inference: from the op shapes, fp16)."""
+    d = ex.dims
+    wl = ex.c.primary_workload
+    P = m.prefix_tokens(wl, d)
+    V = m.vision_tokens(wl, d)
+    kv = d.t_kv_heads * d.head_dim
+    rows = [
+        dict(src="vision", dst="connector", what=f"image tokens, {wl.cameras} cameras x {V} x {d.v_hidden}",
+             bytes=wl.cameras * V * d.v_hidden * DTYPE_BYTES, when="once per call"),
+        dict(src="connector", dst="prefix", what=f"{wl.cameras * V // d.shuffle ** 2} image tokens x {d.t_hidden} "
+             f"(the prefix's {P} rows add language and state tokens)",
+             bytes=wl.cameras * V // d.shuffle ** 2 * d.t_hidden * DTYPE_BYTES, when="once per call"),
+        dict(src="prefix", dst="expert", what=f"K and V of {d.e_layers} prefix layers, {P} x {kv} each "
+             f"(cross layers project them once per call; self layers attend over {P} + {d.chunk} rows)",
+             bytes=d.e_layers * 2 * P * kv * DTYPE_BYTES, when="once per call, read every step"),
+        dict(src="expert", dst="output", what=f"action chunk {d.chunk} x {d.action_dim}, Euler-updated each step",
+             bytes=d.chunk * d.action_dim * DTYPE_BYTES, when=f"{d.steps} steps"),
+    ]
+    return rows
+
+
+def assumptions(ex, page_sums: dict) -> list[str]:
+    return [
+        f"fp16 operands (the kernels' precision); weight footprint = parameters x {DTYPE_BYTES} B.",
+        f"Every kernel runs alone on all {NCL} clusters; kernels run one after another, so times add (no overlap "
+        "between kernels or stages).",
+        "Every kernel reads its inputs from HBM and writes its output to HBM: no on-chip reuse between kernels.",
+        f"HBM: DRAMSys, {ex.bw / 1e9:,.0f} GB/s peak (measured: 16 channels x 64 GB/s).",
+        "Attention is unmasked (stage1-spec §4.2): dense FLOP and time, no causal or padding savings.",
+        "Expert self-attention's KV concatenation is not modelled (as upstream's plan).",
+        f"Host-side, not timed: {page_sums['total_uncovered']}.",
+        "W1's plan runs are not traced (no per-cluster busy data); W1-b is not run under the plan.",
+    ]
+
+
+LIMITS = [
+    "Stage time on part of the mesh: every run used the full mesh, so there is no data on how a stage scales on "
+    "fewer clusters (needed to place the vision encoder, prefix and expert side by side).",
+    "Concurrency: no runs of two stages at once, so no HBM or NoC contention data.",
+    "Overlap and pipelining between kernels or stages (all times here add serially).",
+    "Gains from fusion or on-chip reuse: every kernel round-trips HBM.",
+    "Masked attention and KV concatenation costs.",
+]
+
+
+# column / tile label of the comparison ratio, per page kind (False: sweep page, True: plan page)
+RATIO_LABEL = {True: "sweep preset ÷ plan", False: "stage-1 pick ÷ selected"}
 
 
 # ------------------------------------------------------------------------------------------- Markdown
@@ -770,17 +984,19 @@ def render_md(ex: Explorer) -> str:
         "kernel-explorer.html`; serve it with `python3 infra/kernel-runs/serve_traces.py`.",
         "",
         "Labels: kernel times, sweep rows and trace events are *measured*; the valid space counts come from the "
-        "drivers' candidate generators (*inference*); MFU factors, the time budget and busy fractions are *estimate*.",
+        "drivers' candidate generators (*inference*); MFU factors, the time budget and busy fractions are *estimate*; "
+        "composed call and stage times are sums of measured kernel times (*estimate*: no overlap).",
         "",
-        "## Checks",
-        "",
-        "| check | what | result | detail |",
-        "| --- | --- | --- | --- |",
     ]
-    for c in ex.checks:
-        L.append(f"| {c['kind']} | `{c['what']}` | {'pass' if c['ok'] else '**FAIL**'} | {c['detail']} |")
     n_fail = sum(not c["ok"] for c in ex.checks)
-    L += ["", f"{len(ex.checks) - n_fail} of {len(ex.checks)} checks pass.", "",
+    L += [f"**Checks:** {len(ex.checks) - n_fail} of {len(ex.checks)} pass (list in [the appendix](#appendix-checks)).", ""]
+    L += render_context_md(ex)
+    C = ["## Appendix: checks", "",
+         "| check | what | result | detail |",
+         "| --- | --- | --- | --- |"]
+    for c in ex.checks:
+        C.append(f"| {c['kind']} | `{c['what']}` | {'pass' if c['ok'] else '**FAIL**'} | {c['detail']} |")
+    C += ["",
           "* **pick**: W1 (upstream deployment plan, `h1_plan`): the selected run is the fastest with a passing output "
           "check among the plan runs of its key (upstream's candidates and the recorded fixes, "
           "`results/plan_runs_h1.csv`), and its time is the one in `constants.yaml`. W1-b (sweep preset, "
@@ -793,7 +1009,8 @@ def render_md(ex: Explorer) -> str:
           "RedMulE activity in the kernel window of the trace (`results/trace_summary_h1.json`). Coverage: the "
           "traces are of square groups (1x1, 2x2) and attention only. The selected non-square and splitK expert "
           "mappings and the scale-8 picks have no trace, so their mesh diagrams rest on the kernel source alone.",
-          "* **sum**: count x kernel time over all operators gives the composed time of the operator-graph page.", ""]
+          "* **sum**: count x kernel time over all operators gives the composed time of the operator-graph page; "
+          "the expert's per-step and once-per-call rows add up to the expert stage.", ""]
 
     L += render_plan_md(ex)
     L += ["## Where the time goes (estimate)", "",
@@ -809,36 +1026,46 @@ def render_md(ex: Explorer) -> str:
               "| stage | ideal | padding | idle clusters | HBM floor | rest beyond roofline | row operators | total | MFU, % |",
               "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
         tot = dict(ideal=0.0, padding=0.0, idle=0.0, hbm=0.0, rest=0.0, row=0.0)
+        smfu = {x["stage"]: x["mfu"] for x in p["sums"]["stages"]}
         for b in ex.budget(p):
             t = sum(b[x] for x in tot)
             for x in tot:
                 tot[x] += b[x]
             L.append(f"| {b['stage']} | {_f(b['ideal'] / 1e6, 2)} | {_f(b['padding'] / 1e6, 2)} | {_f(b['idle'] / 1e6, 2)} | "
-                     f"{_f(b['hbm'] / 1e6, 2)} | {_f(b['rest'] / 1e6, 2)} | {_f(b['row'] / 1e6, 2)} | {_f(t / 1e6, 2)} | {_f(100 * b['ideal'] / t)} |")
+                     f"{_f(b['hbm'] / 1e6, 2)} | {_f(b['rest'] / 1e6, 2)} | {_f(b['row'] / 1e6, 2)} | {_f(t / 1e6, 2)} | {smfu[b['stage']]} |")
         t = sum(tot.values())
         L += [f"| **all** | {_f(tot['ideal'] / 1e6, 2)} | {_f(tot['padding'] / 1e6, 2)} | {_f(tot['idle'] / 1e6, 2)} | "
-              f"{_f(tot['hbm'] / 1e6, 2)} | {_f(tot['rest'] / 1e6, 2)} | {_f(tot['row'] / 1e6, 2)} | **{_f(t / 1e6, 2)}** | **{_f(100 * tot['ideal'] / t)}** |",
-              "", "MFU here counts only matrix-kernel FLOP; the operator-graph page also counts the row operators' "
-              "few FLOP, so it can differ in the last digit.", ""]
+              f"{_f(tot['hbm'] / 1e6, 2)} | {_f(tot['rest'] / 1e6, 2)} | {_f(tot['row'] / 1e6, 2)} | **{_f(t / 1e6, 2)}** | **{p['sums']['total']['mfu']}** |",
+              "", "MFU as everywhere on this page: all FLOP of the stage (row operators included) at peak / time.", ""]
 
     L += ["## Matrix kernels", "",
           "MFU = f_pad x f_occ x f_rest. f_pad = true / padded FLOP = shape padding x RedMulE block fill (below); "
           f"f_occ = active clusters / {NCL}; f_rest = the rest, "
-          "the matrix units' share of time inside the active clusters. Bound: which of the two lower limits, "
-          "true FLOP at peak or the operator's unique bytes at 1,024 GB/s, is larger. Time in µs per call; "
-          "total = over both pages' uses is not summed, see the operator-graph pages for call totals.", "",
-          "| kernel | used by | selected setting | technique | active | time | MFU, % | f_pad | f_occ | f_rest | "
-          "bound | roofline time | swept (ok) | valid space | trace |",
-          "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- |"]
+          "the matrix units' share of time inside the active clusters. Roofline bound: which of the two lower "
+          f"limits, true FLOP at peak or the operator's unique bytes at {ex.bw / 1e9:,.0f} GB/s, is larger; "
+          "x roofline = measured time / that limit (a large value means latency, sync or overhead dominate, "
+          "whatever the bound). Time in µs per call; call totals are on the operator-graph pages.", ""]
     ks = sorted((k for k in ex.kernels.values() if k["kind"] != "row"), key=lambda k: (k["kind"], k["shape"]))
-    for k in ks:
-        uses = ", ".join(sorted({f"{u['page']} {u['stage']}.{u['op']}" for u in k["uses"]}))
-        sel = k["selected"]
-        n_ok = sum(c["status"] == "ok" for c in k["candidates"])
-        L.append(f"| `{k['name']}` | {uses} | `{sel['cand']}` | {sel['technique']} | {sel['setting']['active']} | "
-                 f"{_f(k['time_ns'] / 1e3, 2)} | {_f(100 * k['mfu'])} | {k['f_pad']:.2f} | {k['f_occ']:.2f} | "
-                 f"{k['f_rest']:.2f} | {k['bound']} | {_f(k['roof_ns'] / 1e3, 2)} | {len(k['candidates'])} ({n_ok}) | "
-                 f"{sum(k['space'].values()):,} | {k['trace_status']} |")
+    for plan in (True, False):
+        pg = ", ".join(p["name"] for p in ex.pages if (p["group"] != m.SWEEP_GROUP) == plan)
+        runs = "plan runs (ok)" if plan else "swept (ok) | valid space"
+        L += [f"### {pg}: {'upstream deployment plan' if plan else 'sweep preset'}", "",
+              "| kernel | used by | selected setting | technique | active | time | MFU, % | f_pad | f_occ | f_rest | "
+              f"roofline bound | x roofline | {runs} | trace |",
+              "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | "
+              + ("" if plan else "---: | ") + "--- |"]
+        for k in ks:
+            if k["plan"] != plan:
+                continue
+            uses = ", ".join(sorted({f"{u['stage']}.{u['op']}" for u in k["uses"]}))
+            sel = k["selected"]
+            n_ok = sum(c["status"] == "ok" for c in k["candidates"])
+            L.append(f"| `{k['name']}` | {uses} | `{sel['cand']}` | {sel['technique']} | {sel['setting']['active']} | "
+                     f"{_f(k['time_ns'] / 1e3, 2)} | {_f(100 * k['mfu'])} | {k['f_pad']:.2f} | {k['f_occ']:.2f} | "
+                     f"{k['f_rest']:.2f} | {k['bound']} | {k['time_ns'] / k['roof_ns']:.1f} | "
+                     f"{len(k['candidates'])} ({n_ok}) | " + ("" if plan else f"{sum(k['space'].values()):,} | ")
+                     + f"{k['trace_status']} |")
+        L.append("")
     bm, bn, bk = ex.rm_blk
     L += ["", "### f_pad in words", "",
           f"f_pad = shape padding x RedMulE block fill. Shape padding: the operator rounded up to whole tiles. "
@@ -876,15 +1103,18 @@ def render_md(ex: Explorer) -> str:
     L += ["", "## Mapping space per GEMM shape", "",
           "Valid settings per technique (the driver's candidate generator: tiles multiples of 32 up to 256, L1 "
           "double buffers within 352 KiB, padded work at most 2.5x) / runs in the sweeps (passing the output check). "
-          "A dash: the technique was not enumerated for this shape.", "",
+          "A dash: the technique was not enumerated for this shape. Sweep-preset shapes only; W1's plan runs per "
+          "key are in the plan section above.", "",
           "| shape | " + " | ".join(t for t, _, _ in GEMM_TECHNIQUES) + " | selected |",
           "| --- | " + " | ".join("---:" for _ in GEMM_TECHNIQUES) + " | --- |"]
     for k in ks:
-        if k["kind"] != "gemm":
+        if k["kind"] != "gemm" or k["plan"]:
             continue
+        by = {t["technique"]: t for t in k["techniques"]}
         cells = []
-        for t in k["techniques"]:
-            cells.append(f"{t['valid']:,} / {t['swept']} ({t['ok']})" if t["enumerated"] else "-")
+        for name, _, _ in GEMM_TECHNIQUES:
+            t = by.get(name)
+            cells.append(f"{t['valid']:,} / {t['swept']} ({t['ok']})" if t and t["enumerated"] else "-")
         L.append(f"| `{k['name']}` | " + " | ".join(cells) + f" | {k['selected']['technique']} |")
     L += ["", "In the kernel but never swept (per shape in the explorer): " + "; ".join(f"{a} ({b})" for a, b in GEMM_NOT_SWEPT)
           + ". Row kernels: Activation's bias_enable (bias added in the same pass) is never run; the bias before GELU "
@@ -909,7 +1139,41 @@ def render_md(ex: Explorer) -> str:
     L.append("")
     L += render_options_md(ex)
     L += render_interfaces_md(ex)
+    L += C
     return "\n".join(L)
+
+
+def render_context_md(ex: Explorer) -> list[str]:
+    """Glossary, per-stage table, stage dataflow, assumptions and limits (the same data as the HTML cards)."""
+    L = ["## Glossary", "", "| term | meaning |", "| --- | --- |"]
+    L += [f"| {g['term']} | {g['meaning']} |" for g in glossary(ex)]
+    L += ["", "## Per stage, per policy call", "",
+          "Time and MFU as on the operator-graph pages (sums of measured kernel times, *estimate*). Weight "
+          f"footprint: the checkpoint's parameters x {DTYPE_BYTES} B (token embedding and state_proj are host-side, "
+          "lm_head is never called). Weight reads and HBM traffic per call: op model on logical shapes (plan "
+          "padding not included), for the operators that run as their own kernel (*estimate*). GB/s = traffic / "
+          "time.", ""]
+    for p in ex.pages:
+        L += [f"### {p['name']} ({p['desc']})", "",
+              "| stage | time, ms | share | kernel calls | MFU, % | weight footprint, MB | weight reads, MB | "
+              "HBM traffic, MB | GB/s |",
+              "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+        for r in ex.stage_tables[p["name"]]:
+            lab = r["label"] if r["kind"] == "stage" else f"↳ {r['label']}"
+            L.append(f"| {lab} | {_f(r['ms'], 3)} | {'' if r['share'] is None else _f(100 * r['share']) + ' %'} | "
+                     f"{r['calls']:,} | {_f(100 * r['mfu'])} | "
+                     f"{'' if r['footprint_mb'] is None else _f(r['footprint_mb'])} | {_f(r['weights_mb'])} | "
+                     f"{_f(r['traffic_mb'])} | {_f(r['gbps'], 0)} |")
+        L.append("")
+    L += ["## What each stage hands to the next (inference, from op shapes)", "",
+          "| from | to | what | MB | when |", "| --- | --- | --- | ---: | --- |"]
+    L += [f"| {d['src']} | {d['dst']} | {d['what']} | {_f(d['bytes'] / 1e6, 3)} | {d['when']} |" for d in dataflow(ex)]
+    p0 = ex.pages[0]
+    L += ["", "## Assumptions behind every number", ""] + [f"* {a}" for a in assumptions(ex, p0["sums"])]
+    L += ["", "## What this baseline cannot tell you", "",
+          "For studies that split or recombine the vision encoder, prefix and action expert:", ""]
+    L += [f"* {x}" for x in LIMITS] + [""]
+    return L
 
 
 def render_plan_md(ex: Explorer) -> list[str]:

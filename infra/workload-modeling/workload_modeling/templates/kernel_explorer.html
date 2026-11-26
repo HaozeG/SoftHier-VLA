@@ -45,6 +45,8 @@ body { margin: 0; }
 h1 { font-size: 20px; margin: 0 0 4px; }
 h2 { font-size: 16px; margin: 0 0 10px; }
 h3 { font-size: 14px; margin: 16px 0 8px; color: var(--text-secondary); font-weight: 600; }
+tr.sub td { color: var(--text-secondary); }
+summary h2 { margin: 0; }
 p { margin: 4px 0 8px; }
 .muted { color: var(--text-muted); }
 .sec { color: var(--text-secondary); }
@@ -117,10 +119,28 @@ details summary { cursor: pointer; color: var(--text-secondary); }
 
   <div class="tiles" id="tiles" style="margin-top:14px"></div>
 
+  <div class="card" id="checkLine"></div>
+
   <div class="card">
-    <h2>Checks on the baseline</h2>
-    <div id="checkSummary"></div>
-    <details style="margin-top:8px"><summary>All checks</summary><div class="scroll" style="margin-top:8px"><table id="checkTable"></table></div></details>
+    <h2>Per stage, per policy call</h2>
+    <p class="sec">Time and MFU as on the operator-graph pages (sums of measured kernel times, estimate). Weight footprint: the checkpoint's parameters at 2 B
+      (token embedding and state_proj are host-side, lm_head is never called). Weight reads and HBM traffic per call: op model on logical shapes, plan padding not included (estimate). GB/s = traffic / time.</p>
+    <div class="scroll"><table id="stageTable"></table></div>
+    <h3 style="margin-top:14px">What each stage hands to the next <span class="muted" style="font-weight:400">(inference, from op shapes)</span></h3>
+    <div class="scroll"><table id="flowTable"></table></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="gap:24px;align-items:flex-start">
+      <div class="grow" style="min-width:0;flex-basis:320px"><h2>Assumptions behind every number</h2><ul id="assumptions" class="sec"></ul></div>
+      <div class="grow" style="min-width:0;flex-basis:320px"><h2>What this baseline cannot tell you</h2>
+        <p class="sec" style="margin:0">For studies that split or recombine the vision encoder, prefix and action expert:</p><ul id="limits" class="sec"></ul></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <details open><summary><h2 style="display:inline">Glossary</h2> <span class="muted">names, suffixes and columns used on this page</span></summary>
+      <div class="scroll" style="margin-top:8px"><table id="glossary"></table></div></details>
   </div>
 
   <div class="card">
@@ -140,6 +160,12 @@ details summary { cursor: pointer; color: var(--text-secondary); }
   </div>
 
   <div class="card" id="detail"></div>
+
+  <div class="card">
+    <h2>Checks on the baseline</h2>
+    <div id="checkSummary"></div>
+    <details style="margin-top:8px"><summary>All checks</summary><div class="scroll" style="margin-top:8px"><table id="checkTable"></table></div></details>
+  </div>
 </div>
 <div id="tip"></div>
 </div>
@@ -201,15 +227,30 @@ function renderTiles() {
   const tot = BUDGET.reduce((a, [k]) => a + sum(k), 0);
   const t = $("#tiles"); t.innerHTML = "";
   const tile = (v, l) => t.append(el("div", { class: "tile" }, `<div class="v">${v}</div><div class="l">${l}</div>`));
-  tile(`${p.total_ms} ms`, "per policy call (estimate: sum of kernel times)");
+  tile(`${p.total_ms} ms`, "per policy call (estimate: sum of measured kernel times, no overlap)");
   tile(`${p.mfu} %`, "MFU of the call");
   tile(`${fmt(sum("ideal") / 1e6, 2)} ms`, "ideal: all matrix FLOP at peak");
   tile(`${fmt(sum("hbm") / 1e6, 2)} ms`, "HBM floor (unique bytes at 1,024 GB/s)");
   tile(`${fmt(sum("rest") / 1e6, 2)} ms`, "rest beyond roofline (largest loss)");
   tile(`${fmt(sum("row") / 1e6, 2)} ms`, "row operators on vector cores");
   const ctot = parseFloat(String(p.total_ms).replace(/,/g, ""));
-  if (p.compare_ms) tile(`${fmt(p.compare_ms, 2)} ms`, `${esc(p.compare_label)} (comparison, estimate; plan ×${(ctot / p.compare_ms).toFixed(2)} of it)`);
-  else if (p.stage1_ms > ctot + 1e-6) tile(`${fmt(p.stage1_ms, 2)} ms`, `with the stage-1 picks (estimate; constants now ${fmt(ctot, 2)} ms, ×${(p.stage1_ms / ctot).toFixed(2)})`);
+  if (p.compare_ms) tile(`${fmt(p.compare_ms, 2)} ms`, `${esc(p.compare_label)} (comparison, estimate; ${esc(p.ratio_label)} = ×${(p.compare_ms / ctot).toFixed(2)})`);
+  else if (p.stage1_ms > ctot + 1e-6) tile(`${fmt(p.stage1_ms, 2)} ms`, `with the stage-1 picks (estimate; ${esc(p.ratio_label)} = ×${(p.stage1_ms / ctot).toFixed(2)})`);
+}
+
+function renderContext() {
+  const p = pageData(), C = DATA.context;
+  const nf = DATA.checks.filter(x => !x.ok).length;
+  $("#checkLine").innerHTML = `<span class="badge ${nf ? "fail" : "ok"}">checks: ${DATA.checks.length - nf} of ${DATA.checks.length} pass</span> <span class="sec">pick, constants, placement vs trace and sums; the list is at the bottom of the page.</span>`;
+  const n = (x, d) => `<td class="n">${x == null ? "" : fmt(x, d)}</td>`;
+  $("#stageTable").innerHTML = `<tr><th>stage</th><th class="n">time, ms</th><th class="n">share</th><th class="n">kernel calls</th><th class="n">MFU, %</th><th class="n">weight footprint, MB</th><th class="n">weight reads, MB</th><th class="n">HBM traffic, MB</th><th class="n">GB/s</th></tr>` +
+    p.stages.map(r => `<tr${r.kind === "stage" ? "" : ' class="sub"'}><td>${r.kind === "stage" ? `<b>${esc(r.label)}</b>` : `<span class="muted">↳</span> ${esc(r.label)}`}</td>${n(r.ms, 3)}<td class="n">${r.share == null ? "" : pct(r.share) + " %"}</td>${n(r.calls, 0)}${n(100 * r.mfu, 1)}${n(r.footprint_mb, 1)}${n(r.weights_mb, 1)}${n(r.traffic_mb, 1)}${n(r.gbps, 0)}</tr>`).join("");
+  $("#flowTable").innerHTML = `<tr><th>from</th><th>to</th><th>what</th><th class="n">MB</th><th>when</th></tr>` +
+    C.dataflow.map(d => `<tr><td>${d.src}</td><td>${d.dst}</td><td class="sec">${esc(d.what)}</td><td class="n">${fmt(d.bytes / 1e6, 3)}</td><td class="sec">${esc(d.when)}</td></tr>`).join("");
+  const md = t => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>");
+  $("#assumptions").innerHTML = p.assumptions.map(a => `<li>${md(a)}</li>`).join("");
+  $("#limits").innerHTML = C.limits.map(a => `<li>${md(a)}</li>`).join("");
+  $("#glossary").innerHTML = `<tr><th>term</th><th>meaning</th></tr>` + C.glossary.map(g => `<tr><td style="white-space:nowrap"><b>${md(g.term)}</b></td><td class="sec">${md(g.meaning)}</td></tr>`).join("");
 }
 
 function renderChecks() {
@@ -244,7 +285,7 @@ function renderBudget() {
       const rect = sv("rect", { x, y, width: Math.max(w - (last ? 0 : 2), 0.5), height: 20, fill: css(c), rx: last ? 4 : 0 });
       hover(rect, `<b>${r.stage}: ${l}</b><br>${fmt(r[k] / 1e6, 3)} ms (${pct(r[k] / totals[i])} % of the stage)`);
       svg.append(rect); x += w; });
-    const t = sv("text", { x: x + 8, y: y + 14 }); t.innerHTML = `<tspan class="ink">${fmt(totals[i] / 1e6, 2)} ms</tspan> · MFU ${pct(r.ideal / totals[i])} %`; svg.append(t);
+    const t = sv("text", { x: x + 8, y: y + 14 }); t.innerHTML = `<tspan class="ink">${fmt(totals[i] / 1e6, 2)} ms</tspan> · MFU ${pageData().stage_mfu[r.stage]} %`; svg.append(t);
   });
 }
 
@@ -260,7 +301,7 @@ function kernelRows() {
   const NA = 1e18, TR = { selected: 0, other: 1, none: 2 };
   const key = { name: r => r.k.name, calls: r => -r.calls, time: r => -r.k.time_ns, total: r => -r.total, share: r => -r.share,
     mfu: r => r.k.kind === "row" ? NA : -r.k.mfu, fac: r => r.k.kind === "row" ? NA : r.k.f_rest,
-    bound: r => r.k.kind === "row" ? "z" : r.k.bound, cand: r => r.k.kind === "row" ? "~" : r.k.selected.cand,
+    bound: r => r.k.kind === "row" ? "z" : r.k.bound, roof: r => r.k.kind === "row" ? NA : -r.k.time_ns / r.k.roof_ns, cand: r => r.k.kind === "row" ? "~" : r.k.selected.cand,
     trace: r => TR[r.k.trace_status], opt: r => r.k.stage1 ? -r.k.stage1.speedup : NA }[state.sort];
   const dir = state.sortRev ? -1 : 1;
   rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * dir || (b.total - a.total); });
@@ -270,7 +311,7 @@ const TRACE_BADGE = { selected: ["ok", "selected"], other: ["warn", "other setti
 function renderKernels() {
   const t = $("#kernelTable"); const rows = kernelRows();
   const th = (k, l, n, title) => `<th class="sort ${n ? "n" : ""}" data-s="${k}"${title ? ` title="${title}"` : ""}>${l}${state.sort === k ? (state.sortRev ? " ▴" : " ▾") : ""}</th>`;
-  t.innerHTML = `<tr>${th("name", "kernel")}<th>operators</th>${th("calls", "calls", 1)}${th("time", "µs per call", 1)}${th("total", "ms per policy call", 1)}${th("share", "share", 1)}${th("mfu", "MFU, %", 1)}${th("fac", "f_pad · f_occ · f_rest", 0, "sorts by f_rest, lowest first")}${th("bound", "bound")}${th("cand", "selected setting")}${th("opt", "vs comparison", 0, "W1: sweep preset time / plan time for the same operator (below 1: the plan is slower); W1-b: stage-1 pick / selected; largest first")}${th("trace", "trace", 0, "selected setting traced first")}</tr>`;
+  t.innerHTML = `<tr>${th("name", "kernel")}<th>operators</th>${th("calls", "calls", 1)}${th("time", "µs per call", 1)}${th("total", "ms per policy call", 1)}${th("share", "share", 1)}${th("mfu", "MFU, %", 1)}${th("fac", "f_pad · f_occ · f_rest", 0, "sorts by f_rest, lowest first")}${th("bound", "roofline bound", 0, "the larger lower limit: true FLOP at peak (compute) or unique bytes at HBM peak (HBM)")}${th("roof", "× roofline", 1, "measured time / roofline limit; large = latency, sync or overhead dominate")}${th("cand", "selected setting")}${th("opt", pageData().ratio_label, 0, "comparison time / this page's time for the same operator; below 1: this page is slower; largest first")}${th("trace", "trace", 0, "selected setting traced first")}</tr>`;
   t.querySelectorAll("th.sort").forEach(h => h.onclick = () => { state.sortRev = state.sort === h.dataset.s ? !state.sortRev : false; state.sort = h.dataset.s; renderKernels(); });
   for (const r of rows) {
     const k = r.k; const tr = el("tr", { class: "click" + (state.kernel === k.name ? " on" : "") });
@@ -279,7 +320,7 @@ function renderKernels() {
     const tb = TRACE_BADGE[k.trace_status];
     tr.innerHTML = `<td class="mono">${esc(k.name)}</td><td class="sec" style="max-width:260px">${esc([...new Set(r.ops)].join(", "))}</td>
       <td class="n">${r.calls}</td><td class="n">${us(k.time_ns)}</td><td class="n">${fmt(r.total / 1e6, 3)}</td><td class="n">${pct(r.share)} %</td>
-      <td class="n">${k.kind === "row" ? "–" : pct(k.mfu)}</td><td>${fac}</td><td>${k.kind === "row" ? "–" : k.bound}</td>
+      <td class="n">${k.kind === "row" ? "–" : pct(k.mfu)}</td><td>${fac}</td><td>${k.kind === "row" ? "–" : k.bound}</td><td class="n">${k.kind === "row" ? "–" : fmt(k.time_ns / k.roof_ns, 1)}</td>
       <td class="mono">${esc(k.kind === "row" ? "" : k.selected.cand)}</td><td>${optCell(k)}</td><td><span class="badge ${tb[0]}">${tb[1]}</span></td>`;
     tr.onclick = () => { state.kernel = k.name; state.cand = null; renderKernels(); renderDetail(); $("#detail").scrollIntoView({ behavior: "smooth", block: "start" }); };
     t.append(tr);
@@ -473,7 +514,7 @@ function renderDetail(keepScroll) {
         <div class="kv" style="margin-bottom:8px">
           <div>time per call</div><div><b>${us(k.time_ns)} µs</b> <span class="muted">(measured, constants <code>${esc(k.constants_key)}</code>)</span></div>
           ${k.kind === "row" ? (k.pipelined ? `<div>schedule</div><div>pipelined rows (<code>pipeline = 1</code>)</div>` : "") : `<div>selected</div><div class="mono">${esc(k.selected.cand)} <span class="muted">(${esc(k.selected.technique)})</span>${k.selected.transposed ? ` <span class="badge">transposed, runs as ${esc(k.selected.run_shape)}; layout cost of X<sup>T</sup> / Z<sup>T</sup> not counted</span>` : ""}</div>`}
-          ${k.stage1 ? `<div>${esc(k.stage1.label || "stage 1")}</div><div class="mono">${esc(k.stage1.setting || "–")} · ${us(k.stage1.time_ns)} µs <span class="muted">(×${k.stage1.speedup.toFixed(2)}${k.plan ? ": sweep preset / plan" : " now"})</span></div>` : (k.plan ? `<div>sweep preset</div><div class="muted">no sweep run of this operator at this shape</div>` : "")}
+          ${k.stage1 ? `<div>${esc(k.stage1.label || "stage 1")}</div><div class="mono">${esc(k.stage1.setting || "–")} · ${us(k.stage1.time_ns)} µs <span class="muted">(×${k.stage1.speedup.toFixed(2)} = ${k.plan ? "sweep preset ÷ plan" : "stage-1 pick ÷ selected"})</span></div>` : (k.plan ? `<div>sweep preset</div><div class="muted">no sweep run of this operator at this shape</div>` : "")}
         </div>
         ${factorBars(k)}
         <details style="margin-top:8px"><summary>Provenance (constants.yaml)</summary><p class="sec mono" style="white-space:pre-wrap">${esc(k.constants_source)}\n\n${esc(k.constants_note)}</p></details>
@@ -541,7 +582,7 @@ function renderDetail(keepScroll) {
   if (!keepScroll) d.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function renderAll() { renderSegs(); renderTiles(); renderChecks(); renderBudget(); renderKernels(); renderDetail(true); writeHash(); }
+function renderAll() { renderSegs(); renderTiles(); renderContext(); renderChecks(); renderBudget(); renderKernels(); renderDetail(true); writeHash(); }
 // deep links: #page=W1-b&k=gemm_50x720x720&cand=...&mode=redmule
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));

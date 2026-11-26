@@ -110,3 +110,36 @@ def test_w1_page_is_the_upstream_plan():
     pick = list(csv.DictReader(open(kx.RES / "plan_pick_h1.csv")))
     assert abs(float(w1["sums"]["total_ms"]) - sum(int(r["total_ns"]) for r in pick) / 1e6) < 0.006
     assert all(c["ok"] for c in ex.checks)
+
+
+def test_glossary_covers_every_name_on_the_page():
+    # every naming element a reader meets in kernel and candidate names has a glossary entry (cold-read feedback)
+    import re
+    ex = kx.Explorer()
+    text = " ".join(e["term"] + " " + e["meaning"] for e in kx.glossary(ex))
+    names = set(ex.kernels) | {c["cand"] for k in ex.kernels.values() for c in k["candidates"]}
+    for n in names:
+        for suf in re.findall(r"_p(?:[A-Z][ws])+$", n.rsplit(".", 1)[-1]):
+            assert f"`{suf}`" in text, suf
+    for token in ("_zto", "_xfrom", "addi", "head-major", "TALL", "W1-b", "h1_plan", "h1_kernels", "x<X>y<Y>g<G>",
+                  "s<S>", "attn_s<sx>x<sy>", "roofline", "f_pad"):
+        assert token in text, token
+    assert any(re.search(r"_x\d+y\d+g\d+_t", n) for n in names) and any(re.search(r"_s\d+g\d+_t", n) for n in names)
+
+
+def test_stage_table_expert_split_and_one_mfu():
+    ex = kx.Explorer()
+    for p in ex.pages:
+        rows = ex.stage_tables[p["name"]]
+        stage = {r["stage"]: r for r in rows if r["kind"] == "stage"}
+        step = next(r for r in rows if r["kind"] == "step")
+        once = next(r for r in rows if r["kind"] == "call")
+        assert abs(ex.dims.steps * step["ms"] + once["ms"] - stage["expert"]["ms"]) < 1e-6
+        assert abs(sum(r["ms"] for r in stage.values()) - float(p["sums"]["total_ms"])) < 0.006
+        # MFU: the operator-graph page's definition, to its printed digit
+        for s in p["sums"]["stages"]:
+            assert f"{100 * stage[s['stage']]['mfu']:.1f}" == s["mfu"]
+    # the expert re-reads its weights every step: per-step reads at most the footprint
+    w1 = {r["label"]: r for r in ex.stage_tables["W1"]}
+    step = next(r for r in ex.stage_tables["W1"] if r["kind"] == "step")
+    assert step["weights_mb"] <= w1["expert"]["footprint_mb"]
