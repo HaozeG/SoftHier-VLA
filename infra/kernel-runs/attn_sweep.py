@@ -35,6 +35,7 @@ WORK_CAP = 2.5
 # name: (query heads, KV heads, q length, kv length, operators). W1 and W1-b share these (attention per camera).
 SHAPES = {
     "12x1024x1024x64": (12, 12, 1024, 1024, "vision qk, softmax, pv (per camera)"),
+    "36x1024x1024x64": (36, 36, 1024, 1024, "vision qk, softmax, pv (W1-b under the plan: cameras x heads, one call)"),
     "15x241x241x64": (15, 5, 241, 241, "prefix qk, softmax, pv"),
     "15x50x291x64": (15, 5, 50, 291, "expert self qk, softmax, pv"),
     "15x50x241x64": (15, 5, 50, 241, "expert cross qk, softmax, pv"),
