@@ -875,6 +875,36 @@ class Explorer:
             context=dict(glossary=glossary(self), dataflow=dataflow(self), limits=LIMITS),
             views=self.views(), plans=self.plan_bundles(kernels))
 
+    def _own_candidates(self, k: dict, sel: str) -> None:
+        """Keep only the runs this plan's selection looked at: upstream rule = upstream's runs of the key (its
+        candidates, recorded fixes, fallbacks); plan-constrained sweep = the sweep's runs plus upstream's runs, which
+        the sweep takes as candidates too (marked "upstream run"). Techniques, run counts, failures follow."""
+        is_sweep = lambda c: c.get("origin", "").startswith("plan-constrained")
+        n = k.get("n_runs") or {}
+        if k["kind"] == "row":
+            rr = k.get("row_runs", [])
+            k["row_runs"] = [r for r in rr if sel == "constrained" or r.get("origin") != "plan-constrained sweep"]
+            k["n_runs"] = dict(n, sweep=0, sweep_ok=0) if sel == "upstream" else n
+            k["n_own"] = len(k["row_runs"])
+            return
+        cands = [c for c in k["candidates"] if sel == "constrained" or not is_sweep(c)]
+        if sel == "constrained":
+            cands = [dict(c, origin=c.get("origin", "") if is_sweep(c) else "upstream run (also a sweep candidate): "
+                          + c.get("origin", "")) for c in cands]
+        k["candidates"] = cands
+        ts = sorted({c["technique"] for c in cands})
+        desc = "upstream rule's runs" if sel == "upstream" else "plan-constrained sweep runs and upstream's runs"
+        drv = "plan_runs.py" if sel == "upstream" else "plan_sweep.py, plan_runs.py"
+        techs = [(t, desc, drv) for t in ts]
+        k["space"] = {t: sum(c["technique"] == t for c in cands) for t in ts}
+        k["techniques"] = self._tech_table(techs, k["space"], cands, k["selected"], True)
+        if sel == "constrained":
+            k["failed"] = [dict(cand=c["cand"], status=c["status"], bad=c.get("bad"), time_ns=c.get("time_ns"),
+                                fix=c.get("fix", "")) for c in cands if c["status"] != "ok"]
+        self._wrong_faster(k)
+        k["n_runs"] = dict(n, sweep=0, sweep_ok=0, variants=1) if sel == "upstream" else n
+        k["n_own"] = len(cands)
+
     def plan_bundles(self, kernels: dict) -> list[dict]:
         """One self-contained bundle per plan (page x selection): its operators, kernels (selected setting, time,
         factors, candidates), per-stage table and budget. The visualizer shows any two side by side and can load
@@ -917,6 +947,7 @@ class Explorer:
                             k["stage1"] = dict(label="plan-constrained sweep (same page)", setting=a["cand"],
                                                time_ns=int(a["time_ns"]), speedup=a["time_ns"] / k["time_ns"])
                         k["plan_sel"] = sel
+                        self._own_candidates(k, sel)
                         for u in k["uses"]:
                             u["total_ns"] = u["count"] * k["time_ns"]
                         ks[o["kernel"]] = k
