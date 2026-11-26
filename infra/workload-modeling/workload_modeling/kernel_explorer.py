@@ -351,6 +351,21 @@ class Explorer:
                         f"{p['compare_ms']:.3f} ms vs {up_ms:.3f} ms (upstream's combination is a candidate)")
         return p
 
+    @staticmethod
+    def _origin_sweep(r: dict, vid0: str) -> str:
+        pad = "" if r["vid"] == vid0 else f" @{r['vid'].split('@', 1)[1]}"
+        return f"plan-constrained sweep ({r.get('source', '')}){pad}"
+
+    def _mark(self, c: dict, r: dict, vid0: str, alts: set) -> dict:
+        """Label a candidate's origin; flag the plan-constrained pick (selected on some page)."""
+        if r.get("sweep"):
+            c["origin"] = self._origin_sweep(r, vid0)
+            c["vid"] = r["vid"]
+        else:
+            c["vid"] = vid0
+        c["constrained_pick"] = (c["vid"], c["cand"]) in alts
+        return c
+
     def _vid(self, key: str) -> str:
         """plan_sweep.vid of the upstream plan's run of a key (key @ padded sizes)."""
         cfg = self.plan_runs[key]["cfg"]
@@ -457,16 +472,23 @@ class Explorer:
         self._stage1(k)
 
     def _plan_kernel(self, k: dict) -> None:
-        """A W1 kernel under the upstream deployment plan: its candidates are the plan runs of its key (upstream's
-        opt() / attn_auto setting, with recorded fixes, and fallbacks; also those that failed the output check); the
-        selected one is the fastest that passed, and must be the time in constants.yaml h1_plan. The sweep preset's
-        time for the same operator is the comparison (k["stage1"], labelled)."""
+        """A kernel under the upstream deployment plan. Candidates: the plan runs of its key (upstream's opt() /
+        attn_auto setting, with recorded fixes, and fallbacks) and the plan-constrained sweep's runs of the same key
+        (every run variant, i.e. also other head paddings), also those that failed the output check. Selected = the
+        fastest passing upstream run, the time in constants.yaml h1_plan; the plan-constrained pick is marked and is
+        the comparison (k["stage1"])."""
         key = k["name"]
         run = self.plan_runs[key]
         kern = run["kernel"]
         mine = [r for r in self.pr if r["key"] == key]
         rows = [r for r in mine if r["status"] not in ("unfit", "skipped_m_iter")]
         ok = [r for r in rows if r["status"] == "ok"]
+        # the plan-constrained sweep's runs of this key (not repeating an upstream run of the same variant)
+        vid0 = self._vid(key)
+        seen = {(vid0, r["cand"]) for r in rows}
+        sw = [dict(r, fix="", sweep=True) for r in self.ps if r["key"] == key and r["status"] != "unfit"
+              and (r["vid"], r["cand"]) not in seen]
+        alts = {(a["vid"], a["cand"]) for a in k.get("alt", {}).values()}
         best = min(ok, key=lambda r: int(r["time_ns"]))
         self._check("pick", key, int(best["time_ns"]) == int(k["time_ns"]),
                     f"fastest checked of {len(ok)} plan run(s) = {best['cand']} ({int(best['time_ns']):,} ns); "
@@ -480,29 +502,38 @@ class Explorer:
         cands = []
         if k["kind"] == "gemm":
             M, N, K = k["shape"]
-            for r in rows:
+            for r in rows + sw:
                 s = gemm_setting(r, self.rm_blk, self.rm_mac_per_ns)
                 wr = round(s["Mp"] * s["Np"] * s["Kp"] / (M * N * K), 3)
-                c = self._cand(dict(r, work_ratio=wr), s, "plan_runs", gemm_technique(s))
-                cands.append(dict(c, upstream=not r["fix"].startswith(FALLBACK_FIX), fix=r["fix"], origin=origin(r)))
+                c = self._cand(dict(r, work_ratio=wr), s, "plan_sweep" if r.get("sweep") else "plan_runs",
+                               gemm_technique(s))
+                cands.append(self._mark(dict(c, upstream=not r.get("sweep") and not r["fix"].startswith(FALLBACK_FIX),
+                                             fix=r["fix"], origin=origin(r)), r, vid0, alts))
         elif k["kind"] == "attn":
             h, q, kv, d = k["shape"]
             name = f"{h}x{q}x{kv}x{d}"
             hq, hkv = self.A.SHAPES[name][0], self.A.SHAPES[name][1]
             cfg = run["cfg"]
-            for r in rows:
+            for r in rows + sw:
                 sx, sy, Br, Bc = map(int, re.match(r"attn_s(\d+)x(\d+)_b(\d+)x(\d+)", r["cand"]).groups())
-                s = attn_setting(dict(sx=sx, sy=sy, Br=Br, Bc=Bc, q_pad=cfg["q_pad"], kv_pad=cfg["kv_pad"],
-                                      **{"async": str(cfg["async_"])}), hq, hkv)
-                wr = round(cfg["q_pad"] * cfg["kv_pad"] / (q * kv), 3)
-                c = self._cand(dict(r, work_ratio=wr), s, "plan_runs", s["mode"])
-                cands.append(dict(c, upstream=True, fix=r["fix"], origin=origin(r)))
+                if r.get("sweep"):
+                    qp, kvp, asy = int(r["q_pad"]), int(r["kv_pad"]), int(r["async"] or 0)
+                else:
+                    qp, kvp, asy = cfg["q_pad"], cfg["kv_pad"], cfg["async_"]
+                s = attn_setting(dict(sx=sx, sy=sy, Br=Br, Bc=Bc, q_pad=qp, kv_pad=kvp, **{"async": str(asy)}),
+                                 hq, hkv)
+                wr = round(qp * kvp / (q * kv), 3)
+                c = self._cand(dict(r, work_ratio=wr), s, "plan_sweep" if r.get("sweep") else "plan_runs", s["mode"])
+                cands.append(self._mark(dict(c, upstream=not r.get("sweep"), fix=r["fix"], origin=origin(r)),
+                                        r, vid0, alts))
             k.update(hq=hq, hkv=hkv)
         if k["kind"] == "row":
             sel = dict(cand=best["cand"], time_ns=int(best["time_ns"]), run_dir=best["run_dir"], setting=None,
                        fix=best["fix"])
             k.update(config=f"{kern} " + " ".join(f"{a}={b}" for a, b in run["cfg"].items()), pipelined=False,
-                     row_runs=[dict(setting=r["cand"], time_ns=int(r["time_ns"])) for r in ok],
+                     row_runs=[dict(setting=r["cand"], time_ns=int(r["time_ns"]),
+                                    origin="plan-constrained sweep" if r.get("sweep") else "upstream rule")
+                               for r in ok + [x for x in sw if x["status"] == "ok"]],
                      row_note="no mapping knob: the kernel spreads the rows over the clusters itself; default "
                               "parameters, the plan's shape and HBM placement")
             techs = []
@@ -510,8 +541,12 @@ class Explorer:
             sel = next(c for c in cands if c["cand"] == best["cand"])
             sel = dict(sel, time_final_ns=sel["time_ns"])
             ts = sorted({c["technique"] for c in cands})
-            techs = [(t, "upstream's candidates (opt() / attn_auto) and recorded fixes", "plan_runs.py") for t in ts]
+            techs = [(t, "upstream's candidates (opt() / attn_auto), recorded fixes, and the plan-constrained "
+                         "sweep's candidates", "plan_runs.py, plan_sweep.py") for t in ts]
         space = {t: sum(c["technique"] == t for c in cands) for t, _, _ in techs}
+        k["n_runs"] = dict(upstream=len(rows), upstream_ok=len(ok), sweep=len(sw),
+                           sweep_ok=sum(r["status"] == "ok" for r in sw),
+                           variants=len({r["vid"] for r in sw} | {vid0}))
         k.update(candidates=cands, selected=sel, space=space, not_swept=[],
                  techniques=self._tech_table(techs, space, cands, sel, True) if techs else [],
                  plan_fix=run["fix"], skipped=[dict(cand=r["cand"], status=r["status"], fix=r["fix"])
@@ -828,7 +863,43 @@ class Explorer:
                         stage1_ms=self.stage1_total(p) if p["group"] == m.SWEEP_GROUP else None,
                         compare_ms=p.get("compare_ms"), compare_label=p.get("compare_label")) for p in self.pages],
             kernels=kernels, checks=self.checks,
-            context=dict(glossary=glossary(self), dataflow=dataflow(self), limits=LIMITS))
+            context=dict(glossary=glossary(self), dataflow=dataflow(self), limits=LIMITS),
+            views=self.views())
+
+    def views(self) -> list[dict]:
+        """One view per page x selection (upstream rule, plan-constrained sweep) for the side-by-side comparison:
+        call total, MFU, per-stage time and MFU, and per run key the selected setting and time."""
+        f = lambda v: float(str(v).replace(",", ""))
+        out = []
+        for i, p in enumerate(self.pages):
+            for sel, sums in (("upstream", p["sums"]), ("constrained", p.get("compare_sums"))):
+                if sums is None:
+                    continue
+                ks = {}
+                for o in p["ops"]:
+                    if not o["kernel"]:
+                        continue
+                    k = self.kernels[o["kernel"]]
+                    if sel == "upstream":
+                        cand, ns, vid = k["selected"]["cand"], o["ns"], self._vid(o["kernel"])
+                    else:
+                        a = k["alt"][p["name"]]
+                        cand, ns, vid = a["cand"], o["alt_ns"], a["vid"]
+                    e = ks.setdefault(o["kernel"], dict(key=o["kernel"], kind=k["kind"], cand=cand, ns=ns, calls=0,
+                                                        pad=vid.split("@", 1)[1] if vid != self._vid(o["kernel"]) else "",
+                                                        n_runs=k["n_runs"]))
+                    e["calls"] += o["count"]
+                for e in ks.values():
+                    e["total_ms"] = e["calls"] * e["ns"] / 1e6
+                out.append(dict(
+                    id=f"{p['name']}:{sel}", page=i, page_name=p["name"], sel=sel, group=p["group"] if sel == "upstream" else p["compare_group"],
+                    label=f"{p['name']} · {'upstream rule' if sel == 'upstream' else 'plan-constrained sweep'}",
+                    desc=p["desc"].split(";")[0], total_ms=f(sums["total_ms"]), mfu=f(sums["total"]["mfu"]),
+                    stages=[dict(stage=r["stage"], ms=f(r["ms"]), share=f(r["share"]), mfu=f(r["mfu"]),
+                                 gemm_ms=f(r["GEMM"]) / 1e3, attn_ms=f(r["attention"]) / 1e3,
+                                 row_ms=f(r["row operators"]) / 1e3) for r in sums["stages"]],
+                    kernels=sorted(ks.values(), key=lambda e: (m.STAGES.index(e["key"].split(".")[0]), e["key"]))))
+        return out
 
 
 # ------------------------------------------------------------------------------------------- reader context
@@ -1088,7 +1159,7 @@ def render_md(ex: Explorer) -> str:
         pg = ", ".join(p["name"] for p in ex.pages if (p["group"] != m.SWEEP_GROUP) == plan)
         if not pg:
             continue
-        runs = "plan runs (ok)" if plan else "swept (ok) | valid space"
+        runs = "runs (ok): upstream + constrained" if plan else "swept (ok) | valid space"
         L += [f"### {pg}: {'upstream deployment plan' if plan else 'sweep preset'}", "",
               "| kernel | used by | selected setting | technique | active | time | MFU, % | f_pad | f_occ | f_rest | "
               f"roofline bound | x roofline | {runs} | trace |",
@@ -1103,7 +1174,8 @@ def render_md(ex: Explorer) -> str:
             L.append(f"| `{k['name']}` | {uses} | `{sel['cand']}` | {sel['technique']} | {sel['setting']['active']} | "
                      f"{_f(k['time_ns'] / 1e3, 2)} | {_f(100 * k['mfu'])} | {k['f_pad']:.2f} | {k['f_occ']:.2f} | "
                      f"{k['f_rest']:.2f} | {k['bound']} | {k['time_ns'] / k['roof_ns']:.1f} | "
-                     f"{len(k['candidates'])} ({n_ok}) | " + ("" if plan else f"{sum(k['space'].values()):,} | ")
+                     + (f"{plan_runs_text(k)} | " if plan else f"{len(k['candidates'])} ({n_ok}) | ")
+                     + ("" if plan else f"{sum(k['space'].values()):,} | ")
                      + f"{k['trace_status']} |")
         L.append("")
     bm, bn, bk = ex.rm_blk
@@ -1215,6 +1287,14 @@ def render_context_md(ex: Explorer) -> list[str]:
     return L
 
 
+def plan_runs_text(k: dict) -> str:
+    """Simulated runs of a plan key: upstream rule + plan-constrained sweep (passing in brackets), and the number of
+    run variants (head paddings) the sweep covered."""
+    n = k["n_runs"]
+    v = f", {n['variants']} paddings" if n["variants"] > 1 else ""
+    return f"{n['upstream']} ({n['upstream_ok']}) + {n['sweep']} ({n['sweep_ok']}){v}"
+
+
 def render_plan_md(ex: Explorer) -> list[str]:
     """Per page, under the upstream deployment plan: per run key, the selected run (upstream's rule), the
     plan-constrained sweep's pick for the same key (comparison), the recorded fixes and the runs that failed the
@@ -1231,8 +1311,9 @@ def render_plan_md(ex: Explorer) -> list[str]:
               f"(estimate){cmp_}. Times in µs per call; *constrained* = the plan-constrained sweep's run for the same "
               "key (padded sizes may differ: the attention padding is chosen for the whole graph); x = constrained / "
               "upstream rule.", "",
-              "| run key | calls | upstream rule | µs | constrained | µs | x | recorded fix | failed the output check |",
-              "| --- | ---: | --- | ---: | --- | ---: | ---: | --- | --- |"]
+              "| run key | calls | upstream rule | µs | constrained | µs | x (constrained / upstream) | runs (ok): "
+              "upstream + constrained | recorded fix | failed the output check |",
+              "| --- | ---: | --- | ---: | --- | ---: | ---: | --- | --- | --- |"]
         for o in sorted({o["kernel"] for o in p["ops"] if o["kernel"]},
                         key=lambda n: (m.STAGES.index(n.split(".")[0]), n)):
             k = ex.kernels[o]
@@ -1249,7 +1330,7 @@ def render_plan_md(ex: Explorer) -> list[str]:
             else:
                 altc = "– | – | –"
             L.append(f"| `{k['name']}` | {calls} | `{k['selected']['cand']}` | {_f(k['time_ns'] / 1e3, 2)} | {altc} | "
-                     f"{fix or '–'} | {bad or '–'} |")
+                     f"{plan_runs_text(k)} | {fix or '–'} | {bad or '–'} |")
         L += ["", "`@<sizes>` after a constrained setting: that run uses other padded sizes than upstream's (the "
               "selected attention padding combination).", ""]
     return L

@@ -38,6 +38,15 @@
   --g-a: #1c5cab; --g-b: #104281; --sel: #f0efec;
 }
 * { box-sizing: border-box; }
+.cmp-head { display: grid; grid-template-columns: repeat(var(--ncol, 2), minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+@media (max-width: 720px) { .cmp-head { grid-template-columns: minmax(0, 1fr); } }
+.cmp-col { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface-2); min-width: 0; }
+.cmp-col .big { font-size: 22px; font-weight: 600; }
+.cmp-col.c0 { border-top: 3px solid var(--s1); } .cmp-col.c1 { border-top: 3px solid var(--s2); }
+th.g0, td.g0 { box-shadow: inset 0 -2px 0 0 transparent; } th.gh0 { border-bottom: 3px solid var(--s1); } th.gh1 { border-bottom: 3px solid var(--s2); }
+td.gs, th.gs { border-left: 2px solid var(--border); }
+.seg.chips { flex-wrap: wrap; max-width: 100%; }
+.chips button .k { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
 body { margin: 0; }
 .viz-root { background: var(--surface-0); color: var(--text-primary); min-height: 100vh;
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -111,11 +120,20 @@ details summary { cursor: pointer; color: var(--text-secondary); }
         W1 and W1-b are deployed with upstream's whole-graph HBM plan and kernel-selection rule (<code>constants.yaml h1_plan</code>, <code>h1_plan_w1b</code>); the comparison on each is the plan-constrained sweep of the same plan (<code>h1_psweep</code>, <code>h1_psweep_w1b</code>). Every time comes from a run under the plan.
         Companion to <code>docs/analysis/kernel-mapping-h1.md</code>.</div>
     </div>
-    <div class="seg" id="pageSeg"></div>
+    <div class="seg chips" id="viewSeg" title="pick up to two plans to compare side by side"></div>
     <div class="seg" id="themeSeg"><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
   </div>
 
   <div class="card" id="serverNote"></div>
+
+  <div class="card" id="compare" style="margin-top:14px">
+    <h2>Side by side: up to two plans</h2>
+    <p class="sec" style="margin-top:0">Pick up to two plans in the header (a third click replaces the older pick). Left column first; x = right / left. Rows line up by stage and by run key. Every time is a sum of measured kernel times under the deployment plan (estimate, no overlap). The cards below follow the left plan's page.</p>
+    <div class="cmp-head" id="cmpHead"></div>
+    <div class="scroll"><table id="cmpStages"></table></div>
+    <div class="row" style="margin:14px 0 6px;align-items:center"><h2 class="grow" style="margin:0">Per run key</h2><div class="seg" id="cmpKind"></div></div>
+    <div class="scroll" style="max-height:520px"><table id="cmpKernels"></table></div>
+  </div>
 
   <div class="tiles" id="tiles" style="margin-top:14px"></div>
 
@@ -195,7 +213,7 @@ const TECH_COLOR = { "Nosplit": "--s1", "splitN, square groups": "--s2", "splitN
 const BUDGET = [["ideal", "ideal", "--s1"], ["padding", "padding", "--s2"], ["idle", "idle clusters", "--s3"],
   ["hbm", "HBM floor", "--s6"], ["rest", "rest beyond roofline", "--s4"], ["row", "row operators", "--s5"]];
 
-const state = { page: 0, kind: "all", kernel: null, cand: null, overlay: "redmule", sort: "total", server: false };
+const state = { page: 0, views: ["W1:upstream", "W1:constrained"], cmpKind: "all", kind: "all", kernel: null, cand: null, overlay: "redmule", sort: "total", server: false };
 
 // ------------------------------------------------------------------ server detection (traces need serve_traces.py)
 async function detectServer() {
@@ -212,9 +230,15 @@ async function detectServer() {
 // ------------------------------------------------------------------ header
 function pageData() { return DATA.pages[state.page]; }
 function renderSegs() {
-  const ps = $("#pageSeg"); ps.innerHTML = "";
-  DATA.pages.forEach((p, i) => { const b = el("button", {}, `${p.name} <span class="muted">${esc(p.desc)}</span>`); if (i === state.page) b.className = "on";
-    b.onclick = () => { state.page = i; renderAll(); }; ps.append(b); });
+  const vs = $("#viewSeg"); vs.innerHTML = "";
+  DATA.views.forEach(v => { const j = state.views.indexOf(v.id);
+    const b = el("button", {}, (j >= 0 ? `<span class="k" style="background:var(--s${j + 1})"></span>` : "") + esc(v.label));
+    if (j >= 0) b.className = "on";
+    b.onclick = () => { const i = state.views.indexOf(v.id);
+      if (i >= 0) { if (state.views.length > 1) state.views.splice(i, 1); }
+      else { state.views.push(v.id); if (state.views.length > 2) state.views.shift(); }
+      state.page = viewById(state.views[0]).page; renderAll(); };
+    vs.append(b); });
   const ks = $("#kindSeg"); ks.innerHTML = "";
   [["all", "All"], ["gemm", "GEMM"], ["attn", "Attention"], ["row", "Row ops"]].forEach(([k, l]) => {
     const b = el("button", {}, l); if (k === state.kind) b.className = "on"; b.onclick = () => { state.kind = k; renderSegs(); renderKernels(); }; ks.append(b); });
@@ -222,19 +246,59 @@ function renderSegs() {
   ts.querySelectorAll("button").forEach(b => { b.className = b.dataset.t === cur ? "on" : ""; b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; renderAll(); }; });
 }
 
+function viewById(id) { return DATA.views.find(v => v.id === id); }
+function renderCompare() {
+  const V = state.views.map(viewById).filter(Boolean); const two = V.length === 2;
+  const H = $("#cmpHead"); H.style.setProperty("--ncol", V.length); H.innerHTML = "";
+  V.forEach((v, j) => {
+    const d = two && j === 1 ? ` <span class="sec">x ${(v.total_ms / V[0].total_ms).toFixed(2)} vs left</span>` : "";
+    H.append(el("div", { class: `cmp-col c${j}` }, `<div><b>${esc(v.label)}</b> <span class="muted">${esc(v.desc)}; <code>${esc(v.group)}</code></span></div>
+      <div style="margin-top:6px"><span class="big">${fmt(v.total_ms, 2)} ms</span>${d}</div>
+      <div class="sec">MFU ${fmt(v.mfu, 1)} % · ${v.kernels.length} run keys</div>`)); });
+  const gh = (j, n, t) => `<th class="n gh${j}${j && !n ? "" : ""}${n === 0 && j === 1 ? " gs" : ""}">${t}</th>`;
+  // stages
+  const cols = [["ms", "ms", 3], ["mfu", "MFU, %", 1], ["gemm_ms", "GEMM", 2], ["attn_ms", "attn", 2], ["row_ms", "row", 2]];
+  let h = `<tr><th>stage</th>` + V.map((v, j) => cols.map(([, t], n) => gh(j, n, `${t}`)).join("")).join("") + (two ? `<th class="n gs">x (right / left)</th>` : "") + `</tr>`;
+  h += V[0].stages.map((s0, r) => `<tr><td><b>${esc(s0.stage)}</b></td>` + V.map((v, j) => cols.map(([c, , dd], n) =>
+      `<td class="n${n === 0 && j === 1 ? " gs" : ""}">${fmt(v.stages[r][c], dd)}</td>`).join("")).join("") +
+    (two ? `<td class="n gs">${(V[1].stages[r].ms / s0.ms).toFixed(2)}</td>` : "") + `</tr>`).join("");
+  h += `<tr><td><b>call</b></td>` + V.map((v, j) => `<td class="n${j === 1 ? " gs" : ""}"><b>${fmt(v.total_ms, 2)}</b></td><td class="n">${fmt(v.mfu, 1)}</td>` +
+    ["gemm_ms", "attn_ms", "row_ms"].map(c => `<td class="n">${fmt(v.stages.reduce((a, s) => a + s[c], 0), 2)}</td>`).join("")).join("") +
+    (two ? `<td class="n gs"><b>${(V[1].total_ms / V[0].total_ms).toFixed(2)}</b></td>` : "") + `</tr>`;
+  $("#cmpStages").innerHTML = `<caption class="sec" style="text-align:left;caption-side:top;padding-bottom:4px">ms per policy call; GEMM / attn / row = time in matrix products, attention calls and row operators</caption>` + h;
+  // kernels, union of keys in order
+  const ks = $("#cmpKind"); ks.innerHTML = "";
+  [["all", "All"], ["gemm", "GEMM"], ["attn", "Attention"], ["row", "Row ops"], ["diff", "Differs"]].forEach(([k, l]) => {
+    const b = el("button", {}, l); if (k === state.cmpKind) b.className = "on"; b.onclick = () => { state.cmpKind = k; renderCompare(); }; ks.append(b); });
+  const keys = []; V.forEach(v => v.kernels.forEach(k => { if (!keys.includes(k.key)) keys.push(k.key); }));
+  const SO = ["vision", "connector", "prefix", "expert"]; keys.sort((a, b) => SO.indexOf(a.split(".")[0]) - SO.indexOf(b.split(".")[0]) || a.localeCompare(b));
+  const get = (v, key) => v.kernels.find(k => k.key === key);
+  const runs = k => k ? `${k.n_runs.upstream} + ${k.n_runs.sweep}` : "";
+  let t = `<tr><th>run key</th><th class="n">calls</th>` + (two ? `<th class="n">x (right / left)</th>` : "") + V.map((v, j) => `<th class="gh${j} gs">setting <span class="muted">(@ padded sizes if not upstream's)</span></th><th class="n gh${j}">µs</th><th class="n gh${j}">ms</th>`).join("") + `<th class="n" title="simulated runs of this key: upstream rule + plan-constrained sweep">runs</th></tr>`;
+  for (const key of keys) {
+    const K = V.map(v => get(v, key)); const k0 = K.find(Boolean);
+    if (state.cmpKind === "diff" ? !(two && K[0] && K[1] && (K[0].cand !== K[1].cand || K[0].pad !== K[1].pad)) : state.cmpKind !== "all" && k0.kind !== state.cmpKind) continue;
+    t += `<tr><td class="mono">${esc(key)}</td><td class="n">${K.map(k => k ? k.calls : "–").join(" / ").replace(/^(\d+) \/ \1$/, "$1")}</td>` +
+      (two ? `<td class="n">${K[0] && K[1] ? (K[1].ns / K[0].ns).toFixed(2) : "–"}</td>` : "") +
+      K.map((k, j) => k ? `<td class="mono gs" style="white-space:nowrap">${esc(k.cand)}${k.pad ? ` <span class="muted">@${esc(k.pad)}</span>` : ""}</td><td class="n">${us(k.ns)}</td><td class="n">${fmt(k.total_ms, 3)}</td>`
+      : `<td class="gs muted" colspan="3">–</td>`).join("") + `<td class="n muted">${runs(k0)}</td></tr>`;
+  }
+  $("#cmpKernels").innerHTML = t;
+}
+
 function renderTiles() {
   const p = pageData(); const b = p.budget; const sum = k => b.reduce((a, x) => a + x[k], 0);
   const tot = BUDGET.reduce((a, [k]) => a + sum(k), 0);
   const t = $("#tiles"); t.innerHTML = "";
   const tile = (v, l) => t.append(el("div", { class: "tile" }, `<div class="v">${v}</div><div class="l">${l}</div>`));
-  tile(`${p.total_ms} ms`, "per policy call (estimate: sum of measured kernel times, no overlap)");
+  tile(`${p.total_ms} ms`, `${esc(p.name)}, upstream rule: per policy call (estimate: sum of measured kernel times, no overlap); these tiles and the cards below are for this plan`);
   tile(`${p.mfu} %`, "MFU of the call");
   tile(`${fmt(sum("ideal") / 1e6, 2)} ms`, "ideal: all matrix FLOP at peak");
   tile(`${fmt(sum("hbm") / 1e6, 2)} ms`, "HBM floor (unique bytes at 1,024 GB/s)");
   tile(`${fmt(sum("rest") / 1e6, 2)} ms`, "rest beyond roofline (largest loss)");
   tile(`${fmt(sum("row") / 1e6, 2)} ms`, "row operators on vector cores");
   const ctot = parseFloat(String(p.total_ms).replace(/,/g, ""));
-  if (p.compare_ms) tile(`${fmt(p.compare_ms, 2)} ms`, `${esc(p.compare_label)} (comparison, estimate; ${esc(p.ratio_label)} = ×${(p.compare_ms / ctot).toFixed(2)})`);
+  if (p.compare_ms) { /* the plan-constrained comparison is in the side-by-side card */ }
   else if (p.stage1_ms > ctot + 1e-6) tile(`${fmt(p.stage1_ms, 2)} ms`, `with the stage-1 picks (estimate; ${esc(p.ratio_label)} = ×${(p.stage1_ms / ctot).toFixed(2)})`);
 }
 
@@ -432,7 +496,7 @@ function candPlot(k, host) {
     const g = sv("g", { style: "cursor:pointer" });
     g.append(sv("rect", { x: 0, y: y - rh / 2, width: W, height: rh, fill: cur ? css("--surface-2") : "transparent" }));
     const lab = sv("text", { x: L - 10, y: y + 4, "text-anchor": "end", class: sel ? "ink" : "" });
-    lab.textContent = (sel ? "★ " : "") + c.cand + (k.plan ? ((c.origin || "").startsWith("fallback") ? " (fallback)" : c.fix ? " (fixed)" : "") : (c.upstream ? " (upstream opt())" : "")); lab.setAttribute("font-family", "ui-monospace, monospace"); lab.setAttribute("font-size", "11");
+    lab.textContent = (sel ? "★ " : "") + c.cand + (k.plan ? ((c.origin || "").startsWith("fallback") ? " (fallback)" : (c.origin || "").startsWith("plan-constrained") ? (c.constrained_pick ? " ◆ constrained pick" : " (constrained)") : c.fix ? " (fixed)" : "") : (c.upstream ? " (upstream opt())" : "")); lab.setAttribute("font-family", "ui-monospace, monospace"); lab.setAttribute("font-size", "11");
     g.append(lab);
     const col = css(TECH_COLOR[c.technique] || "--s1");
     if (c.time_ns) {
@@ -582,17 +646,18 @@ function renderDetail(keepScroll) {
   if (!keepScroll) d.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function renderAll() { renderSegs(); renderTiles(); renderContext(); renderChecks(); renderBudget(); renderKernels(); renderDetail(true); writeHash(); }
+function renderAll() { renderSegs(); renderCompare(); renderTiles(); renderContext(); renderChecks(); renderBudget(); renderKernels(); renderDetail(true); writeHash(); }
 // deep links: #page=W1-b&k=gemm_50x720x720&cand=...&mode=redmule
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
-  const pi = DATA.pages.findIndex(p => p.name === h.get("page")); if (pi >= 0) state.page = pi;
+  const pi = DATA.pages.findIndex(p => p.name === h.get("page")); if (pi >= 0) { state.page = pi; state.views = [`${DATA.pages[pi].name}:upstream`, `${DATA.pages[pi].name}:constrained`].filter(viewById); }
+  const vv = (h.get("v") || "").split(",").filter(viewById); if (vv.length) { state.views = vv.slice(0, 2); state.page = viewById(vv[0]).page; }
   if (h.get("k") && DATA.kernels[h.get("k")]) state.kernel = h.get("k");
   if (h.get("cand")) state.cand = h.get("cand");
   if (h.get("mode")) state.meshMode = h.get("mode");
 }
 function writeHash() {
-  const h = new URLSearchParams({ page: pageData().name }); if (state.kernel) h.set("k", state.kernel);
+  const h = new URLSearchParams({ page: pageData().name, v: state.views.join(",") }); if (state.kernel) h.set("k", state.kernel);
   if (state.cand) h.set("cand", state.cand); if (state.meshMode) h.set("mode", state.meshMode);
   history.replaceState(null, "", "#" + h.toString());
 }
