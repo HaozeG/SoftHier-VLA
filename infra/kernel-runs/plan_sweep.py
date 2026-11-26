@@ -21,8 +21,10 @@ searched:
   - FlatAttention sx, sy, Br, Bc, async for each padding: the --top best (earlier attn_sweep time where that setting
     ran, then attn_sweep's order), plus upstream's setting;
   - Eltwise: the stage-1 schedule and the pipelined one (ELT_PIPELINE). Other row kernels have no knob.
-Runs of results/plan_runs_h1.csv with the same run (key, padded shape, setting) are candidates too, so with
-upstream's padding the constrained pick is never slower than upstream's rule.
+The sweep is independent of the upstream-rule runs: it runs every candidate itself (upstream's opt() / attn_auto
+settings are among its seeds) and picks from its own runs only, so a key can come out slower than upstream's rule
+where the sweep's candidates miss upstream's setting or fix. --with-upstream-runs instead takes the runs of
+results/plan_runs_h1.csv as candidates too.
 
 A run is identified by its variant id `<stage.key>@<padded sizes>` (the key names the logical shape) and its
 candidate. Results: results/plan_sweep_h1.csv (every run, also those that failed the check); pick writes
@@ -312,10 +314,14 @@ def main():
     ap.add_argument("--top", type=int, default=6)
     ap.add_argument("--attn-top", type=int, default=4)
     ap.add_argument("--kind", action="append", choices=["gemm", "attn", "elt"])
+    ap.add_argument("--with-upstream-runs", action="store_true",
+                    help="take results/plan_runs_h1.csv as candidates too (not independent of the upstream plan)")
     a = ap.parse_args()
     pages = a.page or ["W1", "W1-b"]
     rows = load()
-    prior = plan_rows_as_sweep()
+    # independent by default: the sweep runs and picks from its own runs only (upstream's settings are among its
+    # seeds, but run by the sweep itself); --with-upstream-runs reuses results/plan_runs_h1.csv as candidates
+    prior = plan_rows_as_sweep() if a.with_upstream_runs else []
     if a.cmd == "pick":
         for page in pages:
             pick(page, rows + prior)

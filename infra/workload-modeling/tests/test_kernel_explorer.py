@@ -27,7 +27,7 @@ def test_all_baseline_checks_pass():
     assert not bad, bad
     kinds = {c["kind"] for c in ex.checks}
     # every page is under the deployment plan: no sweep-preset kernels, so no constants / placement checks
-    assert {"pick", "sum"} <= kinds <= {"pick", "sum", "constrained <= upstream"}
+    assert {"pick", "sum"} <= kinds <= {"pick", "sum", "own runs", "reproducible"}
     assert all(k["plan"] for k in ex.kernels.values())
 
 
