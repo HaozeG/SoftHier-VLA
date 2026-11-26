@@ -35,6 +35,7 @@ KERNELS = {
     "Eltwise": ("ELT", "elt.h", "elt"),
     "LayerNorm": ("LNORM", "lnorm.h", "lnorm"),
     "RMSNorm": ("NORM", "norm.h", "norm"),
+    "RoPE": ("ROPE", "rope.h", "rope"),
 }
 
 # What each parameter is. kind: shape (operator size), operator (which computation), mapping (how the work is split
@@ -136,6 +137,14 @@ ANNOT: dict[str, dict[str, dict]] = {
         "NORM_FP8": dict(kind="precision", note="fp8 data", field="dtype"),
         "NORM_CHECK_TOL_ULP": dict(kind="check", note="output check tolerance", field=None),
     },
+    "RoPE": {
+        "ROPE_M_SIZE": dict(kind="shape", note="tokens (rows per head in view mode)"),
+        "ROPE_N_SIZE": dict(kind="shape", note="values per token (heads x head dimension)"),
+        "ROPE_VIEW_ENABLE": dict(kind="layout", note="head-major data (heads, rows, view_n), as attention reads it"),
+        "ROPE_VIEW_N": dict(kind="layout", dep="ROPE_VIEW_ENABLE", note="head dimension of the head-major view"),
+        "ROPE_FP16": dict(kind="precision", note="fp16 data", field="dtype"),
+        "ROPE_CHECK_TOL_ULP": dict(kind="check", note="output check tolerance"),
+    },
 }
 # upstream parameters our kernels do not have (frozen interface, kernel_interface_upstream.json)
 ANNOT_UPSTREAM: dict[str, dict[str, dict]] = {
@@ -150,6 +159,8 @@ ANNOT_UPSTREAM: dict[str, dict[str, dict]] = {
                    "ACTI_ACTI_NUMER_CHUNK": dict(kind="check", note="output check chunk size")},
     "RMSNorm": {"NORM_NORM_NUMER": dict(kind="check", note="output check on / off"),
                 "NORM_NORM_NUMER_CHUNK": dict(kind="check", note="output check chunk size")},
+    "RoPE": {"ROPE_ROPE_NUMER": dict(kind="check", note="output dump on / off (our port checks on chip instead)"),
+             "ROPE_ROPE_NUMER_CHUNK": dict(kind="check", note="output dump chunk size")},
 }
 TUNABLE = ("mapping", "schedule", "fusion", "layout")      # kinds a mapping choice can change ("never swept" applies)
 

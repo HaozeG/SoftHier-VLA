@@ -3,7 +3,7 @@
 #
 #   run_kernel.sh <kernel> <kernel_cfg.py> <out_dir> [--trace] [--hbm] [--arch <arch.py>]
 #
-#   kernel: elt | gemm | attn | acti | lnorm | norm
+#   kernel: elt | gemm | attn | acti | lnorm | norm | rope
 #   arch:   default infra/kernel-runs/arch/arch_h1.py (stage-1 H1)
 #   out_dir receives: kernel_cfg.py, arch.py, sim_stamp.json (which simulator build ran), the generated
 #   kernel headers and preload.elf, build.log, run.log (timer line and output check); with --trace
@@ -34,7 +34,7 @@ done
 
 case $KERNEL in
   elt) APP=Eltwise ;; gemm) APP=SummaGEMM ;; attn) APP=FlatAttention ;;
-  acti) APP=Activation ;; lnorm) APP=LayerNorm ;; norm) APP=RMSNorm ;;
+  acti) APP=Activation ;; lnorm) APP=LayerNorm ;; norm) APP=RMSNorm ;; rope) APP=RoPE ;;
   *) echo "unknown kernel $KERNEL" >&2; exit 2 ;;
 esac
 IMPL=$KREPO/implementation
