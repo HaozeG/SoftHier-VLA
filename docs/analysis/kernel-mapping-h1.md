@@ -6,7 +6,7 @@ Companion to [smolvla-op-graph.md](smolvla-op-graph.md) and [smolvla-op-graph-w1
 
 Labels: kernel times, sweep rows and trace events are *measured*; the valid space counts come from the drivers' candidate generators (*inference*); MFU factors, the time budget and busy fractions are *estimate*; composed call and stage times are sums of measured kernel times (*estimate*: no overlap).
 
-**Checks:** 72 of 72 pass (list in [the appendix](#appendix-checks)).
+**Checks:** 204 of 204 pass (list in [the appendix](#appendix-checks)).
 
 ## Glossary
 
@@ -91,123 +91,123 @@ For studies that split or recombine the vision encoder, prefix and action expert
 
 ## W1 under the upstream deployment plan
 
-cameras one by one; upstream deployment plan (baseline). Upstream's whole-graph HBM plan (activations west, weights, residual and K/V south; head-major attention operands written and read by the GEMMs) and its kernel selection (GEMM `opt()` candidates, both simulated, the faster passing one kept; FlatAttention `attn_auto`; row kernels at default parameters). Composed call: 39.16 ms, MFU 16.3 % (estimate); plan-constrained sweep not yet composed. Times in µs per call; *constrained* = the plan-constrained sweep's run for the same key (padded sizes may differ: the attention padding is chosen for the whole graph); x = constrained / upstream rule.
+cameras one by one; upstream deployment plan (baseline). Upstream's whole-graph HBM plan (activations west, weights, residual and K/V south; head-major attention operands written and read by the GEMMs) and its kernel selection (GEMM `opt()` candidates, both simulated, the faster passing one kept; FlatAttention `attn_auto`; row kernels at default parameters). Composed call: 39.16 ms, MFU 16.3 % (estimate); 32.71 ms with the plan-constrained sweep: the same deployment plan (placement, head-major reshapes, head padding carried through), free knobs searched (attention settings and padding for the whole graph, GEMM tiles / groups / strategy, Eltwise schedule). Times in µs per call; *constrained* = the plan-constrained sweep's run for the same key (padded sizes may differ: the attention padding is chosen for the whole graph); x = constrained / upstream rule.
 
 | run key | calls | upstream rule | µs | constrained | µs | x | recorded fix | failed the output check |
 | --- | ---: | --- | ---: | --- | ---: | ---: | --- | --- |
-| `vision.addi_1024x768` | 36 | `default` | 12.92 | – | – | – | – | – |
-| `vision.addi_1024x768_pBwIsOs` | 72 | `default` | 12.30 | – | – | – | – | – |
-| `vision.addi_1024x768_pIsOs` | 72 | `default` | 13.02 | – | – | – | – | – |
-| `vision.eltwise_add_1024x768_pIsOs` | 3 | `default` | 13.49 | – | – | – | – | – |
-| `vision.eltwise_bias_1024x3072` | 36 | `default` | 32.97 | – | – | – | – | – |
-| `vision.eltwise_bias_1024x768` | 72 | `default` | 9.91 | – | – | – | – | – |
-| `vision.eltwise_bias_1024x768_pOs` | 3 | `default` | 8.76 | – | – | – | – | – |
-| `vision.flatattention_12x1024x1024x64` | 36 | `attn_s8x8_b1024x1024` | 140.33 | – | – | – | – | – |
-| `vision.gelu_1024x3072` | 36 | `default` | 37.51 | – | – | – | – | – |
-| `vision.gemm_1024x3072x768` | 36 | `Nosplit_x8y8g1_t128x96x128` | 79.64 | – | – | – | – | – |
-| `vision.gemm_1024x768x3072` | 36 | `Nosplit_x8y8g1_t128x96x128` | 60.90 | – | – | – | – | – |
-| `vision.gemm_1024x768x768` | 3 | `Nosplit_x8y8g1_t128x96x128` | 20.48 | – | – | – | – | – |
-| `vision.gemm_1024x768x768_xfrom` | 36 | `Nosplit_x8y8g1_t128x96x64` | 24.98 | – | – | – | k_tile 128->64 | – |
-| `vision.gemm_1024x768x768_zto` | 36 | `Nosplit_x8y8g1_t128x64x128` | 33.50 | – | – | – | n_tile 96->64; size 1024x768x768->1024x1024x768 | – |
-| `vision.gemm_1024x768x768_zto_pZs` | 72 | `Nosplit_x8y8g1_t128x64x128` | 31.23 | – | – | – | n_tile 96->64; size 1024x768x768->1024x1024x768 | – |
-| `vision.layernorm_1024x768` | 75 | `default` | 11.27 | – | – | – | – | – |
-| `connector.eltwise_pixel_shuffle_3072x768` | 1 | `default` | 19.95 | – | – | – | – | – |
-| `connector.eltwise_scale_192x960_pOs` | 1 | `default` | 2.29 | – | – | – | – | – |
-| `connector.gemm_192x960x12288` | 1 | `splitK_x8y2g4_t128x128x128` | 73.49 | – | – | – | – | – |
-| `prefix.addi_241x960_pBwIsOs` | 32 | `default` | 4.59 | – | – | – | – | – |
-| `prefix.flatattention_15x241x241x64` | 16 | `attn_s2x4_b256x256` | 26.00 | – | – | – | padded q 241->256, kv 241->256 so opt() runs as written; scale halved to 2x4 so all 5 KV heads are processed; row tile 96->64 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s2x4_b384x256` (81,910 bad) |
-| `prefix.gemm_241x2560x960` | 32 | `splitN_x8y2g4_t128x80x128` | 25.30 | – | – | – | – | `splitK_x8y2g4_t128x80x120` (291,341 bad) |
-| `prefix.gemm_241x320x960_zto_pZs` | 32 | `splitK_x4y2g8_t128x64x120` | 10.35 | – | – | – | n_tile 96->64; size 256x384x960->256x512x960 | `splitK_x4y2g8_t128x32x120` (29,247 bad) |
-| `prefix.gemm_241x960x2560` | 16 | `splitK_x8y2g4_t128x128x128` | 20.73 | – | – | – | – | – |
-| `prefix.gemm_241x960x960_xfrom` | 16 | `splitK_x8y2g4_t128x128x64` | 12.72 | – | – | – | k_tile 120->64; size 256x1024x960->256x1024x1024; group gap X = 256x256x2 B (head-major) | – |
-| `prefix.gemm_241x960x960_zto` | 16 | `splitK_x8y2g4_t128x64x120` | 13.84 | – | – | – | n_tile 128->64 | `splitK_x8y2g4_t128x32x120` (116,647 bad) |
-| `prefix.rmsnorm_241x960` | 33 | `default` | 4.64 | – | – | – | – | – |
-| `prefix.rope_241x320_pCwIsOsSw` | 16 | `default` | 3.38 | – | – | – | – | – |
-| `prefix.rope_241x960` | 16 | `default` | 5.42 | – | – | – | – | – |
-| `prefix.silu_gate_241x2560` | 16 | `default` | 10.47 | – | – | – | – | – |
-| `expert.addi_50x720_pBwIsOs` | 320 | `default` | 1.35 | – | – | – | – | – |
-| `expert.eltwise_axpy_50x32_pIsOsZw` | 10 | `default` | 1.11 | – | – | – | – | – |
-| `expert.eltwise_bias_50x32` | 10 | `default` | 1.21 | – | – | – | – | – |
-| `expert.eltwise_bias_50x720` | 20 | `default` | 1.44 | – | – | – | – | – |
-| `expert.eltwise_bias_50x720_pOs` | 10 | `default` | 1.37 | – | – | – | – | – |
-| `expert.flatattention_15x50x241x64` | 80 | `attn_s2x2_b384x256` | 16.24 | – | – | – | padded q 50->128, kv 241->256 so opt() runs as written; row tile 96->192, sy 4->2 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s2x4_b384x256` (40,957 bad) |
-| `expert.flatattention_15x50x291x64` | 80 | `attn_s4x2_b128x384` | 24.62 | – | – | – | padded q 50->128, kv 291->384 so opt() runs as written; scale halved to 4x2 so all 5 KV heads are processed; row tile 96->64 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s4x2_b192x384` (40,954 bad) |
-| `expert.gemm_241x320x320_xfrom_zto_pXsZs` | 16 | `splitK_x4y2g8_t128x64x32` | 10.53 | – | – | – | n_tile 96->64; k_tile 40->32; size 256x384x320->256x512x512; group gap X = 64x256x2 B (head-major) | `splitK_x4y2g8_t128x32x32` (29,202 bad) |
-| `expert.gemm_50x2048x720` | 320 | `splitK_x8y1g8_t50x128x90` | 11.94 | – | – | – | – | – |
-| `expert.gemm_50x320x720_zto_pZs` | 160 | `splitK_x4y1g16_t50x64x45` | 6.07 | – | – | – | n_tile 96->64; size 50x384x720->50x512x720 | `splitK_x4y1g16_t50x32x45` (6,081 bad) |
-| `expert.gemm_50x32x720` | 10 | `splitK_x1y2g32_t32x32x32` | 3.06 | – | – | – | upstream opt() setting(s) splitK_x1y1g16_t50x32x45 fail the output check (also in gemm_upstream_h1.csv, gemm_smallm_h1.csv); fastest passing earlier setting added | `splitK_x1y1g16_t50x32x45` (1,536 bad) |
-| `expert.gemm_50x720x1440` | 10 | `splitK_x8y1g8_t50x96x96` | 8.95 | – | – | – | – | – |
-| `expert.gemm_50x720x2048` | 160 | `splitK_x8y1g8_t50x96x128` | 10.71 | – | – | – | – | – |
-| `expert.gemm_50x720x32_pXs` | 10 | `splitK_x8y1g8_t50x96x4` | 3.75 | – | – | – | – | – |
-| `expert.gemm_50x720x720` | 10 | `splitK_x8y1g8_t50x96x90` | 6.10 | – | – | – | – | – |
-| `expert.gemm_50x720x960_xfrom` | 160 | `splitK_x8y1g8_t128x96x64` | 9.19 | – | – | – | k_tile 120->64; size 128x768x960->128x768x1024; group gap X = 128x128x2 B (head-major) | – |
-| `expert.gemm_50x960x720_zto` | 160 | `splitK_x8y1g8_t128x64x90` | 9.49 | – | – | – | n_tile 128->64 | `splitK_x8y1g8_t128x32x90` (24,299 bad) |
-| `expert.rmsnorm_50x720` | 330 | `default` | 1.59 | – | – | – | – | – |
-| `expert.rope_50x320_pCwIsOsSw` | 80 | `default` | 1.18 | – | – | – | – | – |
-| `expert.rope_50x960` | 160 | `default` | 3.10 | – | – | – | – | – |
-| `expert.silu_50x720` | 10 | `default` | 1.17 | – | – | – | – | – |
-| `expert.silu_gate_50x2048` | 160 | `default` | 2.40 | – | – | – | – | – |
+| `vision.addi_1024x768` | 36 | `default` | 12.92 | `default` | 12.92 | 1.00 | – | – |
+| `vision.addi_1024x768_pBwIsOs` | 72 | `default` | 12.30 | `default` | 12.30 | 1.00 | – | – |
+| `vision.addi_1024x768_pIsOs` | 72 | `default` | 13.02 | `default` | 13.02 | 1.00 | – | – |
+| `vision.eltwise_add_1024x768_pIsOs` | 3 | `default` | 13.49 | `pipeline` | 11.79 | 0.87 | – | – |
+| `vision.eltwise_bias_1024x3072` | 36 | `default` | 32.97 | `pipeline` | 28.94 | 0.88 | – | – |
+| `vision.eltwise_bias_1024x768` | 72 | `default` | 9.91 | `pipeline` | 7.84 | 0.79 | – | – |
+| `vision.eltwise_bias_1024x768_pOs` | 3 | `default` | 8.76 | `pipeline` | 7.00 | 0.80 | – | – |
+| `vision.flatattention_12x1024x1024x64` | 36 | `attn_s8x8_b1024x1024` | 140.33 | `attn_s8x4_b1024x1024_async` | 74.25 | 0.53 | – | – |
+| `vision.gelu_1024x3072` | 36 | `default` | 37.51 | `default` | 37.51 | 1.00 | – | – |
+| `vision.gemm_1024x3072x768` | 36 | `Nosplit_x8y8g1_t128x96x128` | 79.64 | `Nosplit_x8y8g1_t128x192x192` | 56.44 | 0.71 | – | – |
+| `vision.gemm_1024x768x3072` | 36 | `Nosplit_x8y8g1_t128x96x128` | 60.90 | `Nosplit_x8y8g1_t128x96x256` | 59.84 | 0.98 | – | – |
+| `vision.gemm_1024x768x768` | 3 | `Nosplit_x8y8g1_t128x96x128` | 20.48 | `Nosplit_x8y8g1_t128x96x128` | 20.48 | 1.00 | – | – |
+| `vision.gemm_1024x768x768_xfrom` | 36 | `Nosplit_x8y8g1_t128x96x64` | 24.98 | `Nosplit_x8y8g1_t128x96x64` | 24.98 | 1.00 | k_tile 128->64 | – |
+| `vision.gemm_1024x768x768_zto` | 36 | `Nosplit_x8y8g1_t128x64x128` | 33.50 | `Nosplit_x8y8g1_t128x64x256` | 29.13 | 0.87 | n_tile 96->64; size 1024x768x768->1024x1024x768 | – |
+| `vision.gemm_1024x768x768_zto_pZs` | 72 | `Nosplit_x8y8g1_t128x64x128` | 31.23 | `Nosplit_x8y8g1_t128x64x256` | 27.33 | 0.88 | n_tile 96->64; size 1024x768x768->1024x1024x768 | – |
+| `vision.layernorm_1024x768` | 75 | `default` | 11.27 | `default` | 11.27 | 1.00 | – | – |
+| `connector.eltwise_pixel_shuffle_3072x768` | 1 | `default` | 19.95 | `pipeline` | 19.95 | 1.00 | – | – |
+| `connector.eltwise_scale_192x960_pOs` | 1 | `default` | 2.29 | `pipeline` | 2.22 | 0.97 | – | – |
+| `connector.gemm_192x960x12288` | 1 | `splitK_x8y2g4_t128x128x128` | 73.49 | `splitK_x8y2g4_t128x128x128` | 73.49 | 1.00 | – | – |
+| `prefix.addi_241x960_pBwIsOs` | 32 | `default` | 4.59 | `default` | 4.59 | 1.00 | – | – |
+| `prefix.flatattention_15x241x241x64` | 16 | `attn_s2x4_b256x256` | 26.00 | `attn_s2x4_b768x256` | 17.13 | 0.66 | padded q 241->256, kv 241->256 so opt() runs as written; scale halved to 2x4 so all 5 KV heads are processed; row tile 96->64 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s2x4_b384x256` (81,910 bad) |
+| `prefix.gemm_241x2560x960` | 32 | `splitN_x8y2g4_t128x80x128` | 25.30 | `splitN_x8y2g4_t128x80x128` | 25.30 | 1.00 | – | `splitK_x8y2g4_t128x80x120` (291,341 bad) |
+| `prefix.gemm_241x320x960_zto_pZs` | 32 | `splitK_x4y2g8_t128x64x120` | 10.35 | `splitK_x4y2g8_t128x64x120` | 10.35 | 1.00 | n_tile 96->64; size 256x384x960->256x512x960 | `splitK_x4y2g8_t128x32x120` (29,247 bad) |
+| `prefix.gemm_241x960x2560` | 16 | `splitK_x8y2g4_t128x128x128` | 20.73 | `splitK_x8y2g4_t128x128x128` | 20.73 | 1.00 | – | – |
+| `prefix.gemm_241x960x960_xfrom` | 16 | `splitK_x8y2g4_t128x128x64` | 12.72 | `splitK_x8y2g4_t128x128x64` | 12.72 | 1.00 | k_tile 120->64; size 256x1024x960->256x1024x1024; group gap X = 256x256x2 B (head-major) | – |
+| `prefix.gemm_241x960x960_zto` | 16 | `splitK_x8y2g4_t128x64x120` | 13.84 | `splitK_x8y2g4_t128x64x120` | 13.84 | 1.00 | n_tile 128->64 | `splitK_x8y2g4_t128x32x120` (116,647 bad) |
+| `prefix.rmsnorm_241x960` | 33 | `default` | 4.64 | `default` | 4.64 | 1.00 | – | – |
+| `prefix.rope_241x320_pCwIsOsSw` | 16 | `default` | 3.38 | `default` | 3.38 | 1.00 | – | – |
+| `prefix.rope_241x960` | 16 | `default` | 5.42 | `default` | 5.42 | 1.00 | – | – |
+| `prefix.silu_gate_241x2560` | 16 | `default` | 10.47 | `default` | 10.47 | 1.00 | – | – |
+| `expert.addi_50x720_pBwIsOs` | 320 | `default` | 1.35 | `default` | 1.35 | 1.00 | – | – |
+| `expert.eltwise_axpy_50x32_pIsOsZw` | 10 | `default` | 1.11 | `pipeline` | 1.05 | 0.94 | – | – |
+| `expert.eltwise_bias_50x32` | 10 | `default` | 1.21 | `pipeline` | 1.16 | 0.96 | – | – |
+| `expert.eltwise_bias_50x720` | 20 | `default` | 1.44 | `pipeline` | 1.35 | 0.94 | – | – |
+| `expert.eltwise_bias_50x720_pOs` | 10 | `default` | 1.37 | `default` | 1.37 | 1.00 | – | – |
+| `expert.flatattention_15x50x241x64` | 80 | `attn_s2x2_b384x256` | 16.24 | `attn_s8x1_b192x256` @64x256 | 12.04 | 0.74 | padded q 50->128, kv 241->256 so opt() runs as written; row tile 96->192, sy 4->2 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s2x4_b384x256` (40,957 bad) |
+| `expert.flatattention_15x50x291x64` | 80 | `attn_s4x2_b128x384` | 24.62 | `attn_s4x1_b192x384` @64x384 | 14.06 | 0.57 | padded q 50->128, kv 291->384 so opt() runs as written; scale halved to 4x2 so all 5 KV heads are processed; row tile 96->64 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s4x2_b192x384` (40,954 bad) |
+| `expert.gemm_241x320x320_xfrom_zto_pXsZs` | 16 | `splitK_x4y2g8_t128x64x32` | 10.53 | `Nosplit_x8y8g1_t32x64x64` | 9.12 | 0.87 | n_tile 96->64; k_tile 40->32; size 256x384x320->256x512x512; group gap X = 64x256x2 B (head-major) | `splitK_x4y2g8_t128x32x32` (29,202 bad) |
+| `expert.gemm_50x2048x720` | 320 | `splitK_x8y1g8_t50x128x90` | 11.94 | `splitK_x8y2g4_t32x256x96` | 11.77 | 0.99 | – | – |
+| `expert.gemm_50x320x720_zto_pZs` | 160 | `splitK_x4y1g16_t50x64x45` | 6.07 | `splitK_x8y1g8_t50x64x96` | 4.38 | 0.72 | n_tile 96->64; size 50x384x720->50x512x720 | `splitK_x4y1g16_t50x32x45` (6,081 bad) |
+| `expert.gemm_50x32x720` | 10 | `splitK_x1y2g32_t32x32x32` | 3.06 | `splitK_x1y2g32_t32x32x32` | 3.06 | 1.00 | upstream opt() setting(s) splitK_x1y1g16_t50x32x45 fail the output check (also in gemm_upstream_h1.csv, gemm_smallm_h1.csv); fastest passing earlier setting added | `splitK_x1y1g16_t50x32x45` (1,536 bad) |
+| `expert.gemm_50x720x1440` | 10 | `splitK_x8y1g8_t50x96x96` | 8.95 | `splitK_x8y1g8_t50x96x96` | 8.95 | 1.00 | – | – |
+| `expert.gemm_50x720x2048` | 160 | `splitK_x8y1g8_t50x96x128` | 10.71 | `splitK_x8y1g8_t50x96x128` | 10.71 | 1.00 | – | – |
+| `expert.gemm_50x720x32_pXs` | 10 | `splitK_x8y1g8_t50x96x4` | 3.75 | `splitN_x4y2g8_t32x32x32` | 2.97 | 0.79 | – | – |
+| `expert.gemm_50x720x720` | 10 | `splitK_x8y1g8_t50x96x90` | 6.10 | `splitK_x4y2g8_t32x192x96` | 6.03 | 0.99 | – | – |
+| `expert.gemm_50x720x960_xfrom` | 160 | `splitK_x8y1g8_t128x96x64` | 9.19 | `splitK_x4y2g8_t32x192x64` @64x720x960 | 7.33 | 0.80 | k_tile 120->64; size 128x768x960->128x768x1024; group gap X = 128x128x2 B (head-major) | – |
+| `expert.gemm_50x960x720_zto` | 160 | `splitK_x8y1g8_t128x64x90` | 9.49 | `splitK_x8y1g8_t64x64x90` @64x960x720 | 7.90 | 0.83 | n_tile 128->64 | `splitK_x8y1g8_t128x32x90` (24,299 bad) |
+| `expert.rmsnorm_50x720` | 330 | `default` | 1.59 | `default` | 1.59 | 1.00 | – | – |
+| `expert.rope_50x320_pCwIsOsSw` | 80 | `default` | 1.18 | `default` | 1.18 | 1.00 | – | – |
+| `expert.rope_50x960` | 160 | `default` | 3.10 | `default` @64x960 | 1.75 | 0.56 | – | – |
+| `expert.silu_50x720` | 10 | `default` | 1.17 | `default` | 1.17 | 1.00 | – | – |
+| `expert.silu_gate_50x2048` | 160 | `default` | 2.40 | `default` | 2.40 | 1.00 | – | – |
 
 `@<sizes>` after a constrained setting: that run uses other padded sizes than upstream's (the selected attention padding combination).
 
 ## W1-b under the upstream deployment plan
 
-cameras batched; upstream deployment plan (baseline). Upstream's whole-graph HBM plan (activations west, weights, residual and K/V south; head-major attention operands written and read by the GEMMs) and its kernel selection (GEMM `opt()` candidates, both simulated, the faster passing one kept; FlatAttention `attn_auto`; row kernels at default parameters). Composed call: 40.71 ms, MFU 15.7 % (estimate); plan-constrained sweep not yet composed. Times in µs per call; *constrained* = the plan-constrained sweep's run for the same key (padded sizes may differ: the attention padding is chosen for the whole graph); x = constrained / upstream rule.
+cameras batched; upstream deployment plan (baseline). Upstream's whole-graph HBM plan (activations west, weights, residual and K/V south; head-major attention operands written and read by the GEMMs) and its kernel selection (GEMM `opt()` candidates, both simulated, the faster passing one kept; FlatAttention `attn_auto`; row kernels at default parameters). Composed call: 40.71 ms, MFU 15.7 % (estimate); 31.58 ms with the plan-constrained sweep: the same deployment plan (placement, head-major reshapes, head padding carried through), free knobs searched (attention settings and padding for the whole graph, GEMM tiles / groups / strategy, Eltwise schedule). Times in µs per call; *constrained* = the plan-constrained sweep's run for the same key (padded sizes may differ: the attention padding is chosen for the whole graph); x = constrained / upstream rule.
 
 | run key | calls | upstream rule | µs | constrained | µs | x | recorded fix | failed the output check |
 | --- | ---: | --- | ---: | --- | ---: | ---: | --- | --- |
-| `vision.addi_3072x768` | 12 | `default` | 41.18 | – | – | – | – | – |
-| `vision.addi_3072x768_pBwIsOs` | 24 | `default` | 42.61 | – | – | – | – | – |
-| `vision.addi_3072x768_pIsOs` | 24 | `default` | 45.43 | – | – | – | – | – |
-| `vision.eltwise_add_3072x768_pIsOs` | 1 | `default` | 44.78 | – | – | – | – | – |
-| `vision.eltwise_bias_3072x3072` | 12 | `default` | 96.74 | – | – | – | – | – |
-| `vision.eltwise_bias_3072x768` | 24 | `default` | 30.32 | – | – | – | – | – |
-| `vision.eltwise_bias_3072x768_pOs` | 1 | `default` | 24.92 | – | – | – | – | – |
-| `vision.flatattention_36x1024x1024x64` | 12 | `attn_s8x8_b1024x1024` | 419.70 | – | – | – | – | – |
-| `vision.gelu_3072x3072` | 12 | `default` | 106.57 | – | – | – | – | – |
-| `vision.gemm_3072x3072x768` | 12 | `Nosplit_x8y8g1_t96x96x128` | 280.77 | – | – | – | – | – |
-| `vision.gemm_3072x768x3072` | 12 | `Nosplit_x8y8g1_t96x96x128` | 211.92 | – | – | – | – | – |
-| `vision.gemm_3072x768x768` | 1 | `Nosplit_x8y8g1_t96x96x128` | 69.60 | – | – | – | – | – |
-| `vision.gemm_3072x768x768_xfrom` | 12 | `Nosplit_x8y8g1_t96x96x64` | 88.51 | – | – | – | k_tile 128->64 | – |
-| `vision.gemm_3072x768x768_zto` | 12 | `Nosplit_x8y8g1_t96x64x128` | 117.73 | – | – | – | n_tile 96->64; size 3072x768x768->3072x1024x768 | – |
-| `vision.gemm_3072x768x768_zto_pZs` | 24 | `Nosplit_x8y8g1_t96x64x128` | 104.34 | – | – | – | n_tile 96->64; size 3072x768x768->3072x1024x768 | – |
-| `vision.layernorm_3072x768` | 25 | `default` | 27.76 | – | – | – | – | – |
-| `connector.eltwise_pixel_shuffle_3072x768` | 1 | `default` | 19.95 | – | – | – | – | – |
-| `connector.eltwise_scale_192x960_pOs` | 1 | `default` | 2.29 | – | – | – | – | – |
-| `connector.gemm_192x960x12288` | 1 | `splitK_x8y2g4_t128x128x128` | 73.49 | – | – | – | – | – |
-| `prefix.addi_241x960_pBwIsOs` | 32 | `default` | 4.59 | – | – | – | – | – |
-| `prefix.flatattention_15x241x241x64` | 16 | `attn_s2x4_b256x256` | 26.00 | – | – | – | padded q 241->256, kv 241->256 so opt() runs as written; scale halved to 2x4 so all 5 KV heads are processed; row tile 96->64 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s2x4_b384x256` (81,910 bad) |
-| `prefix.gemm_241x2560x960` | 32 | `splitN_x8y2g4_t128x80x128` | 25.30 | – | – | – | – | `splitK_x8y2g4_t128x80x120` (291,341 bad) |
-| `prefix.gemm_241x320x960_zto_pZs` | 32 | `splitK_x4y2g8_t128x64x120` | 10.35 | – | – | – | n_tile 96->64; size 256x384x960->256x512x960 | `splitK_x4y2g8_t128x32x120` (29,247 bad) |
-| `prefix.gemm_241x960x2560` | 16 | `splitK_x8y2g4_t128x128x128` | 20.73 | – | – | – | – | – |
-| `prefix.gemm_241x960x960_xfrom` | 16 | `splitK_x8y2g4_t128x128x64` | 12.72 | – | – | – | k_tile 120->64; size 256x1024x960->256x1024x1024; group gap X = 256x256x2 B (head-major) | – |
-| `prefix.gemm_241x960x960_zto` | 16 | `splitK_x8y2g4_t128x64x120` | 13.84 | – | – | – | n_tile 128->64 | `splitK_x8y2g4_t128x32x120` (116,647 bad) |
-| `prefix.rmsnorm_241x960` | 33 | `default` | 4.64 | – | – | – | – | – |
-| `prefix.rope_241x320_pCwIsOsSw` | 16 | `default` | 3.38 | – | – | – | – | – |
-| `prefix.rope_241x960` | 16 | `default` | 5.42 | – | – | – | – | – |
-| `prefix.silu_gate_241x2560` | 16 | `default` | 10.47 | – | – | – | – | – |
-| `expert.addi_50x720_pBwIsOs` | 320 | `default` | 1.35 | – | – | – | – | – |
-| `expert.eltwise_axpy_50x32_pIsOsZw` | 10 | `default` | 1.11 | – | – | – | – | – |
-| `expert.eltwise_bias_50x32` | 10 | `default` | 1.21 | – | – | – | – | – |
-| `expert.eltwise_bias_50x720` | 20 | `default` | 1.44 | – | – | – | – | – |
-| `expert.eltwise_bias_50x720_pOs` | 10 | `default` | 1.37 | – | – | – | – | – |
-| `expert.flatattention_15x50x241x64` | 80 | `attn_s2x2_b384x256` | 16.24 | – | – | – | padded q 50->128, kv 241->256 so opt() runs as written; row tile 96->192, sy 4->2 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s2x4_b384x256` (40,957 bad) |
-| `expert.flatattention_15x50x291x64` | 80 | `attn_s4x2_b128x384` | 24.62 | – | – | – | padded q 50->128, kv 291->384 so opt() runs as written; scale halved to 4x2 so all 5 KV heads are processed; row tile 96->64 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s4x2_b192x384` (40,954 bad) |
-| `expert.gemm_241x320x320_xfrom_zto_pXsZs` | 16 | `splitK_x4y2g8_t128x64x32` | 10.53 | – | – | – | n_tile 96->64; k_tile 40->32; size 256x384x320->256x512x512; group gap X = 64x256x2 B (head-major) | `splitK_x4y2g8_t128x32x32` (29,202 bad) |
-| `expert.gemm_50x2048x720` | 320 | `splitK_x8y1g8_t50x128x90` | 11.94 | – | – | – | – | – |
-| `expert.gemm_50x320x720_zto_pZs` | 160 | `splitK_x4y1g16_t50x64x45` | 6.07 | – | – | – | n_tile 96->64; size 50x384x720->50x512x720 | `splitK_x4y1g16_t50x32x45` (6,081 bad) |
-| `expert.gemm_50x32x720` | 10 | `splitK_x1y2g32_t32x32x32` | 3.06 | – | – | – | upstream opt() setting(s) splitK_x1y1g16_t50x32x45 fail the output check (also in gemm_upstream_h1.csv, gemm_smallm_h1.csv); fastest passing earlier setting added | `splitK_x1y1g16_t50x32x45` (1,536 bad) |
-| `expert.gemm_50x720x1440` | 10 | `splitK_x8y1g8_t50x96x96` | 8.95 | – | – | – | – | – |
-| `expert.gemm_50x720x2048` | 160 | `splitK_x8y1g8_t50x96x128` | 10.71 | – | – | – | – | – |
-| `expert.gemm_50x720x32_pXs` | 10 | `splitK_x8y1g8_t50x96x4` | 3.75 | – | – | – | – | – |
-| `expert.gemm_50x720x720` | 10 | `splitK_x8y1g8_t50x96x90` | 6.10 | – | – | – | – | – |
-| `expert.gemm_50x720x960_xfrom` | 160 | `splitK_x8y1g8_t128x96x64` | 9.19 | – | – | – | k_tile 120->64; size 128x768x960->128x768x1024; group gap X = 128x128x2 B (head-major) | – |
-| `expert.gemm_50x960x720_zto` | 160 | `splitK_x8y1g8_t128x64x90` | 9.49 | – | – | – | n_tile 128->64 | `splitK_x8y1g8_t128x32x90` (24,299 bad) |
-| `expert.rmsnorm_50x720` | 330 | `default` | 1.59 | – | – | – | – | – |
-| `expert.rope_50x320_pCwIsOsSw` | 80 | `default` | 1.18 | – | – | – | – | – |
-| `expert.rope_50x960` | 160 | `default` | 3.10 | – | – | – | – | – |
-| `expert.silu_50x720` | 10 | `default` | 1.17 | – | – | – | – | – |
-| `expert.silu_gate_50x2048` | 160 | `default` | 2.40 | – | – | – | – | – |
+| `vision.addi_3072x768` | 12 | `default` | 41.18 | `default` | 41.18 | 1.00 | – | – |
+| `vision.addi_3072x768_pBwIsOs` | 24 | `default` | 42.61 | `default` | 42.61 | 1.00 | – | – |
+| `vision.addi_3072x768_pIsOs` | 24 | `default` | 45.43 | `default` | 45.43 | 1.00 | – | – |
+| `vision.eltwise_add_3072x768_pIsOs` | 1 | `default` | 44.78 | `pipeline` | 39.04 | 0.87 | – | – |
+| `vision.eltwise_bias_3072x3072` | 12 | `default` | 96.74 | `pipeline` | 84.59 | 0.87 | – | – |
+| `vision.eltwise_bias_3072x768` | 24 | `default` | 30.32 | `pipeline` | 29.69 | 0.98 | – | – |
+| `vision.eltwise_bias_3072x768_pOs` | 1 | `default` | 24.92 | `pipeline` | 18.84 | 0.76 | – | – |
+| `vision.flatattention_36x1024x1024x64` | 12 | `attn_s8x8_b1024x1024` | 419.70 | `attn_s8x4_b1024x1024_async` | 197.31 | 0.47 | – | – |
+| `vision.gelu_3072x3072` | 12 | `default` | 106.57 | `default` | 106.57 | 1.00 | – | – |
+| `vision.gemm_3072x3072x768` | 12 | `Nosplit_x8y8g1_t96x96x128` | 280.77 | `Nosplit_x8y8g1_t192x192x128` | 150.76 | 0.54 | – | – |
+| `vision.gemm_3072x768x3072` | 12 | `Nosplit_x8y8g1_t96x96x128` | 211.92 | `Nosplit_x8y8g1_t192x96x192` | 167.29 | 0.79 | – | – |
+| `vision.gemm_3072x768x768` | 1 | `Nosplit_x8y8g1_t96x96x128` | 69.60 | `Nosplit_x8y8g1_t192x96x192` | 51.96 | 0.75 | – | – |
+| `vision.gemm_3072x768x768_xfrom` | 12 | `Nosplit_x8y8g1_t96x96x64` | 88.51 | `Nosplit_x8y8g1_t192x96x64` | 64.36 | 0.73 | k_tile 128->64 | – |
+| `vision.gemm_3072x768x768_zto` | 12 | `Nosplit_x8y8g1_t96x64x128` | 117.73 | `Nosplit_x8y8g1_t192x64x256` | 73.79 | 0.63 | n_tile 96->64; size 3072x768x768->3072x1024x768 | – |
+| `vision.gemm_3072x768x768_zto_pZs` | 24 | `Nosplit_x8y8g1_t96x64x128` | 104.34 | `Nosplit_x8y8g1_t192x64x256` | 66.09 | 0.63 | n_tile 96->64; size 3072x768x768->3072x1024x768 | – |
+| `vision.layernorm_3072x768` | 25 | `default` | 27.76 | `default` | 27.76 | 1.00 | – | – |
+| `connector.eltwise_pixel_shuffle_3072x768` | 1 | `default` | 19.95 | `pipeline` | 19.95 | 1.00 | – | – |
+| `connector.eltwise_scale_192x960_pOs` | 1 | `default` | 2.29 | `pipeline` | 2.22 | 0.97 | – | – |
+| `connector.gemm_192x960x12288` | 1 | `splitK_x8y2g4_t128x128x128` | 73.49 | `splitK_x8y2g4_t128x128x128` | 73.49 | 1.00 | – | – |
+| `prefix.addi_241x960_pBwIsOs` | 32 | `default` | 4.59 | `default` | 4.59 | 1.00 | – | – |
+| `prefix.flatattention_15x241x241x64` | 16 | `attn_s2x4_b256x256` | 26.00 | `attn_s2x4_b768x256` | 17.13 | 0.66 | padded q 241->256, kv 241->256 so opt() runs as written; scale halved to 2x4 so all 5 KV heads are processed; row tile 96->64 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s2x4_b384x256` (81,910 bad) |
+| `prefix.gemm_241x2560x960` | 32 | `splitN_x8y2g4_t128x80x128` | 25.30 | `splitN_x8y2g4_t128x80x128` | 25.30 | 1.00 | – | `splitK_x8y2g4_t128x80x120` (291,341 bad) |
+| `prefix.gemm_241x320x960_zto_pZs` | 32 | `splitK_x4y2g8_t128x64x120` | 10.35 | `splitK_x4y2g8_t128x64x120` | 10.35 | 1.00 | n_tile 96->64; size 256x384x960->256x512x960 | `splitK_x4y2g8_t128x32x120` (29,247 bad) |
+| `prefix.gemm_241x960x2560` | 16 | `splitK_x8y2g4_t128x128x128` | 20.73 | `splitK_x8y2g4_t128x128x128` | 20.73 | 1.00 | – | – |
+| `prefix.gemm_241x960x960_xfrom` | 16 | `splitK_x8y2g4_t128x128x64` | 12.72 | `splitK_x8y2g4_t128x128x64` | 12.72 | 1.00 | k_tile 120->64; size 256x1024x960->256x1024x1024; group gap X = 256x256x2 B (head-major) | – |
+| `prefix.gemm_241x960x960_zto` | 16 | `splitK_x8y2g4_t128x64x120` | 13.84 | `splitK_x8y2g4_t128x64x120` | 13.84 | 1.00 | n_tile 128->64 | `splitK_x8y2g4_t128x32x120` (116,647 bad) |
+| `prefix.rmsnorm_241x960` | 33 | `default` | 4.64 | `default` | 4.64 | 1.00 | – | – |
+| `prefix.rope_241x320_pCwIsOsSw` | 16 | `default` | 3.38 | `default` | 3.38 | 1.00 | – | – |
+| `prefix.rope_241x960` | 16 | `default` | 5.42 | `default` | 5.42 | 1.00 | – | – |
+| `prefix.silu_gate_241x2560` | 16 | `default` | 10.47 | `default` | 10.47 | 1.00 | – | – |
+| `expert.addi_50x720_pBwIsOs` | 320 | `default` | 1.35 | `default` | 1.35 | 1.00 | – | – |
+| `expert.eltwise_axpy_50x32_pIsOsZw` | 10 | `default` | 1.11 | `pipeline` | 1.05 | 0.94 | – | – |
+| `expert.eltwise_bias_50x32` | 10 | `default` | 1.21 | `pipeline` | 1.16 | 0.96 | – | – |
+| `expert.eltwise_bias_50x720` | 20 | `default` | 1.44 | `pipeline` | 1.35 | 0.94 | – | – |
+| `expert.eltwise_bias_50x720_pOs` | 10 | `default` | 1.37 | `default` | 1.37 | 1.00 | – | – |
+| `expert.flatattention_15x50x241x64` | 80 | `attn_s2x2_b384x256` | 16.24 | `attn_s8x1_b192x256` @64x256 | 12.04 | 0.74 | padded q 50->128, kv 241->256 so opt() runs as written; row tile 96->192, sy 4->2 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s2x4_b384x256` (40,957 bad) |
+| `expert.flatattention_15x50x291x64` | 80 | `attn_s4x2_b128x384` | 24.62 | `attn_s4x1_b192x384` @64x384 | 14.06 | 0.57 | padded q 50->128, kv 291->384 so opt() runs as written; scale halved to 4x2 so all 5 KV heads are processed; row tile 96->64 (Br / sy = 96 fails the output check; multiples of 64 pass) | `attn_s4x2_b192x384` (40,954 bad) |
+| `expert.gemm_241x320x320_xfrom_zto_pXsZs` | 16 | `splitK_x4y2g8_t128x64x32` | 10.53 | `Nosplit_x8y8g1_t32x64x64` | 9.12 | 0.87 | n_tile 96->64; k_tile 40->32; size 256x384x320->256x512x512; group gap X = 64x256x2 B (head-major) | `splitK_x4y2g8_t128x32x32` (29,202 bad) |
+| `expert.gemm_50x2048x720` | 320 | `splitK_x8y1g8_t50x128x90` | 11.94 | `splitK_x8y2g4_t32x256x96` | 11.77 | 0.99 | – | – |
+| `expert.gemm_50x320x720_zto_pZs` | 160 | `splitK_x4y1g16_t50x64x45` | 6.07 | `splitK_x8y1g8_t50x64x96` | 4.38 | 0.72 | n_tile 96->64; size 50x384x720->50x512x720 | `splitK_x4y1g16_t50x32x45` (6,081 bad) |
+| `expert.gemm_50x32x720` | 10 | `splitK_x1y2g32_t32x32x32` | 3.06 | `splitK_x1y2g32_t32x32x32` | 3.06 | 1.00 | upstream opt() setting(s) splitK_x1y1g16_t50x32x45 fail the output check (also in gemm_upstream_h1.csv, gemm_smallm_h1.csv); fastest passing earlier setting added | `splitK_x1y1g16_t50x32x45` (1,536 bad) |
+| `expert.gemm_50x720x1440` | 10 | `splitK_x8y1g8_t50x96x96` | 8.95 | `splitK_x8y1g8_t50x96x96` | 8.95 | 1.00 | – | – |
+| `expert.gemm_50x720x2048` | 160 | `splitK_x8y1g8_t50x96x128` | 10.71 | `splitK_x8y1g8_t50x96x128` | 10.71 | 1.00 | – | – |
+| `expert.gemm_50x720x32_pXs` | 10 | `splitK_x8y1g8_t50x96x4` | 3.75 | `splitN_x4y2g8_t32x32x32` | 2.97 | 0.79 | – | – |
+| `expert.gemm_50x720x720` | 10 | `splitK_x8y1g8_t50x96x90` | 6.10 | `splitK_x4y2g8_t32x192x96` | 6.03 | 0.99 | – | – |
+| `expert.gemm_50x720x960_xfrom` | 160 | `splitK_x8y1g8_t128x96x64` | 9.19 | `splitK_x4y2g8_t32x192x64` @64x720x960 | 7.33 | 0.80 | k_tile 120->64; size 128x768x960->128x768x1024; group gap X = 128x128x2 B (head-major) | – |
+| `expert.gemm_50x960x720_zto` | 160 | `splitK_x8y1g8_t128x64x90` | 9.49 | `splitK_x8y1g8_t64x64x90` @64x960x720 | 7.90 | 0.83 | n_tile 128->64 | `splitK_x8y1g8_t128x32x90` (24,299 bad) |
+| `expert.rmsnorm_50x720` | 330 | `default` | 1.59 | `default` | 1.59 | 1.00 | – | – |
+| `expert.rope_50x320_pCwIsOsSw` | 80 | `default` | 1.18 | `default` | 1.18 | 1.00 | – | – |
+| `expert.rope_50x960` | 160 | `default` | 3.10 | `default` @64x960 | 1.75 | 0.56 | – | – |
+| `expert.silu_50x720` | 10 | `default` | 1.17 | `default` | 1.17 | 1.00 | – | – |
+| `expert.silu_gate_50x2048` | 160 | `default` | 2.40 | `default` | 2.40 | 1.00 | – | – |
 
 `@<sizes>` after a constrained setting: that run uses other padded sizes than upstream's (the selected attention padding combination).
 
@@ -470,6 +470,138 @@ Upstream (soft_hier_je 4610405, frozen in `infra/kernel-runs/results/kernel_inte
 
 | check | what | result | detail |
 | --- | --- | --- | --- |
+| constrained <= upstream | `W1 vision.gemm_1024x768x768` | pass | plan-constrained 20,479 ns, upstream rule 20,479 ns (same padding) |
+| constrained <= upstream | `W1 vision.eltwise_bias_1024x768_pOs` | pass | plan-constrained 7,004 ns, upstream rule 8,759 ns (same padding) |
+| constrained <= upstream | `W1 vision.eltwise_add_1024x768_pIsOs` | pass | plan-constrained 11,792 ns, upstream rule 13,492 ns (same padding) |
+| constrained <= upstream | `W1 vision.layernorm_1024x768` | pass | plan-constrained 11,274 ns, upstream rule 11,274 ns (same padding) |
+| constrained <= upstream | `W1 vision.gemm_1024x768x768_zto` | pass | plan-constrained 29,130 ns, upstream rule 33,503 ns (same padding) |
+| constrained <= upstream | `W1 vision.addi_1024x768` | pass | plan-constrained 12,916 ns, upstream rule 12,916 ns (same padding) |
+| constrained <= upstream | `W1 vision.gemm_1024x768x768_zto_pZs` | pass | plan-constrained 27,332 ns, upstream rule 31,228 ns (same padding) |
+| constrained <= upstream | `W1 vision.addi_1024x768_pIsOs` | pass | plan-constrained 13,020 ns, upstream rule 13,020 ns (same padding) |
+| constrained <= upstream | `W1 vision.gemm_1024x768x768_zto_pZs` | pass | plan-constrained 27,332 ns, upstream rule 31,228 ns (same padding) |
+| constrained <= upstream | `W1 vision.addi_1024x768_pIsOs` | pass | plan-constrained 13,020 ns, upstream rule 13,020 ns (same padding) |
+| constrained <= upstream | `W1 vision.flatattention_12x1024x1024x64` | pass | plan-constrained 74,252 ns, upstream rule 140,330 ns (same padding) |
+| constrained <= upstream | `W1 vision.gemm_1024x768x768_xfrom` | pass | plan-constrained 24,983 ns, upstream rule 24,983 ns (same padding) |
+| constrained <= upstream | `W1 vision.eltwise_bias_1024x768` | pass | plan-constrained 7,842 ns, upstream rule 9,907 ns (same padding) |
+| constrained <= upstream | `W1 vision.addi_1024x768_pBwIsOs` | pass | plan-constrained 12,304 ns, upstream rule 12,304 ns (same padding) |
+| constrained <= upstream | `W1 vision.layernorm_1024x768` | pass | plan-constrained 11,274 ns, upstream rule 11,274 ns (same padding) |
+| constrained <= upstream | `W1 vision.gemm_1024x3072x768` | pass | plan-constrained 56,436 ns, upstream rule 79,636 ns (same padding) |
+| constrained <= upstream | `W1 vision.eltwise_bias_1024x3072` | pass | plan-constrained 28,940 ns, upstream rule 32,965 ns (same padding) |
+| constrained <= upstream | `W1 vision.gelu_1024x3072` | pass | plan-constrained 37,514 ns, upstream rule 37,514 ns (same padding) |
+| constrained <= upstream | `W1 vision.gemm_1024x768x3072` | pass | plan-constrained 59,843 ns, upstream rule 60,903 ns (same padding) |
+| constrained <= upstream | `W1 vision.eltwise_bias_1024x768` | pass | plan-constrained 7,842 ns, upstream rule 9,907 ns (same padding) |
+| constrained <= upstream | `W1 vision.addi_1024x768_pBwIsOs` | pass | plan-constrained 12,304 ns, upstream rule 12,304 ns (same padding) |
+| constrained <= upstream | `W1 vision.layernorm_1024x768` | pass | plan-constrained 11,274 ns, upstream rule 11,274 ns (same padding) |
+| constrained <= upstream | `W1 connector.eltwise_pixel_shuffle_3072x768` | pass | plan-constrained 19,948 ns, upstream rule 19,948 ns (same padding) |
+| constrained <= upstream | `W1 connector.gemm_192x960x12288` | pass | plan-constrained 73,486 ns, upstream rule 73,486 ns (same padding) |
+| constrained <= upstream | `W1 connector.eltwise_scale_192x960_pOs` | pass | plan-constrained 2,222 ns, upstream rule 2,285 ns (same padding) |
+| constrained <= upstream | `W1 prefix.rmsnorm_241x960` | pass | plan-constrained 4,638 ns, upstream rule 4,638 ns (same padding) |
+| constrained <= upstream | `W1 prefix.gemm_241x960x960_zto` | pass | plan-constrained 13,843 ns, upstream rule 13,843 ns (same padding) |
+| constrained <= upstream | `W1 prefix.gemm_241x320x960_zto_pZs` | pass | plan-constrained 10,345 ns, upstream rule 10,345 ns (same padding) |
+| constrained <= upstream | `W1 prefix.gemm_241x320x960_zto_pZs` | pass | plan-constrained 10,345 ns, upstream rule 10,345 ns (same padding) |
+| constrained <= upstream | `W1 prefix.rope_241x960` | pass | plan-constrained 5,420 ns, upstream rule 5,420 ns (same padding) |
+| constrained <= upstream | `W1 prefix.rope_241x320_pCwIsOsSw` | pass | plan-constrained 3,385 ns, upstream rule 3,385 ns (same padding) |
+| constrained <= upstream | `W1 prefix.flatattention_15x241x241x64` | pass | plan-constrained 17,132 ns, upstream rule 26,003 ns (same padding) |
+| constrained <= upstream | `W1 prefix.gemm_241x960x960_xfrom` | pass | plan-constrained 12,717 ns, upstream rule 12,717 ns (same padding) |
+| constrained <= upstream | `W1 prefix.addi_241x960_pBwIsOs` | pass | plan-constrained 4,593 ns, upstream rule 4,593 ns (same padding) |
+| constrained <= upstream | `W1 prefix.rmsnorm_241x960` | pass | plan-constrained 4,638 ns, upstream rule 4,638 ns (same padding) |
+| constrained <= upstream | `W1 prefix.gemm_241x2560x960` | pass | plan-constrained 25,296 ns, upstream rule 25,296 ns (same padding) |
+| constrained <= upstream | `W1 prefix.gemm_241x2560x960` | pass | plan-constrained 25,296 ns, upstream rule 25,296 ns (same padding) |
+| constrained <= upstream | `W1 prefix.silu_gate_241x2560` | pass | plan-constrained 10,472 ns, upstream rule 10,472 ns (same padding) |
+| constrained <= upstream | `W1 prefix.gemm_241x960x2560` | pass | plan-constrained 20,728 ns, upstream rule 20,728 ns (same padding) |
+| constrained <= upstream | `W1 prefix.addi_241x960_pBwIsOs` | pass | plan-constrained 4,593 ns, upstream rule 4,593 ns (same padding) |
+| constrained <= upstream | `W1 prefix.rmsnorm_241x960` | pass | plan-constrained 4,638 ns, upstream rule 4,638 ns (same padding) |
+| constrained <= upstream | `W1 expert.gemm_241x320x320_xfrom_zto_pXsZs` | pass | plan-constrained 9,117 ns, upstream rule 10,526 ns (same padding) |
+| constrained <= upstream | `W1 expert.gemm_241x320x320_xfrom_zto_pXsZs` | pass | plan-constrained 9,117 ns, upstream rule 10,526 ns (same padding) |
+| constrained <= upstream | `W1 expert.gemm_50x720x32_pXs` | pass | plan-constrained 2,967 ns, upstream rule 3,754 ns (same padding) |
+| constrained <= upstream | `W1 expert.eltwise_bias_50x720` | pass | plan-constrained 1,347 ns, upstream rule 1,436 ns (same padding) |
+| constrained <= upstream | `W1 expert.gemm_50x720x1440` | pass | plan-constrained 8,950 ns, upstream rule 8,950 ns (same padding) |
+| constrained <= upstream | `W1 expert.eltwise_bias_50x720` | pass | plan-constrained 1,347 ns, upstream rule 1,436 ns (same padding) |
+| constrained <= upstream | `W1 expert.silu_50x720` | pass | plan-constrained 1,168 ns, upstream rule 1,168 ns (same padding) |
+| constrained <= upstream | `W1 expert.gemm_50x720x720` | pass | plan-constrained 6,031 ns, upstream rule 6,103 ns (same padding) |
+| constrained <= upstream | `W1 expert.eltwise_bias_50x720_pOs` | pass | plan-constrained 1,366 ns, upstream rule 1,366 ns (same padding) |
+| constrained <= upstream | `W1 expert.rmsnorm_50x720` | pass | plan-constrained 1,594 ns, upstream rule 1,594 ns (same padding) |
+| constrained <= upstream | `W1 expert.gemm_50x320x720_zto_pZs` | pass | plan-constrained 4,383 ns, upstream rule 6,068 ns (same padding) |
+| constrained <= upstream | `W1 expert.gemm_50x320x720_zto_pZs` | pass | plan-constrained 4,383 ns, upstream rule 6,068 ns (same padding) |
+| constrained <= upstream | `W1 expert.rope_50x320_pCwIsOsSw` | pass | plan-constrained 1,183 ns, upstream rule 1,183 ns (same padding) |
+| constrained <= upstream | `W1 expert.addi_50x720_pBwIsOs` | pass | plan-constrained 1,354 ns, upstream rule 1,354 ns (same padding) |
+| constrained <= upstream | `W1 expert.rmsnorm_50x720` | pass | plan-constrained 1,594 ns, upstream rule 1,594 ns (same padding) |
+| constrained <= upstream | `W1 expert.gemm_50x2048x720` | pass | plan-constrained 11,768 ns, upstream rule 11,937 ns (same padding) |
+| constrained <= upstream | `W1 expert.gemm_50x2048x720` | pass | plan-constrained 11,768 ns, upstream rule 11,937 ns (same padding) |
+| constrained <= upstream | `W1 expert.silu_gate_50x2048` | pass | plan-constrained 2,396 ns, upstream rule 2,396 ns (same padding) |
+| constrained <= upstream | `W1 expert.gemm_50x720x2048` | pass | plan-constrained 10,712 ns, upstream rule 10,712 ns (same padding) |
+| constrained <= upstream | `W1 expert.addi_50x720_pBwIsOs` | pass | plan-constrained 1,354 ns, upstream rule 1,354 ns (same padding) |
+| constrained <= upstream | `W1 expert.rmsnorm_50x720` | pass | plan-constrained 1,594 ns, upstream rule 1,594 ns (same padding) |
+| constrained <= upstream | `W1 expert.gemm_50x32x720` | pass | plan-constrained 3,059 ns, upstream rule 3,059 ns (same padding) |
+| constrained <= upstream | `W1 expert.eltwise_bias_50x32` | pass | plan-constrained 1,161 ns, upstream rule 1,213 ns (same padding) |
+| constrained <= upstream | `W1 expert.eltwise_axpy_50x32_pIsOsZw` | pass | plan-constrained 1,048 ns, upstream rule 1,109 ns (same padding) |
+| constrained <= upstream | `W1 call total` | pass | 32.710 ms vs 39.160 ms (upstream's combination is a candidate) |
+| constrained <= upstream | `W1-b vision.gemm_3072x768x768` | pass | plan-constrained 51,957 ns, upstream rule 69,599 ns (same padding) |
+| constrained <= upstream | `W1-b vision.eltwise_bias_3072x768_pOs` | pass | plan-constrained 18,843 ns, upstream rule 24,917 ns (same padding) |
+| constrained <= upstream | `W1-b vision.eltwise_add_3072x768_pIsOs` | pass | plan-constrained 39,037 ns, upstream rule 44,783 ns (same padding) |
+| constrained <= upstream | `W1-b vision.layernorm_3072x768` | pass | plan-constrained 27,761 ns, upstream rule 27,761 ns (same padding) |
+| constrained <= upstream | `W1-b vision.gemm_3072x768x768_zto` | pass | plan-constrained 73,794 ns, upstream rule 117,730 ns (same padding) |
+| constrained <= upstream | `W1-b vision.addi_3072x768` | pass | plan-constrained 41,178 ns, upstream rule 41,178 ns (same padding) |
+| constrained <= upstream | `W1-b vision.gemm_3072x768x768_zto_pZs` | pass | plan-constrained 66,087 ns, upstream rule 104,342 ns (same padding) |
+| constrained <= upstream | `W1-b vision.addi_3072x768_pIsOs` | pass | plan-constrained 45,428 ns, upstream rule 45,428 ns (same padding) |
+| constrained <= upstream | `W1-b vision.gemm_3072x768x768_zto_pZs` | pass | plan-constrained 66,087 ns, upstream rule 104,342 ns (same padding) |
+| constrained <= upstream | `W1-b vision.addi_3072x768_pIsOs` | pass | plan-constrained 45,428 ns, upstream rule 45,428 ns (same padding) |
+| constrained <= upstream | `W1-b vision.flatattention_36x1024x1024x64` | pass | plan-constrained 197,315 ns, upstream rule 419,696 ns (same padding) |
+| constrained <= upstream | `W1-b vision.gemm_3072x768x768_xfrom` | pass | plan-constrained 64,360 ns, upstream rule 88,507 ns (same padding) |
+| constrained <= upstream | `W1-b vision.eltwise_bias_3072x768` | pass | plan-constrained 29,687 ns, upstream rule 30,315 ns (same padding) |
+| constrained <= upstream | `W1-b vision.addi_3072x768_pBwIsOs` | pass | plan-constrained 42,606 ns, upstream rule 42,606 ns (same padding) |
+| constrained <= upstream | `W1-b vision.layernorm_3072x768` | pass | plan-constrained 27,761 ns, upstream rule 27,761 ns (same padding) |
+| constrained <= upstream | `W1-b vision.gemm_3072x3072x768` | pass | plan-constrained 150,763 ns, upstream rule 280,766 ns (same padding) |
+| constrained <= upstream | `W1-b vision.eltwise_bias_3072x3072` | pass | plan-constrained 84,586 ns, upstream rule 96,742 ns (same padding) |
+| constrained <= upstream | `W1-b vision.gelu_3072x3072` | pass | plan-constrained 106,569 ns, upstream rule 106,569 ns (same padding) |
+| constrained <= upstream | `W1-b vision.gemm_3072x768x3072` | pass | plan-constrained 167,293 ns, upstream rule 211,921 ns (same padding) |
+| constrained <= upstream | `W1-b vision.eltwise_bias_3072x768` | pass | plan-constrained 29,687 ns, upstream rule 30,315 ns (same padding) |
+| constrained <= upstream | `W1-b vision.addi_3072x768_pBwIsOs` | pass | plan-constrained 42,606 ns, upstream rule 42,606 ns (same padding) |
+| constrained <= upstream | `W1-b vision.layernorm_3072x768` | pass | plan-constrained 27,761 ns, upstream rule 27,761 ns (same padding) |
+| constrained <= upstream | `W1-b connector.eltwise_pixel_shuffle_3072x768` | pass | plan-constrained 19,948 ns, upstream rule 19,948 ns (same padding) |
+| constrained <= upstream | `W1-b connector.gemm_192x960x12288` | pass | plan-constrained 73,486 ns, upstream rule 73,486 ns (same padding) |
+| constrained <= upstream | `W1-b connector.eltwise_scale_192x960_pOs` | pass | plan-constrained 2,222 ns, upstream rule 2,285 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.rmsnorm_241x960` | pass | plan-constrained 4,638 ns, upstream rule 4,638 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.gemm_241x960x960_zto` | pass | plan-constrained 13,843 ns, upstream rule 13,843 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.gemm_241x320x960_zto_pZs` | pass | plan-constrained 10,345 ns, upstream rule 10,345 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.gemm_241x320x960_zto_pZs` | pass | plan-constrained 10,345 ns, upstream rule 10,345 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.rope_241x960` | pass | plan-constrained 5,420 ns, upstream rule 5,420 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.rope_241x320_pCwIsOsSw` | pass | plan-constrained 3,385 ns, upstream rule 3,385 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.flatattention_15x241x241x64` | pass | plan-constrained 17,132 ns, upstream rule 26,003 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.gemm_241x960x960_xfrom` | pass | plan-constrained 12,717 ns, upstream rule 12,717 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.addi_241x960_pBwIsOs` | pass | plan-constrained 4,593 ns, upstream rule 4,593 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.rmsnorm_241x960` | pass | plan-constrained 4,638 ns, upstream rule 4,638 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.gemm_241x2560x960` | pass | plan-constrained 25,296 ns, upstream rule 25,296 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.gemm_241x2560x960` | pass | plan-constrained 25,296 ns, upstream rule 25,296 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.silu_gate_241x2560` | pass | plan-constrained 10,472 ns, upstream rule 10,472 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.gemm_241x960x2560` | pass | plan-constrained 20,728 ns, upstream rule 20,728 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.addi_241x960_pBwIsOs` | pass | plan-constrained 4,593 ns, upstream rule 4,593 ns (same padding) |
+| constrained <= upstream | `W1-b prefix.rmsnorm_241x960` | pass | plan-constrained 4,638 ns, upstream rule 4,638 ns (same padding) |
+| constrained <= upstream | `W1-b expert.gemm_241x320x320_xfrom_zto_pXsZs` | pass | plan-constrained 9,117 ns, upstream rule 10,526 ns (same padding) |
+| constrained <= upstream | `W1-b expert.gemm_241x320x320_xfrom_zto_pXsZs` | pass | plan-constrained 9,117 ns, upstream rule 10,526 ns (same padding) |
+| constrained <= upstream | `W1-b expert.gemm_50x720x32_pXs` | pass | plan-constrained 2,967 ns, upstream rule 3,754 ns (same padding) |
+| constrained <= upstream | `W1-b expert.eltwise_bias_50x720` | pass | plan-constrained 1,347 ns, upstream rule 1,436 ns (same padding) |
+| constrained <= upstream | `W1-b expert.gemm_50x720x1440` | pass | plan-constrained 8,950 ns, upstream rule 8,950 ns (same padding) |
+| constrained <= upstream | `W1-b expert.eltwise_bias_50x720` | pass | plan-constrained 1,347 ns, upstream rule 1,436 ns (same padding) |
+| constrained <= upstream | `W1-b expert.silu_50x720` | pass | plan-constrained 1,168 ns, upstream rule 1,168 ns (same padding) |
+| constrained <= upstream | `W1-b expert.gemm_50x720x720` | pass | plan-constrained 6,031 ns, upstream rule 6,103 ns (same padding) |
+| constrained <= upstream | `W1-b expert.eltwise_bias_50x720_pOs` | pass | plan-constrained 1,366 ns, upstream rule 1,366 ns (same padding) |
+| constrained <= upstream | `W1-b expert.rmsnorm_50x720` | pass | plan-constrained 1,594 ns, upstream rule 1,594 ns (same padding) |
+| constrained <= upstream | `W1-b expert.gemm_50x320x720_zto_pZs` | pass | plan-constrained 4,383 ns, upstream rule 6,068 ns (same padding) |
+| constrained <= upstream | `W1-b expert.gemm_50x320x720_zto_pZs` | pass | plan-constrained 4,383 ns, upstream rule 6,068 ns (same padding) |
+| constrained <= upstream | `W1-b expert.rope_50x320_pCwIsOsSw` | pass | plan-constrained 1,183 ns, upstream rule 1,183 ns (same padding) |
+| constrained <= upstream | `W1-b expert.addi_50x720_pBwIsOs` | pass | plan-constrained 1,354 ns, upstream rule 1,354 ns (same padding) |
+| constrained <= upstream | `W1-b expert.rmsnorm_50x720` | pass | plan-constrained 1,594 ns, upstream rule 1,594 ns (same padding) |
+| constrained <= upstream | `W1-b expert.gemm_50x2048x720` | pass | plan-constrained 11,768 ns, upstream rule 11,937 ns (same padding) |
+| constrained <= upstream | `W1-b expert.gemm_50x2048x720` | pass | plan-constrained 11,768 ns, upstream rule 11,937 ns (same padding) |
+| constrained <= upstream | `W1-b expert.silu_gate_50x2048` | pass | plan-constrained 2,396 ns, upstream rule 2,396 ns (same padding) |
+| constrained <= upstream | `W1-b expert.gemm_50x720x2048` | pass | plan-constrained 10,712 ns, upstream rule 10,712 ns (same padding) |
+| constrained <= upstream | `W1-b expert.addi_50x720_pBwIsOs` | pass | plan-constrained 1,354 ns, upstream rule 1,354 ns (same padding) |
+| constrained <= upstream | `W1-b expert.rmsnorm_50x720` | pass | plan-constrained 1,594 ns, upstream rule 1,594 ns (same padding) |
+| constrained <= upstream | `W1-b expert.gemm_50x32x720` | pass | plan-constrained 3,059 ns, upstream rule 3,059 ns (same padding) |
+| constrained <= upstream | `W1-b expert.eltwise_bias_50x32` | pass | plan-constrained 1,161 ns, upstream rule 1,213 ns (same padding) |
+| constrained <= upstream | `W1-b expert.eltwise_axpy_50x32_pIsOsZw` | pass | plan-constrained 1,048 ns, upstream rule 1,109 ns (same padding) |
+| constrained <= upstream | `W1-b call total` | pass | 31.580 ms vs 40.710 ms (upstream's combination is a candidate) |
 | pick | `vision.gemm_1024x768x768` | pass | fastest checked of 1 plan run(s) = Nosplit_x8y8g1_t128x96x128 (20,479 ns); constants h1_plan 20,479 ns |
 | pick | `vision.eltwise_bias_1024x768_pOs` | pass | fastest checked of 1 plan run(s) = default (8,759 ns); constants h1_plan 8,759 ns |
 | pick | `vision.eltwise_add_1024x768_pIsOs` | pass | fastest checked of 1 plan run(s) = default (13,492 ns); constants h1_plan 13,492 ns |

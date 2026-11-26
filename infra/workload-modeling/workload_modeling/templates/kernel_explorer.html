@@ -108,7 +108,7 @@ details summary { cursor: pointer; color: var(--text-secondary); }
     <div class="grow">
       <h1>SmolVLA on SoftHier H1: kernel mapping explorer</h1>
       <div class="sec">Stage-1 baseline, <code>vlabench-3cam</code>, one policy call composed from hand-written kernels simulated one at a time (GVSoC, DRAMSys HBM).
-        W1 is deployed with upstream's whole-graph HBM plan and kernel-selection rule (<code>constants.yaml h1_plan</code>); W1-b, not yet run under the plan, reads the sweep preset (<code>h1_kernels</code>).
+        W1 and W1-b are deployed with upstream's whole-graph HBM plan and kernel-selection rule (<code>constants.yaml h1_plan</code>, <code>h1_plan_w1b</code>); the comparison on each is the plan-constrained sweep of the same plan (<code>h1_psweep</code>, <code>h1_psweep_w1b</code>). Every time comes from a run under the plan.
         Companion to <code>docs/analysis/kernel-mapping-h1.md</code>.</div>
     </div>
     <div class="seg" id="pageSeg"></div>
@@ -256,7 +256,7 @@ function renderContext() {
 function renderChecks() {
   const c = DATA.checks; const bad = c.filter(x => !x.ok);
   const kinds = {}; c.forEach(x => { kinds[x.kind] = kinds[x.kind] || [0, 0]; kinds[x.kind][x.ok ? 0 : 1]++; });
-  const desc = { pick: "selected = fastest run that passed the output check; W1: among the plan runs of the key (upstream's candidates and recorded fixes), = constants.yaml h1_plan; W1-b: over every sweep of the shape", constants: "sweep preset: final re-run time = constants.yaml h1_kernels",
+  const desc = { pick: "selected = fastest run that passed the output check; among the plan runs of the key (upstream's candidates and recorded fixes), = constants.yaml h1_plan / h1_plan_w1b", "constrained <= upstream": "plan-constrained sweep not above the upstream rule: call total, and per key where it keeps upstream's padding", constants: "sweep preset: final re-run time = constants.yaml h1_kernels",
     placement: "mesh placement computed from the kernel source = clusters with RedMulE activity in the trace. Covers square groups (1x1, 2x2) and attention only: selected non-square / splitK expert mappings and scale-8 picks have no trace, their diagrams rest on the source", sum: "sum of kernel times = operator-graph total" };
   $("#checkSummary").innerHTML = Object.entries(kinds).map(([k, [ok, f]]) =>
     `<div style="margin:3px 0"><span class="badge ${f ? "fail" : "ok"}">${k}: ${ok} of ${ok + f}</span> <span class="sec">${desc[k] || ""}</span></div>`).join("")
@@ -514,7 +514,7 @@ function renderDetail(keepScroll) {
         <div class="kv" style="margin-bottom:8px">
           <div>time per call</div><div><b>${us(k.time_ns)} µs</b> <span class="muted">(measured, constants <code>${esc(k.constants_key)}</code>)</span></div>
           ${k.kind === "row" ? (k.pipelined ? `<div>schedule</div><div>pipelined rows (<code>pipeline = 1</code>)</div>` : "") : `<div>selected</div><div class="mono">${esc(k.selected.cand)} <span class="muted">(${esc(k.selected.technique)})</span>${k.selected.transposed ? ` <span class="badge">transposed, runs as ${esc(k.selected.run_shape)}; layout cost of X<sup>T</sup> / Z<sup>T</sup> not counted</span>` : ""}</div>`}
-          ${k.stage1 ? `<div>${esc(k.stage1.label || "stage 1")}</div><div class="mono">${esc(k.stage1.setting || "–")} · ${us(k.stage1.time_ns)} µs <span class="muted">(×${k.stage1.speedup.toFixed(2)} = ${k.plan ? "sweep preset ÷ plan" : "stage-1 pick ÷ selected"})</span></div>` : (k.plan ? `<div>sweep preset</div><div class="muted">no sweep run of this operator at this shape</div>` : "")}
+          ${k.stage1 ? `<div>${esc(k.stage1.label || "stage 1")}</div><div class="mono">${esc(k.stage1.setting || "–")} · ${us(k.stage1.time_ns)} µs <span class="muted">(×${k.stage1.speedup.toFixed(2)} = ${k.plan ? "constrained ÷ upstream rule" : "stage-1 pick ÷ selected"})</span></div>` : (k.plan ? `<div>plan-constrained sweep</div><div class="muted">not composed yet</div>` : "")}
         </div>
         ${factorBars(k)}
         <details style="margin-top:8px"><summary>Provenance (constants.yaml)</summary><p class="sec mono" style="white-space:pre-wrap">${esc(k.constants_source)}\n\n${esc(k.constants_note)}</p></details>
