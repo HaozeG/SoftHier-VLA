@@ -16,6 +16,7 @@ Byte columns and the count rule (docs/analysis/conventions.md):
 
 from __future__ import annotations
 
+import functools
 import math
 from dataclasses import dataclass, field, replace
 
@@ -475,22 +476,43 @@ class KernelSet:
 # Stage-1 lowering (docs/designs/stage1-spec.md §3.3): reference computation plus cross K/V once per call.
 STAGE1_LOWERING = Lowering(kv_proj_per_step=False)
 STAGE1_LOWERING_W1B = Lowering(kv_proj_per_step=False, batch_cameras=True)
+# The stage-1 baseline (decision 2026-11-25): upstream's deployment plan, which has separate q / k / v and
+# gate / up products (deploy_plan.Plan); its kernel times are the h1_plan group (plan_runs.py, to_constants.py).
+PLAN_LOWERING = Lowering(kv_proj_per_step=False, split_fused=True)
 KERNEL_SETS = {
-    "vlabench-3cam": KernelSet("h1_kernels", "h1", STAGE1_LOWERING),  # H1 (stage-1 spec §4)
+    "vlabench-3cam": KernelSet("h1_plan", "h1", PLAN_LOWERING),  # H1, upstream deployment plan (stage-1 spec §4)
 }
+# Any other lowering of a workload in KERNEL_SETS (W1-b, the unsplit stage-1 lowering) reads the sweep preset:
+# per kernel shape the fastest checked run over every sweep, placement per kernel (the comparison).
+SWEEP_GROUP = "h1_kernels"
 
 
-def kernel_set(workload_id: str) -> KernelSet:
-    """Kernel times of a workload; KeyError for workloads without simulated kernels (pr1-1cam, libero-2cam, ...)."""
+def kernel_set(workload_id: str, lowering: Lowering | None = None) -> KernelSet:
+    """Kernel times of a workload under a lowering (default: the workload's own); KeyError for workloads without
+    simulated kernels (pr1-1cam, libero-2cam, ...)."""
     if workload_id not in KERNEL_SETS:
         raise KeyError(f"no hand-kernel times for workload {workload_id!r}; kernel sets: {sorted(KERNEL_SETS)}")
-    return KERNEL_SETS[workload_id]
+    ks = KERNEL_SETS[workload_id]
+    if lowering is None or lowering == ks.lowering:
+        return ks
+    return KernelSet(SWEEP_GROUP, ks.arch, lowering)
+
+
+@functools.lru_cache(maxsize=None)
+def plan_keys(workload_id: str = "vlabench-3cam") -> dict[tuple[str, str], str]:
+    """(stage, op) -> run key of the upstream deployment plan (deploy_plan.Plan), e.g. gemm_1024x768x768_zto_pZs."""
+    from .deploy_plan import Plan          # deploy_plan imports this module
+    return {(d.stage, d.op): d.key for d in Plan(workload_id).deploys}
 
 
 def hand_kernel_key(row: OpRow, group: str = "h1_kernels") -> str | None:
-    """constants key of the row's simulated kernel: <group>.<stage>.<kernel>_<row shape>."""
+    """constants key of the row's simulated kernel: <group>.<stage>.<kernel>_<row shape> (sweep preset), or
+    <group>.<stage>.<plan run key> for the deployment-plan group h1_plan."""
     if row.op in HOST_OPS or (row.stage, row.op) in INCLUDED_IN:
         return None
+    if group == KERNEL_SETS["vlabench-3cam"].group:
+        k = plan_keys().get((row.stage, row.op))
+        return f"{group}.{row.stage}.{k}" if k else None
     shape = "x".join(map(str, row.shape))
     if row.cls == "gemm":
         return f"{group}.{row.stage}.gemm_{shape}"
@@ -502,16 +524,19 @@ def hand_kernel_key(row: OpRow, group: str = "h1_kernels") -> str | None:
     return f"{group}.{row.stage}.eltwise_{kind}_{shape}" if kind else None
 
 
-def hand_kernel_ns(c, workload_id: str, row: OpRow) -> float | None:
-    """Measured ns per call of the row's hand kernel, if one was simulated at this workload and shape."""
+def hand_kernel_ns(c, workload_id: str, row: OpRow, group: str | None = None) -> float | None:
+    """Measured ns per call of the row's hand kernel, if one was simulated at this workload and shape. group: the
+    constants group (kernel_set(workload, lowering).group); default the workload's own."""
     if workload_id not in KERNEL_SETS:
         return None
-    key = hand_kernel_key(row, kernel_set(workload_id).group)
+    group = group or kernel_set(workload_id).group
+    key = hand_kernel_key(row, group)
     if key is None or key not in c.entries:
         return None
     e = c.get(key)
-    shape = key.rsplit("_", 1)[1]
-    if e.workload != workload_id or shape != "x".join(map(str, row.shape)):
+    if e.workload != workload_id:
+        return None
+    if group == SWEEP_GROUP and key.rsplit("_", 1)[1] != "x".join(map(str, row.shape)):
         return None
     return float(e.value)
 

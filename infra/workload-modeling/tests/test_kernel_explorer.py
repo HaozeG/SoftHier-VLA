@@ -57,8 +57,10 @@ def test_f_pad_includes_array_padding():
             assert abs(k["f_pad"] - k["f_pad_shape"] * k["f_pad_array"]) < 1e-12
             assert abs(k["f_pad"] * k["f_occ"] * k["f_rest"] - k["mfu"]) < 1e-12
     assert all(k["f_pad_array"] == 1.0 for k in ex.kernels.values() if k["kind"] == "attn")
-    # the stage-1 pick of 1024x768x768 (tile 128x96) loses a quarter of the array to block fill
-    c = next(c for c in ex.kernels["gemm_1024x768x768"]["candidates"] if c["cand"] == "Nosplit_s8g1_t128x96x128")
+    # upstream's setting for vision 1024x768x768 under the plan (tile 128x96) loses a quarter of the array to
+    # block fill
+    c = next(c for c in ex.kernels["vision.gemm_1024x768x768"]["candidates"]
+             if c["cand"] == "Nosplit_x8y8g1_t128x96x128")
     assert c["setting"]["f_array"] == 0.75 and c["setting"]["tile_blk"][:2] == [128, 128]
     # 50x32x720 (splitK tile 32x32x32): the 32 output columns fill half of a 64-column block
     k = ex.kernels["gemm_50x32x720"]
@@ -84,5 +86,27 @@ def test_kernel_model_is_the_explorer_model():
     r = km.gemm_ns(1024, 768, 768, 128, 96, 128, 8, 8, 1, "Nosplit", A)
     assert G.model_ns(1024, 768, 768, 128, 96, 128, 8, 8, 1, "Nosplit") == r["est_ns"]
     ex = kx.Explorer()
-    c = next(c for c in ex.kernels["gemm_1024x768x768"]["candidates"] if c["cand"] == "Nosplit_s8g1_t128x96x128")
+    c = next(c for c in ex.kernels["vision.gemm_1024x768x768"]["candidates"]
+             if c["cand"] == "Nosplit_x8y8g1_t128x96x128")
     assert c["est_ns"] == round(r["est_ns"])
+
+
+def test_w1_page_is_the_upstream_plan():
+    # W1 reads the deployment-plan group: one kernel per plan run key, selected = fastest checked plan run
+    import csv
+    ex = kx.Explorer()
+    w1 = next(p for p in ex.pages if p["name"] == "W1")
+    assert w1["group"] == "h1_plan"
+    plan = {k: v for k, v in ex.kernels.items() if v["plan"]}
+    assert len(plan) == len(ex.plan_runs)
+    # upstream's attention setting failed the check: kept as a failed run next to the recorded fix
+    a = ex.kernels["prefix.flatattention_15x241x241x64"]
+    assert [f["cand"] for f in a["failed"]] == ["attn_s2x4_b384x256"]
+    assert a["selected"]["cand"] == "attn_s2x4_b256x256" and "row tile" in a["selected"]["fix"]
+    # the action output projection: upstream's only setting failed, the fallback is labelled as such
+    g = ex.kernels["expert.gemm_50x32x720"]
+    assert g["selected"]["origin"].startswith("fallback")
+    # the page's composed time is plan_runs.py pick's sum
+    pick = list(csv.DictReader(open(kx.RES / "plan_pick_h1.csv")))
+    assert abs(float(w1["sums"]["total_ms"]) - sum(int(r["total_ns"]) for r in pick) / 1e6) < 0.006
+    assert all(c["ok"] for c in ex.checks)

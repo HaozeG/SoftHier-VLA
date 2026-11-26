@@ -33,7 +33,11 @@ def test_kernel_mapping_matches_kernel_repo(c):
     assert rows["gelu"].hand_kernel.startswith("Activation (GELU")   # branch gelu-layernorm-kernels
     assert rows["ln1"].hand_kernel == "LayerNorm"
     assert rows["silu_mul"].hand_kernel.startswith("Activation")
-    assert rows["mlp_gateup"].hand_kernel == "SummaGEMM"
+    # W1 is lowered as upstream's deployment plan deploys it: gate and up as separate products
+    assert rows["mlp_gate"].hand_kernel == "SummaGEMM" and rows["mlp_up"].hand_kernel == "SummaGEMM"
+    assert "mlp_gateup" not in rows
+    unsplit = {r.op: r for r in m.annotate(m.build(c, W1, m.STAGE1_LOWERING))}
+    assert unsplit["mlp_gateup"].hand_kernel == "SummaGEMM"
     assert rows["state_proj"].pr1_unit.startswith("host")
 
 
@@ -87,11 +91,14 @@ def test_csv_has_all_rows(c):
     assert len(text.strip().splitlines()) == len(w1_rows(c)) + 1
 
 
-@pytest.mark.parametrize("wl,low", [("vlabench-3cam", m.STAGE1_LOWERING),
-                                    ("vlabench-3cam", m.STAGE1_LOWERING_W1B)])
-def test_hand_kernel_times_and_stage_sums(c, wl, low):
+@pytest.mark.parametrize("wl,low,group", [("vlabench-3cam", m.PLAN_LOWERING, "h1_plan"),
+                                          ("vlabench-3cam", m.STAGE1_LOWERING, "h1_kernels"),
+                                          ("vlabench-3cam", m.STAGE1_LOWERING_W1B, "h1_kernels")])
+def test_hand_kernel_times_and_stage_sums(c, wl, low, group):
+    # the constants group follows the lowering: the plan's lowering reads h1_plan, any other the sweep preset
+    assert m.kernel_set(wl, low).group == group
     rows = m.annotate(m.build(c, wl, low))
-    ns = {(r.stage, r.op): m.hand_kernel_ns(c, wl, r) for r in rows}
+    ns = {(r.stage, r.op): m.hand_kernel_ns(c, wl, r, group) for r in rows}
     # Every operator outside the host prepare step has a simulated kernel or runs inside another row's call.
     for r in rows:
         if r.op in m.HOST_OPS:
@@ -100,8 +107,8 @@ def test_hand_kernel_times_and_stage_sums(c, wl, low):
         if key in m.INCLUDED_IN:
             assert ns[(r.stage, m.INCLUDED_IN[key])] is not None, r.op
         else:
-            assert ns[key] is not None, (r.stage, r.op, m.hand_kernel_key(r, m.kernel_set(wl).group))
-    sums = render.kernel_sums(c, wl, rows)
+            assert ns[key] is not None, (r.stage, r.op, m.hand_kernel_key(r, group))
+    sums = render.kernel_sums(c, wl, rows, group)
     want = sum(r.count * ns[(r.stage, r.op)] for r in rows if ns[(r.stage, r.op)] is not None) / 1e3
     assert sums["total"]["total"] == f"{want:,.1f}"
     vision = next(k for k in sums["stages"] if k["stage"] == "vision")

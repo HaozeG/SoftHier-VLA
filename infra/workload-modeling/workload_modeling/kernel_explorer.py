@@ -24,10 +24,11 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import sys
 from pathlib import Path
 
-from . import constants, kernel_interface, kernel_model, md_to_html, render
+from . import constants, deploy_plan, kernel_interface, kernel_model, md_to_html, render
 from . import smolvla_ops as m
 
 REPO = Path(__file__).resolve().parents[3]
@@ -50,7 +51,14 @@ def redmule_blocks(c: constants.Constants, arch: str = ARCH) -> tuple[int, int, 
     """(rows, columns, reduction granule) of one LightRedmule output block for an arch in constants.yaml."""
     A = kernel_model.arch(c, arch)
     return A.blk_m, A.blk_n, A.blk_k
-PAGES = (("W1", None, "cameras one by one"), ("W1-b", m.STAGE1_LOWERING_W1B, "cameras batched"))
+# W1: the stage-1 baseline, upstream's deployment plan (kernel times h1_plan); W1-b: cameras batched, not yet run under
+# the plan, so it reads the sweep preset (h1_kernels). The group follows the lowering (smolvla_ops.kernel_set).
+PAGES = (("W1", m.PLAN_LOWERING, "cameras one by one; upstream deployment plan (baseline)"),
+         ("W1-b", m.STAGE1_LOWERING_W1B, "cameras batched; sweep preset, not yet run under the plan"))
+# kernel directory of a deploy_plan kernel
+PLAN_KDIR = {"gemm": "SummaGEMM", "attn": "FlatAttention", "elt": "Eltwise", "acti": "Activation",
+             "lnorm": "LayerNorm", "norm": "RMSNorm", "rope": "RoPE"}
+FALLBACK_FIX = "upstream opt() setting(s)"        # plan_runs.fallback(): fastest passing earlier setting
 
 
 def _rows(path: Path) -> list[dict]:
@@ -254,6 +262,9 @@ class Explorer:
         f1 = RES / "final_h1_stage1.csv"
         self.final_s1 = {r["name"]: r for r in _rows(f1)} if f1.exists() else dict(self.final)
         self.traces = json.loads((RES / "trace_summary_h1.json").read_text())
+        # the upstream deployment plan (W1 baseline): its run list and every run (also those that failed the check)
+        self.plan_runs = deploy_plan.Plan(c=self.c).runs()
+        self.pr = _rows(RES / "plan_runs_h1.csv")
         # kernel parameter interfaces parsed from the kernel sources; upstream's frozen (kernel_interface --freeze)
         self.iface = kernel_interface.interface()
         up = kernel_interface.UPSTREAM_JSON
@@ -268,41 +279,64 @@ class Explorer:
     # ----------------------------------------------------------------- operators -> kernels
     def _page(self, name: str, low, desc: str) -> dict:
         wid = self.c.primary_workload.id
-        rows = m.annotate(m.build(self.c, wid, low or m.kernel_set(wid).lowering))
+        ks = m.kernel_set(wid, low)
+        rows = m.annotate(m.build(self.c, wid, ks.lowering))
         inc: dict[tuple[str, str], list[m.OpRow]] = {}
         for r in rows:
             if (r.stage, r.op) in m.INCLUDED_IN:
                 inc.setdefault((r.stage, m.INCLUDED_IN[(r.stage, r.op)]), []).append(r)
         ops = []
         for r in rows:
-            key = m.hand_kernel_key(r)
-            ns = m.hand_kernel_ns(self.c, wid, r)
+            key = m.hand_kernel_key(r, ks.group)
+            ns = m.hand_kernel_ns(self.c, wid, r, ks.group)
             flop = r.flop + sum(x.flop for x in inc.get((r.stage, r.op), []))
             op = dict(stage=r.stage, op=r.op, cls=r.cls, layers=r.layers, shape=list(r.shape), count=r.count,
                       flop=flop, traffic=r.memory_traffic_bytes, weights=r.weights_read_bytes,
                       kernel_name=r.hand_kernel, kernel=None, ns=ns,
                       included_in=m.INCLUDED_IN.get((r.stage, r.op)), host=r.op in m.HOST_OPS)
             if key and ns is not None:
-                kname = key.split(".", 2)[2]
+                # sweep preset: <kernel>_<shape>; plan: <stage>.<run key>, the key of plan_runs_h1.csv
+                kname = key.split(".", 2)[2] if ks.group == m.SWEEP_GROUP else key.split(".", 1)[1]
                 op["kernel"] = kname
-                k = self.kernels.setdefault(kname, self._new_kernel(kname, r, ns, key))
+                k = self.kernels.setdefault(kname, self._new_kernel(kname, r, ns, key, ks.group))
                 k["uses"].append(dict(page=name, stage=r.stage, op=r.op, count=r.count, layers=r.layers,
                                       total_ns=r.count * ns))
                 k["flop_call"] = flop / r.count
                 k["bytes_call"] = r.memory_traffic_bytes / r.count
                 k["weights_call"] = r.weights_read_bytes / r.count
             ops.append(op)
-        return dict(name=name, desc=desc, ops=ops, sums=render.kernel_sums(self.c, wid, rows))
+        p = dict(name=name, desc=desc, ops=ops, group=ks.group, sums=render.kernel_sums(self.c, wid, rows, ks.group))
+        if ks.group != m.SWEEP_GROUP:
+            # comparison: the same call with the sweep preset (per-kernel placement, fastest checked run per shape
+            # over every sweep), on the unsplit stage-1 lowering the sweeps ran
+            r0 = m.annotate(m.build(self.c, wid, m.STAGE1_LOWERING))
+            p["compare_ms"] = float(render.kernel_sums(self.c, wid, r0, m.SWEEP_GROUP)["total_ms"].replace(",", ""))
+            p["compare_label"] = "with the sweep preset (per-kernel placement, fastest checked run per shape)"
+        return p
 
-    def _new_kernel(self, kname: str, r: m.OpRow, ns: float, key: str) -> dict:
+    def _new_kernel(self, kname: str, r: m.OpRow, ns: float, key: str, group: str) -> dict:
         kind = "gemm" if r.cls == "gemm" else "attn" if r.cls == "attn" else "row"
         e = self.c.get(key)
-        return dict(name=kname, kind=kind, kernel_label=r.hand_kernel, shape=list(r.shape), time_ns=ns,
-                    constants_key=key, constants_source=e.source, constants_note=e.note or "", uses=[])
+        k = dict(name=kname, kind=kind, kernel_label=r.hand_kernel, shape=list(r.shape), time_ns=ns,
+                 constants_key=key, constants_source=e.source, constants_note=e.note or "", uses=[], group=group,
+                 plan=group != m.SWEEP_GROUP)
+        if k["plan"]:
+            # the sweep preset's time for the same operator and shape, where the sweeps ran it (comparison)
+            sk = m.hand_kernel_key(r, m.SWEEP_GROUP)
+            k["kernel_label"] = PLAN_KDIR[self.plan_runs[kname]["kernel"]]
+            k["sweep"] = None
+            if sk and sk in self.c.entries:
+                sn = sk.split(".", 2)[2]
+                k["sweep"] = dict(key=sk, time_ns=float(self.c.get(sk).value),
+                                  setting=self.final.get(sn, {}).get("setting", ""))
+        return k
 
     # ----------------------------------------------------------------- per kernel: space, candidates, checks
     def _finish_kernel(self, k: dict) -> None:
-        {"gemm": self._gemm, "attn": self._attn, "row": self._row}[k["kind"]](k)
+        if k["plan"]:
+            self._plan_kernel(k)
+        else:
+            {"gemm": self._gemm, "attn": self._attn, "row": self._row}[k["kind"]](k)
         f = k["flop_call"]
         t = k["time_ns"] * 1e-9
         k["mfu"] = f / (t * self.peak)
@@ -386,6 +420,74 @@ class Explorer:
         self._interface(k, "SummaGEMM", [c["run_dir"] for c in cands if not c.get("transposed")], fin["dir"])
         self._traces_for(k, shp, cands, sel)
         self._stage1(k)
+
+    def _plan_kernel(self, k: dict) -> None:
+        """A W1 kernel under the upstream deployment plan: its candidates are the plan runs of its key (upstream's
+        opt() / attn_auto setting, with recorded fixes, and fallbacks; also those that failed the output check); the
+        selected one is the fastest that passed, and must be the time in constants.yaml h1_plan. The sweep preset's
+        time for the same operator is the comparison (k["stage1"], labelled)."""
+        key = k["name"]
+        run = self.plan_runs[key]
+        kern = run["kernel"]
+        mine = [r for r in self.pr if r["key"] == key]
+        rows = [r for r in mine if r["status"] not in ("unfit", "skipped_m_iter")]
+        ok = [r for r in rows if r["status"] == "ok"]
+        best = min(ok, key=lambda r: int(r["time_ns"]))
+        self._check("pick", key, int(best["time_ns"]) == int(k["time_ns"]),
+                    f"fastest checked of {len(ok)} plan run(s) = {best['cand']} ({int(best['time_ns']):,} ns); "
+                    f"constants h1_plan {int(k['time_ns']):,} ns")
+
+        def origin(r):
+            if r["fix"].startswith(FALLBACK_FIX):
+                return "fallback: fastest passing earlier sweep setting"
+            return "upstream rule" + (" with recorded fix" if r["fix"] else "")
+
+        cands = []
+        if k["kind"] == "gemm":
+            M, N, K = k["shape"]
+            for r in rows:
+                s = gemm_setting(r, self.rm_blk, self.rm_mac_per_ns)
+                wr = round(s["Mp"] * s["Np"] * s["Kp"] / (M * N * K), 3)
+                c = self._cand(dict(r, work_ratio=wr), s, "plan_runs", gemm_technique(s))
+                cands.append(dict(c, upstream=not r["fix"].startswith(FALLBACK_FIX), fix=r["fix"], origin=origin(r)))
+        elif k["kind"] == "attn":
+            h, q, kv, d = k["shape"]
+            name = f"{h}x{q}x{kv}x{d}"
+            hq, hkv = self.A.SHAPES[name][0], self.A.SHAPES[name][1]
+            cfg = run["cfg"]
+            for r in rows:
+                sx, sy, Br, Bc = map(int, re.match(r"attn_s(\d+)x(\d+)_b(\d+)x(\d+)", r["cand"]).groups())
+                s = attn_setting(dict(sx=sx, sy=sy, Br=Br, Bc=Bc, q_pad=cfg["q_pad"], kv_pad=cfg["kv_pad"],
+                                      **{"async": str(cfg["async_"])}), hq, hkv)
+                wr = round(cfg["q_pad"] * cfg["kv_pad"] / (q * kv), 3)
+                c = self._cand(dict(r, work_ratio=wr), s, "plan_runs", s["mode"])
+                cands.append(dict(c, upstream=True, fix=r["fix"], origin=origin(r)))
+            k.update(hq=hq, hkv=hkv)
+        if k["kind"] == "row":
+            sel = dict(cand=best["cand"], time_ns=int(best["time_ns"]), run_dir=best["run_dir"], setting=None,
+                       fix=best["fix"])
+            k.update(config=f"{kern} " + " ".join(f"{a}={b}" for a, b in run["cfg"].items()), pipelined=False,
+                     row_runs=[dict(setting=r["cand"], time_ns=int(r["time_ns"])) for r in ok],
+                     row_note="no mapping knob: the kernel spreads the rows over the clusters itself; default "
+                              "parameters, the plan's shape and HBM placement")
+            techs = []
+        else:
+            sel = next(c for c in cands if c["cand"] == best["cand"])
+            sel = dict(sel, time_final_ns=sel["time_ns"])
+            ts = sorted({c["technique"] for c in cands})
+            techs = [(t, "upstream's candidates (opt() / attn_auto) and recorded fixes", "plan_runs.py") for t in ts]
+        space = {t: sum(c["technique"] == t for c in cands) for t, _, _ in techs}
+        k.update(candidates=cands, selected=sel, space=space, not_swept=[],
+                 techniques=self._tech_table(techs, space, cands, sel, True) if techs else [],
+                 plan_fix=run["fix"], skipped=[dict(cand=r["cand"], status=r["status"], fix=r["fix"])
+                                               for r in mine if r not in rows],
+                 failed=[dict(cand=r["cand"], status=r["status"], bad=r["bad"], time_ns=r["time_ns"], fix=r["fix"])
+                         for r in rows if r["status"] != "ok"])
+        self._interface(k, PLAN_KDIR[kern], [r["run_dir"] for r in rows], best["run_dir"])
+        k.update(traces=[], trace=None, trace_status="none", trace_note="plan runs are not traced")
+        sw = k.get("sweep")
+        k["stage1"] = None if not sw else dict(label="sweep preset", setting=sw["setting"], time_ns=int(sw["time_ns"]),
+                                               speedup=sw["time_ns"] / k["time_ns"])
 
     def _stage1(self, k: dict) -> None:
         """The stage-1 pick of this kernel (final_h1_stage1.csv), when the selected run differs from it."""
@@ -644,8 +746,9 @@ class Explorer:
         return dict(
             arch=dict(peak=self.peak, peak_cluster=self.peak_cl, bw=self.bw, mesh=[MESH_X, MESH_Y], rm_blk=list(self.rm_blk)),
             pages=[dict(name=p["name"], desc=p["desc"], ops=p["ops"], budget=self.budget(p),
-                        total_ms=p["sums"]["total_ms"], mfu=p["sums"]["total"]["mfu"],
-                        stage1_ms=self.stage1_total(p)) for p in self.pages],
+                        total_ms=p["sums"]["total_ms"], mfu=p["sums"]["total"]["mfu"], group=p["group"],
+                        stage1_ms=self.stage1_total(p) if p["group"] == m.SWEEP_GROUP else None,
+                        compare_ms=p.get("compare_ms"), compare_label=p.get("compare_label")) for p in self.pages],
             kernels=kernels, checks=self.checks)
 
 
@@ -678,10 +781,13 @@ def render_md(ex: Explorer) -> str:
         L.append(f"| {c['kind']} | `{c['what']}` | {'pass' if c['ok'] else '**FAIL**'} | {c['detail']} |")
     n_fail = sum(not c["ok"] for c in ex.checks)
     L += ["", f"{len(ex.checks) - n_fail} of {len(ex.checks)} checks pass.", "",
-          "* **pick**: the selected setting (the one constants.yaml was made from) is the fastest run with a passing "
-          "output check over every result set of the shape (`gemm_sweep_h1.csv`, `gemm_smallm_h1.csv`, "
-          "`gemm_transpose_h1.csv`; row kernels: `row_kernels_h1.csv`, `eltwise_pipeline_h1.csv`).",
-          "* **constants**: the re-run time in `final_h1.csv` is the time in `constants.yaml` (`h1_kernels`).",
+          "* **pick**: W1 (upstream deployment plan, `h1_plan`): the selected run is the fastest with a passing output "
+          "check among the plan runs of its key (upstream's candidates and the recorded fixes, "
+          "`results/plan_runs_h1.csv`), and its time is the one in `constants.yaml`. W1-b (sweep preset, "
+          "`h1_kernels`): the selected setting is the fastest checked run over every result set of the shape "
+          "(`gemm_sweep_h1.csv`, `gemm_smallm_h1.csv`, `gemm_transpose_h1.csv`; row kernels: `row_kernels_h1.csv`, "
+          "`eltwise_pipeline_h1.csv`).",
+          "* **constants** (sweep preset): the re-run time in `final_h1.csv` is the time in `constants.yaml` (`h1_kernels`).",
           "* **placement**: for every traced setting, the clusters the kernel's group placement makes active "
           "(`placement()`, from `flex_group_barrier.h:43` and `SummaGEMM.h:131-138`) are exactly the clusters with "
           "RedMulE activity in the kernel window of the trace (`results/trace_summary_h1.json`). Coverage: the "
@@ -689,6 +795,7 @@ def render_md(ex: Explorer) -> str:
           "mappings and the scale-8 picks have no trace, so their mesh diagrams rest on the kernel source alone.",
           "* **sum**: count x kernel time over all operators gives the composed time of the operator-graph page.", ""]
 
+    L += render_plan_md(ex)
     L += ["## Where the time goes (estimate)", "",
           "Each matrix kernel's time split as: ideal (true FLOP at the 131.1 TFLOP/s peak) + padding (padded "
           "FLOP, same rate: shape padding to whole tiles, and for GEMM RedMulE array padding to whole "
@@ -805,6 +912,39 @@ def render_md(ex: Explorer) -> str:
     return "\n".join(L)
 
 
+def render_plan_md(ex: Explorer) -> list[str]:
+    """W1 under the upstream deployment plan: per run key, the selected run, the sweep preset's time for the same
+    operator (comparison), the recorded fixes and the runs that failed the output check."""
+    p = next(p for p in ex.pages if p["group"] != m.SWEEP_GROUP)
+    L = ["## W1 under the upstream deployment plan", "",
+         f"The stage-1 baseline (decision 2026-11-25): upstream's whole-graph HBM plan (activations west, weights, "
+         f"residual and K/V south; head-major attention operands written and read by the GEMMs) and its kernel "
+         f"selection (GEMM `opt()` candidates, both simulated, the faster passing one kept; FlatAttention "
+         f"`attn_auto`; row kernels at default parameters). Composed W1 call: {p['sums']['total_ms']} ms, MFU "
+         f"{p['sums']['total']['mfu']} % (estimate); {p['compare_ms']:.2f} ms {p['compare_label']}. Times in µs per "
+         "call; *sweep preset* = the time in `h1_kernels` for the same operator and shape, where the sweeps ran it "
+         "(placement per kernel, no reshape); x = sweep preset / plan.", "",
+         "| run key | calls | selected | µs | sweep preset, µs | x | recorded fix | failed the output check |",
+         "| --- | ---: | --- | ---: | ---: | ---: | --- | --- |"]
+    for o in sorted({o["kernel"] for o in p["ops"] if o["kernel"]},
+                    key=lambda n: (m.STAGES.index(n.split(".")[0]), n)):
+        k = ex.kernels[o]
+        calls = sum(u["count"] for u in k["uses"] if u["page"] == p["name"])
+        sw = k.get("sweep")
+        fix = k["selected"].get("fix") or ""
+        bad = "; ".join(f"`{f['cand']}` ({int(f['bad']):,} bad)" if f["bad"] else f"`{f['cand']}` ({f['status']})"
+                        for f in k["failed"])
+        L.append(f"| `{k['name']}` | {calls} | `{k['selected']['cand']}` | {_f(k['time_ns'] / 1e3, 2)} | "
+                 f"{_f(sw['time_ns'] / 1e3, 2) if sw else '–'} | "
+                 f"{sw['time_ns'] / k['time_ns']:.2f} | " if sw else
+                 f"| `{k['name']}` | {calls} | `{k['selected']['cand']}` | {_f(k['time_ns'] / 1e3, 2)} | – | – | ")
+        L[-1] += f"{fix or '–'} | {bad or '–'} |"
+    L += ["", "Sweep preset missing (–): the plan's operator has no sweep run at that shape (split q / k / v and "
+          "gate / up products, residual adds on Activation, RoPE on its own kernel), or the shape differs (head padding).",
+          ""]
+    return L
+
+
 def render_interfaces_md(ex: Explorer) -> list[str]:
     """Per kernel: the tunable parameters parsed from the kernel sources, the values they took over every H1 run of
     that kernel, and the comparison with upstream's frozen interface."""
@@ -845,7 +985,7 @@ def render_interfaces_md(ex: Explorer) -> list[str]:
 
 def render_options_md(ex: Explorer) -> list[str]:
     """Kernels whose constants.yaml entry is no longer the stage-1 pick."""
-    ks = [k for k in ex.kernels.values() if k.get("stage1")]
+    ks = [k for k in ex.kernels.values() if k.get("stage1") and not k["plan"]]
     n_tr = sum(c.get("transposed", False) for k in ex.kernels.values() for c in k["candidates"])
     L = ["## Changes since stage 1", "",
          "constants.yaml (h1_kernels) holds the W1 preset: per kernel the fastest checked run over every result set. "
@@ -883,7 +1023,7 @@ def render_options_md(ex: Explorer) -> list[str]:
         L.append("| none | | | | | |")
     L += ["", "Call time with the stage-1 picks instead (estimate: kernel times add up as on the operator-graph page; "
           "transposed layout cost not counted):", ""]
-    for p in ex.pages:
+    for p in (p for p in ex.pages if p["group"] == m.SWEEP_GROUP):
         L.append(f"* {p['name']}: {ex.stage1_total(p):.3f} ms with the stage-1 picks, {p['sums']['total_ms']} ms "
                  "with constants.yaml")
     L.append("")
