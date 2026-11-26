@@ -90,7 +90,7 @@ For studies that split or recombine the vision encoder, prefix and action expert
 
 ## W1 under the upstream deployment plan
 
-The stage-1 baseline (decision 2026-11-25): upstream's whole-graph HBM plan (activations west, weights, residual and K/V south; head-major attention operands written and read by the GEMMs) and its kernel selection (GEMM `opt()` candidates, both simulated, the faster passing one kept; FlatAttention `attn_auto`; row kernels at default parameters). Composed W1 call: 39.16 ms, MFU 16.3 % (estimate); 27.19 ms with the sweep preset (per-kernel placement, fastest checked run per shape). Times in µs per call; *sweep preset* = the time in `h1_kernels` for the same operator and shape, where the sweeps ran it (placement per kernel, no reshape); x = sweep preset / plan.
+The stage-1 baseline (decision 2026-11-25): upstream's whole-graph HBM plan (activations west, weights, residual and K/V south; head-major attention operands written and read by the GEMMs) and its kernel selection (GEMM `opt()` candidates, both simulated, the faster passing one kept; FlatAttention `attn_auto`; row kernels at default parameters). Composed W1 call: 39.16 ms, MFU 16.3 % (estimate); 27.19 ms with the sweep preset: the same call on the lowering the sweeps ran (q/k/v and gate/up fused, no head padding), fastest checked run per shape, placement per kernel. Times in µs per call; *sweep preset* = the time in `h1_kernels` for the same operator and shape, where the sweeps ran it (placement per kernel, no reshape); x = sweep preset / plan.
 
 | run key | calls | selected | µs | sweep preset, µs | x | recorded fix | failed the output check |
 | --- | ---: | --- | ---: | ---: | ---: | --- | --- |
@@ -151,7 +151,7 @@ Sweep preset missing (–): the plan's operator has no sweep run at that shape (
 
 ## Where the time goes (estimate)
 
-Each matrix kernel's time split as: ideal (true FLOP at the 131.1 TFLOP/s peak) + padding (padded FLOP, same rate: shape padding to whole tiles, and for GEMM RedMulE array padding to whole 32 x 64 output blocks, see below) + idle clusters (padded FLOP on only the active clusters) + HBM floor (the extra time if the operator's unique bytes, each moved once, need longer at 1,024 GB/s than the compute above; that bandwidth is DRAMSys's peak, 16 channels x 64 GB/s) + rest (time beyond that roofline: tiling re-reads, NoC, synchronisation, per-call overhead, HBM below peak). Row operators (vector cores) are counted whole. MFU = ideal / total. Times in ms per call.
+Each matrix kernel's time split as: ideal (true FLOP at the 131.1 TFLOP/s peak) + padding (padded FLOP, same rate: shape padding to whole tiles, and for GEMM RedMulE array padding to whole 32 x 64 output blocks, see below) + idle clusters (padded FLOP on only the active clusters) + HBM floor (the extra time if the operator's unique bytes, each moved once, need longer at 1,024 GB/s than the compute above; that bandwidth is DRAMSys's peak, 16 channels x 64 GB/s) + rest (time beyond that roofline: tiling re-reads, NoC, synchronisation, per-call overhead, HBM below peak). Row operators (vector cores) are counted whole. MFU = all FLOP at peak / time, as on the whole page (row-operator FLOP included, a small share). Times in ms per call.
 
 ### W1 (cameras one by one; upstream deployment plan (baseline))
 

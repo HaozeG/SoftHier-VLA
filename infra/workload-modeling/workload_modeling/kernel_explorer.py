@@ -315,7 +315,8 @@ class Explorer:
             # over every sweep), on the unsplit stage-1 lowering the sweeps ran
             r0 = m.annotate(m.build(self.c, wid, m.STAGE1_LOWERING))
             p["compare_ms"] = float(render.kernel_sums(self.c, wid, r0, m.SWEEP_GROUP)["total_ms"].replace(",", ""))
-            p["compare_label"] = "with the sweep preset (per-kernel placement, fastest checked run per shape)"
+            p["compare_label"] = ("with the sweep preset: the same call on the lowering the sweeps ran (q/k/v and gate/up fused, "
+                                  "no head padding), fastest checked run per shape, placement per kernel")
         return p
 
     def _new_kernel(self, kname: str, r: m.OpRow, ns: float, key: str, group: str) -> dict:
@@ -1020,7 +1021,7 @@ def render_md(ex: Explorer) -> str:
           "if the operator's unique bytes, each moved once, need longer at 1,024 GB/s than the compute above; that "
           "bandwidth is DRAMSys's peak, 16 channels x 64 GB/s) + rest (time "
           "beyond that roofline: tiling re-reads, NoC, synchronisation, per-call overhead, HBM below peak). Row "
-          "operators (vector cores) are counted whole. MFU = ideal / total. Times in ms per call.", ""]
+          "operators (vector cores) are counted whole. MFU = all FLOP at peak / time, as on the whole page (row-operator FLOP included, a small share). Times in ms per call.", ""]
     for p in ex.pages:
         L += [f"### {p['name']} ({p['desc']})", "",
               "| stage | ideal | padding | idle clusters | HBM floor | rest beyond roofline | row operators | total | MFU, % |",
