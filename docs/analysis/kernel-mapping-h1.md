@@ -77,6 +77,7 @@ Time and MFU as on the operator-graph pages (sums of measured kernel times, *est
 * Expert self-attention's KV concatenation is not modelled (as upstream's plan).
 * Host-side, not timed: `lang_embed_scale` (prefix), `state_proj` (prefix), `bias_state` (prefix).
 * W1's plan runs are not traced (no per-cluster busy data); W1-b is not run under the plan.
+* The sweep preset (W1-b, and the comparison on W1) is not a deployable plan: each kernel run had its inputs preloaded in the layout and HBM edge it wants (attention reads q/k/v head-major and padded to its blocks; GEMMs write row-major, unpadded), so splitting the fused q/k/v output, converting to head-major and back, propagating head padding and keeping producer and consumer on the same edge are all free there. The upstream plan pays for them inside its kernels (GEMM reshape on store / load, padded GEMM rows, placement overrides).
 
 ## What this baseline cannot tell you
 
@@ -90,7 +91,7 @@ For studies that split or recombine the vision encoder, prefix and action expert
 
 ## W1 under the upstream deployment plan
 
-The stage-1 baseline (decision 2026-11-25): upstream's whole-graph HBM plan (activations west, weights, residual and K/V south; head-major attention operands written and read by the GEMMs) and its kernel selection (GEMM `opt()` candidates, both simulated, the faster passing one kept; FlatAttention `attn_auto`; row kernels at default parameters). Composed W1 call: 39.16 ms, MFU 16.3 % (estimate); 27.19 ms with the sweep preset: the same call on the lowering the sweeps ran (q/k/v and gate/up fused, no head padding), fastest checked run per shape, placement per kernel. Times in µs per call; *sweep preset* = the time in `h1_kernels` for the same operator and shape, where the sweeps ran it (placement per kernel, no reshape); x = sweep preset / plan.
+The stage-1 baseline (decision 2026-11-25): upstream's whole-graph HBM plan (activations west, weights, residual and K/V south; head-major attention operands written and read by the GEMMs) and its kernel selection (GEMM `opt()` candidates, both simulated, the faster passing one kept; FlatAttention `attn_auto`; row kernels at default parameters). Composed W1 call: 39.16 ms, MFU 16.3 % (estimate); 27.19 ms with the sweep preset: the same call on the lowering the sweeps ran (q/k/v and gate/up fused, no head padding), fastest checked run per shape, placement per kernel; inter-kernel layout and placement free, so not a deployable plan. Times in µs per call; *sweep preset* = the time in `h1_kernels` for the same operator and shape, where the sweeps ran it (placement per kernel, no reshape); x = sweep preset / plan.
 
 | run key | calls | selected | µs | sweep preset, µs | x | recorded fix | failed the output check |
 | --- | ---: | --- | ---: | ---: | ---: | --- | --- |

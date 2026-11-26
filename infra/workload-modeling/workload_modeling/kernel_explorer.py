@@ -316,7 +316,8 @@ class Explorer:
             r0 = m.annotate(m.build(self.c, wid, m.STAGE1_LOWERING))
             p["compare_ms"] = float(render.kernel_sums(self.c, wid, r0, m.SWEEP_GROUP)["total_ms"].replace(",", ""))
             p["compare_label"] = ("with the sweep preset: the same call on the lowering the sweeps ran (q/k/v and gate/up fused, "
-                                  "no head padding), fastest checked run per shape, placement per kernel")
+                                  "no head padding), fastest checked run per shape, placement per kernel; inter-kernel "
+                                  "layout and placement free, so not a deployable plan")
         return p
 
     def _new_kernel(self, kname: str, r: m.OpRow, ns: float, key: str, group: str) -> dict:
@@ -950,6 +951,12 @@ def assumptions(ex, page_sums: dict) -> list[str]:
         "Expert self-attention's KV concatenation is not modelled (as upstream's plan).",
         f"Host-side, not timed: {page_sums['total_uncovered']}.",
         "W1's plan runs are not traced (no per-cluster busy data); W1-b is not run under the plan.",
+        "The sweep preset (W1-b, and the comparison on W1) is not a deployable plan: each kernel run had its inputs "
+        "preloaded in the layout and HBM edge it wants (attention reads q/k/v head-major and padded to its blocks; "
+        "GEMMs write row-major, unpadded), so splitting the fused q/k/v output, converting to head-major and back, "
+        "propagating head padding and keeping producer and consumer on the same edge are all free there. The "
+        "upstream plan pays for them inside its kernels (GEMM reshape on store / load, padded GEMM rows, placement "
+        "overrides).",
     ]
 
 
