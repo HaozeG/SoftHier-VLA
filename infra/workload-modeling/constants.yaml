@@ -72,7 +72,7 @@ arch:
     spatz_vlen_bits: {value: 16384, unit: bit, label: measured, source: "~/softhier@52859c3 Spatz model (row of 4096 fp16 at e16/m4 is one strip)"}
     hbm_channels: {value: 8, unit: "", label: measured, source: "arch.py:66 hbm_chan_placement = [4,0,0,4] (order west, north, east, south: 4 west, 4 south; flex_cluster.py:163-180)"}
     hbm_device: {value: "JEDEC HBM2E-4000, 64-bit, 2000 MHz, DDR", unit: "", label: measured, source: "~/softhier@52859c3 core/models/memory/dramsys.cpp:128 -> dramsys_configs/hbm2-example.json -> memspec/JEDEC_16Gb_HBM2E-4000.json"}
-    hbm_bw_per_channel: {value: 64, unit: GB/s, label: inference, source: "DRAMSys report in kernel runs: AVG BW\\IDLE 453.29 Gb/s = 88.53 %", note: "full scale implied by DRAMSys's own utilization line; the memspec alone (64 bit x 4000 MT/s) gives 32 GB/s; difference not resolved"}
+    hbm_bw_per_channel: {value: 64, unit: GB/s, label: measured, source: "DRAMSys MAX BW 64.00 GB/s (512 Gb/s) per controller in every kernel run's report (14,160 controller reports in stage1-h1, all 64.00); memspec JEDEC_16Gb_HBM2E-4000: width 64 bit x dataRate 2 x 2000 MHz x nbrOfPseudoChannels 2 = 512 Gb/s; upstream soft_hier_je analyze_results.py:246 uses the same 64 GB/s per channel", note: "observed per channel up to 54.90 GB/s busy-time (gemm 50x720x2048 splitN_x1y2g32_t32x32x256, AVG BW\\IDLE 85.78 %), above a one-pseudo-channel 32 GB/s; GB = 1e9 B"}
   h1:
     repo: "SoftHier-VLA infra/kernel-runs/arch/arch_h1.py (sha256 60973e78); GVSoC soft_hier_release d806a84 + infra/softhier/gvsoc-patches 0001-0012"
     file: infra/kernel-runs/arch/arch_h1.py
@@ -93,7 +93,7 @@ arch:
     spatz_vlen_bits: {value: 16384, unit: bit, label: measured, source: "same Spatz model as arch.stage1"}
     hbm_channels: {value: 16, unit: "", label: measured, source: "arch_h1.py:69 hbm_chan_placement = [8,0,0,8] (8 west, 8 south); one controller per edge (num_node_per_ctrl = hbm_node_aliase = 8, XOR scrambling)"}
     hbm_device: {value: "JEDEC HBM2E-4000, 64-bit, 2000 MHz, DDR", unit: "", label: measured, source: "DRAMSys memspec as arch.stage1 (core/models/memory/dramsys.cpp:128)"}
-    hbm_bw_per_channel: {value: 64, unit: GB/s, label: inference, source: "as arch.stage1.hbm_bw_per_channel (DRAMSys utilization report)", note: "the memspec alone (64 bit x 4000 MT/s) gives 32 GB/s; difference not resolved"}
+    hbm_bw_per_channel: {value: 64, unit: GB/s, label: measured, source: "as arch.stage1.hbm_bw_per_channel (DRAMSys MAX BW 64.00 GB/s per controller in every H1 run; memspec 2 pseudo-channels x 64 bit x 4000 MT/s)", note: "16 channels x 64 = 1,024 GB/s; no upstream selection rule uses it (opt(), attn_auto and the deployment flow have no bandwidth term; only analyze_results.py's roofline plot does)"}
   pr1:
     repo: "third_party GVSoC soft_hier_release, PR1 arch file"
     file: "experiments/smolvla-e2e-baseline/profile/hw_spec.csv@68cd4eb"

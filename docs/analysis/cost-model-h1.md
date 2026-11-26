@@ -177,7 +177,7 @@ From `constants.yaml` `arch.h1` (the model reads nothing else). Label: measured 
 | `c_o` | `arch.h1.redmule_call_overhead` | 160 cycle | estimate | RedMulE busy time per call minus the array time, over the traced GEMM runs (trace_summary_h1.json); computed in workload_modeling/cost_model_doc.py Data.overhead_fit, shown in docs/analysis/cost-model-h1.md section 3 (per RedMulE call; used by workload_modeling.kernel_model (GEMM ranking model and kernel explorer)) |
 | `t_red` | `arch.h1.splitk_reduce_step` | 300 ns | estimate | gemm_smallm_sweep.py ranking model, 2026-11-21 (a guess, not fitted) (FlooNoC group reduction of one Z tile per N step in splitK; ranking only) |
 | `n_ch` | `arch.h1.hbm_channels` | 16  | measured | arch_h1.py:69 hbm_chan_placement = [8,0,0,8] (8 west, 8 south); one controller per edge (num_node_per_ctrl = hbm_node_aliase = 8, XOR scrambling) |
-| `b_ch` | `arch.h1.hbm_bw_per_channel` | 64 GB/s | inference | as arch.stage1.hbm_bw_per_channel (DRAMSys utilization report) (the memspec alone (64 bit x 4000 MT/s) gives 32 GB/s; difference not resolved) |
+| `b_ch` | `arch.h1.hbm_bw_per_channel` | 64 GB/s | measured | as arch.stage1.hbm_bw_per_channel (DRAMSys MAX BW 64.00 GB/s per controller in every H1 run; memspec 2 pseudo-channels x 64 bit x 4000 MT/s) (16 channels x 64 = 1,024 GB/s; no upstream selection rule uses it (opt(), attn_auto and the deployment flow have no bandwidth term; only analyze_results.py's roofline plot does)) |
 | `` | `arch.h1.clusters_x` | 8  | measured | arch_h1.py:27 |
 | `` | `arch.h1.clusters_y` | 8  | measured | arch_h1.py:28 |
 | `` | `arch.h1.tcdm_bytes` | 393216 B | measured | arch_h1.py:35 (0x60000) |

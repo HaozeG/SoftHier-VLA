@@ -35,8 +35,8 @@ units). FLOP are the model's true counts, without padding.
 * **Changes from the reference computation.** {{ lowering_text[0] | upper }}{{ lowering_text[1:] }}.
 {%- endif %}
 * **Hardware.** {{ kp.arch_text }}: {{ hw.mesh }} = {{ hw.clusters }} clusters at {{ hw.clock_ghz }} GHz,
-  {{ hw.peak_total }} TFLOP/s fp16 peak, HBM {{ hw.hbm_bw_total }} GB/s (this bandwidth is inferred from DRAMSys's
-  report; its memspec alone gives half). Details in [Hardware and kernels](#hardware-and-kernels).
+  {{ hw.peak_total }} TFLOP/s fp16 peak, HBM {{ hw.hbm_bw_total }} GB/s (DRAMSys's peak,
+  {{ hw.hbm_channels }} channels x {{ hw.hbm_bw_ch }} GB/s). Details in [Hardware and kernels](#hardware-and-kernels).
 * **Kernel times are measured**, one kernel at a time on one instance of the operator, in the GVSoC simulator, with
   each output checked against a golden reference.
 * **The call time is a sum, not a run.** Time per call = sum over operators of (instances x kernel time). Kernels run
@@ -117,7 +117,7 @@ Hardware: {{ kp.arch_text }}. Values read from the arch file are measured; total
 | matrix unit | RedMulE {{ hw.redmule }} CE per cluster, fp16: {{ hw.peak_cluster }} TFLOP/s per cluster, {{ hw.peak_total }} TFLOP/s in total |
 | L1 (TCDM) | {{ hw.tcdm_kib }} KiB per cluster, {{ hw.tcdm_total_mib }} MiB in total |
 | NoC | {{ hw.noc_bits }}-bit links |
-| HBM | {{ hw.hbm_channels }} channels on the west and south edges, DRAMSys model ({{ hw.hbm_device }}); {{ hw.hbm_bw_ch }} GB/s per channel, {{ hw.hbm_bw_total }} GB/s in total (inference: from DRAMSys's utilization report; the memspec alone gives half) |
+| HBM | {{ hw.hbm_channels }} channels on the west and south edges, DRAMSys model ({{ hw.hbm_device }}); {{ hw.hbm_bw_ch }} GB/s per channel, {{ hw.hbm_bw_total }} GB/s in total (measured: DRAMSys's MAX BW per controller; memspec 2 pseudo-channels x 64 bit x 4000 MT/s) |
 | balance | peak / HBM bandwidth = {{ hw.balance }} FLOP per byte: an operator below this FLOP per byte of HBM traffic is bandwidth-bound here |
 
 | kernel | operators | output checked | how it was run |

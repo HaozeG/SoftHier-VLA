@@ -801,7 +801,7 @@ def render_md(ex: Explorer) -> str:
           "FLOP, same rate: shape padding to whole tiles, and for GEMM RedMulE array padding to whole "
           f"{ex.rm_blk[0]} x {ex.rm_blk[1]} output blocks, see below) + idle clusters (padded FLOP on only the active clusters) + HBM floor (the extra time "
           "if the operator's unique bytes, each moved once, need longer at 1,024 GB/s than the compute above; that "
-          "bandwidth is an inference, the memspec alone gives half, which would double this column) + rest (time "
+          "bandwidth is DRAMSys's peak, 16 channels x 64 GB/s) + rest (time "
           "beyond that roofline: tiling re-reads, NoC, synchronisation, per-call overhead, HBM below peak). Row "
           "operators (vector cores) are counted whole. MFU = ideal / total. Times in ms per call.", ""]
     for p in ex.pages:

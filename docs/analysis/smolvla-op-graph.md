@@ -34,8 +34,8 @@ units). FLOP are the model's true counts, without padding.
   within 0.011 % per stage ([crosscheck.md](crosscheck.md)).
 * **Changes from the reference computation.** The expert's cross-attention K/V projection runs once per call, not in every flow step.
 * **Hardware.** H1, `infra/kernel-runs/arch/arch_h1.py` (`constants.yaml` section `arch.h1`): 8 x 8 = 64 clusters at 1 GHz,
-  131.1 TFLOP/s fp16 peak, HBM 1024 GB/s (this bandwidth is inferred from DRAMSys's
-  report; its memspec alone gives half). Details in [Hardware and kernels](#hardware-and-kernels).
+  131.1 TFLOP/s fp16 peak, HBM 1024 GB/s (DRAMSys's peak,
+  16 channels x 64 GB/s). Details in [Hardware and kernels](#hardware-and-kernels).
 * **Kernel times are measured**, one kernel at a time on one instance of the operator, in the GVSoC simulator, with
   each output checked against a golden reference.
 * **The call time is a sum, not a run.** Time per call = sum over operators of (instances x kernel time). Kernels run
@@ -121,7 +121,7 @@ Hardware: H1, `infra/kernel-runs/arch/arch_h1.py` (`constants.yaml` section `arc
 | matrix unit | RedMulE 32 x 32 CE per cluster, fp16: 2.048 TFLOP/s per cluster, 131.1 TFLOP/s in total |
 | L1 (TCDM) | 384 KiB per cluster, 24 MiB in total |
 | NoC | 1024-bit links |
-| HBM | 16 channels on the west and south edges, DRAMSys model (JEDEC HBM2E-4000, 64-bit, 2000 MHz, DDR); 64 GB/s per channel, 1024 GB/s in total (inference: from DRAMSys's utilization report; the memspec alone gives half) |
+| HBM | 16 channels on the west and south edges, DRAMSys model (JEDEC HBM2E-4000, 64-bit, 2000 MHz, DDR); 64 GB/s per channel, 1024 GB/s in total (measured: DRAMSys's MAX BW per controller; memspec 2 pseudo-channels x 64 bit x 4000 MT/s) |
 | balance | peak / HBM bandwidth = 128 FLOP per byte: an operator below this FLOP per byte of HBM traffic is bandwidth-bound here |
 
 | kernel | operators | output checked | how it was run |
