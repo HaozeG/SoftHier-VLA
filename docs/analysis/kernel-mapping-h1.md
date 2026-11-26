@@ -94,7 +94,7 @@ Time and MFU as on the operator-graph pages (sums of measured kernel times, *est
 * Attention is unmasked (stage1-spec §4.2): dense FLOP and time, no causal or padding savings.
 * Expert self-attention's KV concatenation is not modelled (as upstream's plan).
 * Host-side, not timed: `lang_embed_scale` (prefix), `state_proj` (prefix), `bias_state` (prefix).
-* Plan runs and plan-constrained sweep runs are not traced (no per-cluster busy data).
+* Perfetto traces: one run per plan key, the selected run of each plan (trace_picks.py --plan, a separate traced run of the same settings); measured times come from the untraced runs.
 * Every time on these pages comes from a run under the deployment plan: inputs and outputs in the layout and HBM edge the neighbouring kernels use (GEMM reshape on store / load, padded GEMM rows, placement overrides). The earlier sweep preset (`constants.yaml h1_kernels`: each kernel with its inputs preloaded as it wants them, so splitting, head-major conversion, padding and placement were free) is not a deployable plan and is not shown; it stays in constants.yaml for the cost-model fit.
 
 ## What this baseline cannot tell you
@@ -467,39 +467,39 @@ The per-call rule ceil(m/32) x ceil(n/64) x k x 2 cycles + about 160 cycles matc
 
 Trace column: *selected* = a trace of the selected setting exists; *other* = only traces of non-selected candidates (the page says which); *none* = no trace. Reasons:
 
-* `vision.flatattention_12x1024x1024x64`: plan runs are not traced.
-* `expert.flatattention_15x50x241x64`: plan runs are not traced.
-* `expert.flatattention_15x50x291x64`: plan runs are not traced.
-* `prefix.flatattention_15x241x241x64`: plan runs are not traced.
-* `vision.flatattention_36x1024x1024x64`: plan runs are not traced.
-* `expert.gemm_50x32x720`: plan runs are not traced.
-* `expert.gemm_50x320x720_zto_pZs`: plan runs are not traced.
-* `expert.gemm_50x720x32_pXs`: plan runs are not traced.
-* `expert.gemm_50x720x720`: plan runs are not traced.
-* `expert.gemm_50x720x960_xfrom`: plan runs are not traced.
-* `expert.gemm_50x720x1440`: plan runs are not traced.
-* `expert.gemm_50x720x2048`: plan runs are not traced.
-* `expert.gemm_50x960x720_zto`: plan runs are not traced.
-* `expert.gemm_50x2048x720`: plan runs are not traced.
-* `connector.gemm_192x960x12288`: plan runs are not traced.
-* `expert.gemm_241x320x320_xfrom_zto_pXsZs`: plan runs are not traced.
-* `prefix.gemm_241x320x960_zto_pZs`: plan runs are not traced.
-* `prefix.gemm_241x960x960_zto`: plan runs are not traced.
-* `prefix.gemm_241x960x960_xfrom`: plan runs are not traced.
-* `prefix.gemm_241x960x2560`: plan runs are not traced.
-* `prefix.gemm_241x2560x960`: plan runs are not traced.
-* `vision.gemm_1024x768x768`: plan runs are not traced.
-* `vision.gemm_1024x768x768_zto`: plan runs are not traced.
-* `vision.gemm_1024x768x768_zto_pZs`: plan runs are not traced.
-* `vision.gemm_1024x768x768_xfrom`: plan runs are not traced.
-* `vision.gemm_1024x768x3072`: plan runs are not traced.
-* `vision.gemm_1024x3072x768`: plan runs are not traced.
-* `vision.gemm_3072x768x768`: plan runs are not traced.
-* `vision.gemm_3072x768x768_zto`: plan runs are not traced.
-* `vision.gemm_3072x768x768_zto_pZs`: plan runs are not traced.
-* `vision.gemm_3072x768x768_xfrom`: plan runs are not traced.
-* `vision.gemm_3072x768x3072`: plan runs are not traced.
-* `vision.gemm_3072x3072x768`: plan runs are not traced.
+* `vision.flatattention_12x1024x1024x64`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.flatattention_15x50x241x64`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.flatattention_15x50x291x64`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `prefix.flatattention_15x241x241x64`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.flatattention_36x1024x1024x64`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.gemm_50x32x720`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.gemm_50x320x720_zto_pZs`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.gemm_50x720x32_pXs`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.gemm_50x720x720`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.gemm_50x720x960_xfrom`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.gemm_50x720x1440`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.gemm_50x720x2048`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.gemm_50x960x720_zto`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.gemm_50x2048x720`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `connector.gemm_192x960x12288`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `expert.gemm_241x320x320_xfrom_zto_pXsZs`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `prefix.gemm_241x320x960_zto_pZs`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `prefix.gemm_241x960x960_zto`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `prefix.gemm_241x960x960_xfrom`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `prefix.gemm_241x960x2560`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `prefix.gemm_241x2560x960`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_1024x768x768`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_1024x768x768_zto`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_1024x768x768_zto_pZs`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_1024x768x768_xfrom`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_1024x768x3072`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_1024x3072x768`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_3072x768x768`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_3072x768x768_zto`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_3072x768x768_zto_pZs`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_3072x768x768_xfrom`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_3072x768x3072`: this plan's selected run is not traced yet (trace_picks.py --plan).
+* `vision.gemm_3072x3072x768`: this plan's selected run is not traced yet (trace_picks.py --plan).
 
 Runs that failed the output check but were faster than the selected setting (excluded by the pick rule; worth a look before trusting the pick):
 

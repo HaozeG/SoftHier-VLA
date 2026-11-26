@@ -342,7 +342,7 @@ class Explorer:
                     k = self.kernels[o["kernel"]]
                     pr = pick.get(o["kernel"], {})
                     k.setdefault("alt", {})[name] = dict(time_ns=alt, cand=pr.get("cand", ""), vid=pr.get("vid", ""),
-                                                         source=pr.get("source", ""))
+                                                         source=pr.get("source", ""), run_dir=pr.get("run_dir", ""))
             # the plan-constrained plan stands alone: every pick must be a passing run of its own sweep
             # (results/plan_sweep_h1.csv), for the key and run variant the pick names, with the time constants holds
             own = {(r["vid"], r["cand"]): r for r in self.ps if r["status"] == "ok"}
@@ -576,7 +576,7 @@ class Explorer:
                  failed=[dict(cand=r["cand"], status=r["status"], bad=r["bad"], time_ns=r["time_ns"], fix=r["fix"])
                          for r in rows if r["status"] != "ok"])
         self._interface(k, PLAN_KDIR[kern], [r["run_dir"] for r in rows + sw], best["run_dir"])
-        k.update(traces=[], trace=None, trace_status="none", trace_note="plan runs are not traced")
+        self._plan_traces(k, cands, sel["run_dir"], check=True)
         # comparison: the plan-constrained sweep's pick for this key (first page that has one)
         alt = next((a for a in k.get("alt", {}).values() if a["time_ns"]), None)
         k["stage1"] = None if not alt else dict(label="plan-constrained sweep", setting=alt["cand"],
@@ -764,6 +764,45 @@ class Explorer:
             k["trace_note"] = why + (f"; the trace shown is of a non-selected candidate, {other[0]['cand']} "
                                      f"({other[0]['measured_ns']:,} ns vs {sel['time_ns']:,} ns selected)"
                                      if other else "")
+
+    @staticmethod
+    def _trace_name(run_dir: str) -> str | None:
+        """trace_picks.py names a plan trace "plan:<run folder under stage1-h1>"."""
+        i = (run_dir or "").find("/stage1-h1/")
+        return "plan:" + run_dir[i + len("/stage1-h1/"):] if i >= 0 else None
+
+    def _plan_traces(self, k: dict, cands: list[dict], sel_dir: str, check: bool = False) -> None:
+        """Traces of a plan kernel, matched by run folder (trace_picks.py traces each plan's selected run): which
+        candidates have one, the trace status of this plan's selected run, and (once) the placement-vs-trace check."""
+        traced = []
+        for c in cands:
+            n = self._trace_name(c.get("run_dir", ""))
+            t = self.traces.get(n) if n else None
+            c.pop("trace", None)
+            if not (t and t.get("busy_frac")):
+                continue
+            c["trace"] = n
+            traced.append(dict(t, name=n, cand=c["cand"]))
+            if check and c.get("setting"):
+                st = c["setting"]
+                pl = placement(st["sx"], st["sy"], st["groups"] if k["kind"] == "gemm" else st["active_groups"])
+                want = sorted(i for i, q in enumerate(pl) if q["g"] >= 0)
+                got = t["active_by_unit"]["redmule"]
+                self._check("placement", f"{k['name']} / {c['cand']} @{c.get('vid', '').split('@', 1)[-1]}",
+                            want == got, f"{len(want)} clusters from the kernel's group placement, {len(got)} with "
+                            "redmule activity in the trace" + ("" if want == got else
+                                                               f"; differ at {sorted(set(want) ^ set(got))}"))
+        n = self._trace_name(sel_dir)
+        t = self.traces.get(n) if n else None
+        if t and t.get("busy_frac"):
+            mine = next((x for x in traced if x["name"] == n), None) or dict(t, name=n, cand=k["selected"]["cand"])
+            if mine not in traced:
+                traced.append(mine)
+            k.update(traces=traced, trace=mine, trace_status="selected", trace_note="trace of this plan's selected run")
+        else:
+            k.update(traces=traced, trace=None, trace_status="none",
+                     trace_note="tracing this plan's selected run failed or timed out" if t else
+                     "this plan's selected run is not traced yet (trace_picks.py --plan)")
 
     def _wrong_faster(self, k: dict) -> None:
         """Runs that failed the output check but were faster than the pick: their failure needs a look first."""
@@ -963,6 +1002,8 @@ class Explorer:
                         k["plan_sel"] = sel
                         k["stage1"] = None      # no per-key cross-plan field: plans are independent
                         self._own_candidates(k, sel)
+                        self._plan_traces(k, k.get("candidates", []),
+                                          a["run_dir"] if sel == "constrained" else k["selected"].get("run_dir", ""))
                         for u in k["uses"]:
                             u["total_ns"] = u["count"] * k["time_ns"]
                         ks[o["kernel"]] = k
@@ -1176,7 +1217,7 @@ def assumptions(ex, page_sums: dict) -> list[str]:
         "Attention is unmasked (stage1-spec §4.2): dense FLOP and time, no causal or padding savings.",
         "Expert self-attention's KV concatenation is not modelled (as upstream's plan).",
         f"Host-side, not timed: {page_sums['total_uncovered']}.",
-        "Plan runs and plan-constrained sweep runs are not traced (no per-cluster busy data).",
+        "Perfetto traces: one run per plan key, the selected run of each plan (trace_picks.py --plan, a separate traced run of the same settings); measured times come from the untraced runs.",
         "Every time on these pages comes from a run under the deployment plan: inputs and outputs in the layout and "
         "HBM edge the neighbouring kernels use (GEMM reshape on store / load, padded GEMM rows, placement "
         "overrides). The earlier sweep preset (`constants.yaml h1_kernels`: each kernel with its inputs preloaded "
