@@ -70,14 +70,22 @@ def _sig(kernel: str, place: dict) -> str:
 
 
 class Plan:
-    def __init__(self, workload: str = "vlabench-3cam", c=None):
+    def __init__(self, workload: str = "vlabench-3cam", c=None, lowering=None, attn: dict | None = None):
+        """lowering: default PLAN_LOWERING (W1); PLAN_LOWERING_W1B batches the cameras. attn: (stage, op) ->
+        AttnSetting overriding upstream's attn_opt for that attention call (the plan-constrained sweep); the
+        tensors' head padding follows the attention settings, so every kernel touching them changes with it."""
         c = c or constants.load()
         self.workload = workload
         # upstream's plan has separate q / k / v and gate / up products (stage1-spec §3.3, split_fused)
-        low = dataclasses.replace(smolvla_ops.kernel_set(workload).lowering, split_fused=True)
+        low = lowering or smolvla_ops.PLAN_LOWERING
+        assert low.split_fused, "the plan has separate q / k / v and gate / up products"
+        self.lowering = low
+        self.dims = smolvla_ops.load_dims(c.workloads[workload])
+        self.cameras = c.workloads[workload].cameras
         self.rows = smolvla_ops.annotate(smolvla_ops.build(c, workload, low))
         self.T: dict[str, Tensor] = {}
         self.attn = {}                      # (stage, op) -> AttnSetting
+        self._override = dict(attn or {})
         self._tensors()
         self.deploys: list[Deploy] = [d for r in self.rows for d in [self._deploy(r)] if d]
 
@@ -89,22 +97,31 @@ class Plan:
         return next(r for r in self.rows if r.stage == stage and r.op == op)
 
     def _tensors(self):
+        dm = self.dims
         for stage, op in (("vision", "qk"), ("prefix", "qk"), ("expert", "self_qk"), ("expert", "cross_qk")):
             h, q, kv, _ = self._row(stage, op).shape
-            hkv = 12 if stage == "vision" else 5
-            self.attn[(stage, op)] = attn_opt(h, hkv, q, kv)
+            hkv = h if stage == "vision" else dm.t_kv_heads        # SigLIP: MHA; VLM / expert: GQA
+            self.attn[(stage, op)] = self._override.get((stage, op)) or attn_opt(h, hkv, q, kv)
         v, p = self.attn[("vision", "qk")], self.attn[("prefix", "qk")]
         es, ec = self.attn[("expert", "self_qk")], self.attn[("expert", "cross_qk")]
         assert es.q_pad == ec.q_pad, "expert self and cross Q share rope_q and o_proj"
-        self._t("vision.q", A, 12, v.q_pad); self._t("vision.k", B, 12, v.kv_pad); self._t("vision.v", B, 12, v.kv_pad)
-        self._t("vision.o", A, 12, v.q_pad)
-        self._t("prefix.q", A, 15, p.q_pad); self._t("prefix.k", B, 5, p.kv_pad); self._t("prefix.v", B, 5, p.kv_pad)
-        self._t("prefix.o", A, 15, p.q_pad)
-        self._t("expert.q", A, 15, es.q_pad); self._t("expert.o", A, 15, es.q_pad)
+        hv, ht, hk = dm.v_heads, dm.t_heads, dm.t_kv_heads
+        if self.lowering.attn_cameras_as_heads:
+            # (heads, cameras x rows, d) = (heads x cameras, rows, d) blocks: no padding between cameras
+            N = self._row("vision", "qk").shape[1]
+            assert v.q_pad == N and v.kv_pad == N, ("cameras-as-heads needs unpadded vision rows", v)
+            vq = vkv = self.cameras * N
+        else:
+            vq, vkv = v.q_pad, v.kv_pad
+        self._t("vision.q", A, hv, vq); self._t("vision.k", B, hv, vkv); self._t("vision.v", B, hv, vkv)
+        self._t("vision.o", A, hv, vq)
+        self._t("prefix.q", A, ht, p.q_pad); self._t("prefix.k", B, hk, p.kv_pad); self._t("prefix.v", B, hk, p.kv_pad)
+        self._t("prefix.o", A, ht, p.q_pad)
+        self._t("expert.q", A, ht, es.q_pad); self._t("expert.o", A, ht, es.q_pad)
         # self-attention keys: prefix cache + own 50 tokens; the concatenation is not modelled, so the projection
         # writes its own head-major tensor and no consumer fixes its row count
-        self._t("expert.k_self", B, 5, None); self._t("expert.v_self", B, 5, None)
-        self._t("expert.k_cross", B, 5, ec.kv_pad); self._t("expert.v_cross", B, 5, ec.kv_pad)
+        self._t("expert.k_self", B, hk, None); self._t("expert.v_self", B, hk, None)
+        self._t("expert.k_cross", B, hk, ec.kv_pad); self._t("expert.v_cross", B, hk, ec.kv_pad)
         assert p.kv_pad == ec.kv_pad, "cross K/V projections read prefix K/V and write cross K/V at the same M"
         for s in ("vision", "connector", "prefix", "expert"):
             self._t(f"{s}.res", B)          # residual stream

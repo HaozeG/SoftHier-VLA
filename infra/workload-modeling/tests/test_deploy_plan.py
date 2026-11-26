@@ -48,3 +48,21 @@ def test_attn_rule_fixes_are_recorded():
     assert "head" in s.fix and 64 // (s.sx * s.sy) >= 5
     v = attn_opt(12, 12, 1024, 1024)
     assert v.fix == "" and (v.sx, v.sy, v.q_pad) == (8, 8, 1024)
+
+
+def test_w1b_plan_batches_the_vision_encoder():
+    # W1-b under the plan: same FLOP as W1; vision attention as one call per layer over cameras x heads, its q/k/v
+    # head-major tensors (heads, cameras x rows, d); prefix and expert runs are W1's
+    from workload_modeling import constants, smolvla_ops as m
+    from workload_modeling.deploy_plan import Plan
+    c = constants.load()
+    w = c.primary_workload.id
+    flop = lambda low: sum(r.flop for r in m.build(c, w, low))
+    assert flop(m.PLAN_LOWERING_W1B) == flop(m.PLAN_LOWERING)
+    a, b = Plan().runs(), Plan(lowering=m.PLAN_LOWERING_W1B).runs()
+    assert {k: v for k, v in a.items() if not k.startswith("vision.")} == \
+           {k: v for k, v in b.items() if not k.startswith("vision.")}
+    at = b["vision.flatattention_36x1024x1024x64"]
+    assert at["count"] == 12 and at["cfg"]["q_pad"] == 1024
+    q = next(v for k, v in b.items() if k.startswith("vision.gemm_3072x768x768_zto") and "q_proj" in v["ops"])
+    assert q["cfg"]["resha_z_to_m"] * 64 == 3072 * 768       # chunk = head dim: (12, 3072, 64)

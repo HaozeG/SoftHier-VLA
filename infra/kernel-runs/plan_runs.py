@@ -2,7 +2,10 @@
 """Stage-1 baseline runs under the deployment plan (stage1-spec §4.3 item 3): every distinct run of
 workload_modeling.deploy_plan, each kernel set by upstream's selection rule, placed as the plan says.
 
-    plan_runs.py plan | run | pick   [--kernel gemm|attn|elt|acti|lnorm|norm|rope]... [--key <stage.key>]...
+    plan_runs.py plan | run | pick   [--page W1|W1-b] [--kernel gemm|attn|elt|acti|lnorm|norm|rope]... [--key <stage.key>]...
+
+--page W1-b: the plan with the cameras batched (smolvla_ops.PLAN_LOWERING_W1B); its prefix and expert keys are W1's
+(same runs), the vision keys are its own. One CSV for both pages; pick writes one file per page.
 
 Attention: the attn_auto opt() setting carried by the plan (upstream_rules.attn_opt, fixes recorded). Row kernels and
 RoPE: template defaults with the plan's shape and operator. GEMM: upstream opt() (gemm_upstream.opt) on the plan's shape (M = the plan's padded rows), both of its settings
@@ -30,9 +33,11 @@ import row_kernels as RK
 
 sys.path.insert(0, str(HERE.parent / "workload-modeling"))
 from workload_modeling.deploy_plan import Plan, D  # noqa: E402
+from workload_modeling import smolvla_ops  # noqa: E402
 
 CSV = HERE / "results/plan_runs_h1.csv"
-PICK = HERE / "results/plan_pick_h1.csv"
+PAGES = {"W1": (smolvla_ops.PLAN_LOWERING, HERE / "results/plan_pick_h1.csv"),
+         "W1-b": (smolvla_ops.PLAN_LOWERING_W1B, HERE / "results/plan_pick_w1b_h1.csv")}
 RUNS = DATA / "stage1-h1/plan"
 FIELDS = ["key", "kernel", "ops", "count", "cand", "strategy", "m_size", "n_size", "k_size", "m_tile", "n_tile",
           "k_tile", "scale_x", "scale_y", "groups", "gap_x", "gap_z", "fix", "est_ns", "time_ns", "bad", "max_ulp",
@@ -210,8 +215,10 @@ def main():
     ap.add_argument("--kernel", action="append", choices=["gemm", "attn", "elt", "acti", "lnorm", "norm", "rope"],
                     help="default: every kernel")
     ap.add_argument("--key", action="append")
+    ap.add_argument("--page", choices=sorted(PAGES), default="W1")
     a = ap.parse_args()
-    plan = Plan()
+    low, PICK = PAGES[a.page]
+    plan = Plan(lowering=low)
     runs = {k: v for k, v in plan.runs().items()
             if (not a.kernel or v["kernel"] in a.kernel) and (not a.key or k in a.key)}
     rows = load_csv()

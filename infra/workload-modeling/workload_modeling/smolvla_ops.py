@@ -102,6 +102,9 @@ class Lowering:
     batch_cameras: bool = False      # True: all cameras in one vision-encoder call (weights read once)
     split_fused: bool = False        # True: expert qkv_proj as q, k, v products and mlp_gateup as gate, up
     #                                  (upstream's deployment plan; stage1-spec §3.3)
+    attn_cameras_as_heads: bool = False  # with batch_cameras: vision attention as one call per layer over
+    #                                  cameras x heads (head-major (heads, cameras x rows, d) read as
+    #                                  (heads x cameras, rows, d) blocks; MHA, so every block is its own head)
 
 
 def pr1_lowering(prefix_rows: int) -> Lowering:
@@ -299,9 +302,15 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
         add(_ew("vision", L, f"bias_{p}", "elementwise", "bias", M, Hv, n, weight_elems=Hv))
     add(_data("vision", L, "transpose_k", M, Hv, n))
     hd_v = Hv // d.v_heads
-    add(_attn("vision", L, "qk", d.v_heads, d.v_heads, N, N, hd_v, d.v_layers * cam, note="per camera"))
-    add(_ew("vision", L, "softmax", "softmax", "softmax", d.v_heads * N, N, d.v_layers * cam))
-    add(_attn("vision", L, "pv", d.v_heads, d.v_heads, N, N, hd_v, d.v_layers * cam, note="per camera"))
+    if lowering.attn_cameras_as_heads:
+        if not lowering.batch_cameras:
+            raise ValueError("attn_cameras_as_heads needs batch_cameras")
+        hv, na, note = d.v_heads * cam, d.v_layers, "cameras x heads in one call"
+    else:
+        hv, na, note = d.v_heads, d.v_layers * cam, "per camera"
+    add(_attn("vision", L, "qk", hv, hv, N, N, hd_v, na, note=note))
+    add(_ew("vision", L, "softmax", "softmax", "softmax", hv * N, N, na))
+    add(_attn("vision", L, "pv", hv, hv, N, N, hd_v, na, note=note))
     add(_gemm("vision", L, "o_proj", M, Hv, Hv, n))
     add(_ew("vision", L, "bias_o", "elementwise", "bias", M, Hv, n, weight_elems=Hv))
     add(_ew("vision", L, "residual_attn", "elementwise", "add", M, Hv, n, n_in=2))
@@ -479,6 +488,9 @@ STAGE1_LOWERING_W1B = Lowering(kv_proj_per_step=False, batch_cameras=True)
 # The stage-1 baseline (decision 2026-11-25): upstream's deployment plan, which has separate q / k / v and
 # gate / up products (deploy_plan.Plan); its kernel times are the h1_plan group (plan_runs.py, to_constants.py).
 PLAN_LOWERING = Lowering(kv_proj_per_step=False, split_fused=True)
+# W1-b under the same plan: cameras batched through the vision encoder, attention over cameras x heads
+PLAN_LOWERING_W1B = Lowering(kv_proj_per_step=False, split_fused=True, batch_cameras=True,
+                             attn_cameras_as_heads=True)
 KERNEL_SETS = {
     "vlabench-3cam": KernelSet("h1_plan", "h1", PLAN_LOWERING),  # H1, upstream deployment plan (stage-1 spec §4)
 }
@@ -499,10 +511,10 @@ def kernel_set(workload_id: str, lowering: Lowering | None = None) -> KernelSet:
 
 
 @functools.lru_cache(maxsize=None)
-def plan_keys(workload_id: str = "vlabench-3cam") -> dict[tuple[str, str], str]:
+def plan_keys(workload_id: str = "vlabench-3cam", lowering: Lowering | None = None) -> dict[tuple[str, str], str]:
     """(stage, op) -> run key of the upstream deployment plan (deploy_plan.Plan), e.g. gemm_1024x768x768_zto_pZs."""
     from .deploy_plan import Plan          # deploy_plan imports this module
-    return {(d.stage, d.op): d.key for d in Plan(workload_id).deploys}
+    return {(d.stage, d.op): d.key for d in Plan(workload_id, lowering=lowering).deploys}
 
 
 def hand_kernel_key(row: OpRow, group: str = "h1_kernels") -> str | None:
