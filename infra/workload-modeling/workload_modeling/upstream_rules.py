@@ -73,6 +73,22 @@ def attn_opt(hq: int, hkv: int, q: int, kv: int) -> AttnSetting:
             sx //= 2
     if (sx, sy) != _scales(qp * r, kvp):
         fix.append(f"scale halved to {sx}x{sy} so all {hkv} KV heads are processed")
+    # row tile: every run with Br / sy = 96 failed the output check (prefix 15x241x241, expert 15x50x291 and
+    # 15x50x241 under the rules above; root cause not known), every pass had a multiple of 64 (64..256). Keep the
+    # scale and take the largest multiple of 64 <= opt()'s tile that divides the rows; if none, halve sy.
+    if ty % 64:
+        ty0, sy0 = ty, sy
+        while True:
+            rows = (qp * r) // sy
+            fits = [t for t in range(64, rows + 1, 64) if rows % t == 0]
+            if fits:
+                below = [t for t in fits if t <= ty]
+                ty = max(below) if below else min(fits)
+                break
+            sy //= 2
+            ty = min(ty * 2, (qp * r) // sy)
+        fix.append(f"row tile {ty0}->{ty}" + (f", sy {sy0}->{sy}" if sy != sy0 else "")
+                   + " (Br / sy = 96 fails the output check; multiples of 64 pass)")
     # block = scale * tile; the halved axis keeps opt()'s tile, so the block must still divide the padded length
     Br, Bc = sy * ty, sx * tx
     assert (qp * r) % Br == 0 and kvp % Bc == 0, (qp, kvp, Br, Bc)

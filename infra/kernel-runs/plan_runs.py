@@ -32,6 +32,7 @@ sys.path.insert(0, str(HERE.parent / "workload-modeling"))
 from workload_modeling.deploy_plan import Plan, D  # noqa: E402
 
 CSV = HERE / "results/plan_runs_h1.csv"
+PICK = HERE / "results/plan_pick_h1.csv"
 RUNS = DATA / "stage1-h1/plan"
 FIELDS = ["key", "kernel", "ops", "count", "cand", "strategy", "m_size", "n_size", "k_size", "m_tile", "n_tile",
           "k_tile", "scale_x", "scale_y", "groups", "gap_x", "gap_z", "fix", "est_ns", "time_ns", "bad", "max_ulp",
@@ -116,7 +117,35 @@ def gemm_cands(run, logical):
                 out.append((f, "skipped_m_iter"))      # SummaGEMM.h:165, as gemm_upstream.py
             else:
                 out.append((f, None))
+    fb = fallback(logical, [c for c, skip in out if skip is None])
+    if fb:
+        out.append((fb, None))
     return out
+
+
+EARLIER = ("gemm_upstream_h1.csv", "gemm_smallm_h1.csv")   # same simulator, default placement
+
+
+def fallback(logical, cands):
+    """Recorded fix: when every runnable opt() setting already failed the output check in the earlier sweeps
+    (default placement), add the fastest setting that passed there, so the key has a correct run to select."""
+    shape = "x".join(map(str, logical))
+    rows = [r for f in EARLIER if (HERE / "results" / f).exists()
+            for r in csv.DictReader(open(HERE / "results" / f)) if r["shape"] == shape]
+    seen = {r["cand"]: r["status"] for r in rows}
+    if not cands or any(seen.get(c["cand"]) != "wrong" for c in cands):
+        return None
+    ok = sorted((r for r in rows if r["status"] == "ok"), key=lambda r: float(r["time_ns"]))
+    if not ok:
+        return None
+    r = ok[0]
+    c = {k: int(r[k]) for k in ("m_size", "n_size", "k_size", "m_tile", "n_tile", "k_tile",
+                                "scale_x", "scale_y", "groups")}
+    c.update(strategy=r["strategy"], cand=r["cand"], est_ns=int(float(r["est_ns"])),
+             m_iter=c["m_size"] // (c["scale_y"] * c["m_tile"]), gap_x=None, gap_z=None, resha={},
+             fix=f"upstream opt() setting(s) {', '.join(x['cand'] for x in cands)} fail the output check "
+                 f"(also in {', '.join(EARLIER)}); fastest passing earlier setting added")
+    return c
 
 
 def write_gemm_cfg(path, run, c, logical):
@@ -146,7 +175,9 @@ def other_cands(run):
     """Attention: the attn_auto opt() setting the plan carries (upstream_rules.attn_opt, fixes recorded); row kernels
     and RoPE: the kernel at its template defaults with the plan's shape and operator (stage1-spec §4.3 item 3)."""
     if run["kernel"] == "attn":
-        return [(dict(cand="attn_auto", fix=run["fix"]), None)]
+        c = run["cfg"]
+        name = f"attn_s{c['sx']}x{c['sy']}_b{c['Br']}x{c['Bc']}"
+        return [(dict(cand=name, fix=run["fix"]), None)]
     return [(dict(cand="default", fix=""), None)]
 
 
@@ -185,10 +216,28 @@ def main():
             if (not a.kernel or v["kernel"] in a.kernel) and (not a.key or k in a.key)}
     rows = load_csv()
     if a.cmd == "pick":
-        for k in runs:
-            ok = [r for r in rows if r["key"] == k and r["status"] == "ok"]
-            b = min(ok, key=lambda r: int(r["time_ns"])) if ok else None
-            print(f"{k:44} " + (f"{int(b['time_ns']):>9} ns  {b['cand']}  {b['fix']}" if b else "no checked run"))
+        # selected = fastest run that passed the output check; composed = sum of selected time x count (the
+        # operator's multiplicity in the op graph), kernels back to back, per stage
+        tot, missing = {}, []
+        with PICK.open("w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["key", "kernel", "count", "cand", "time_ns", "total_ns", "ops", "fix", "run_dir"])
+            for k, run in runs.items():
+                ok = [r for r in rows if r["key"] == k and r["status"] == "ok"]
+                b = min(ok, key=lambda r: int(r["time_ns"])) if ok else None
+                if not b:
+                    missing.append(k)
+                    print(f"{k:44} no checked run")
+                    continue
+                t = int(b["time_ns"])
+                st = k.split(".", 1)[0]
+                tot[st] = tot.get(st, 0) + t * run["count"]
+                w.writerow([k, run["kernel"], run["count"], b["cand"], t, t * run["count"], b["ops"], b["fix"],
+                            b["run_dir"]])
+                print(f"{k:44} x{run['count']:<4} {t:>9} ns  {b['cand']}")
+        for st, v in tot.items():
+            print(f"{st:10} {v / 1e6:9.3f} ms")
+        print(f"{'total':10} {sum(tot.values()) / 1e6:9.3f} ms" + (f"  (missing: {missing})" if missing else ""))
         return
     done = {(r["key"], r["cand"]) for r in rows}
     for k, run in runs.items():

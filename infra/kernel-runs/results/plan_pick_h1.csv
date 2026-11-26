@@ -1,0 +1,53 @@
+key,kernel,count,cand,time_ns,total_ns,ops,fix,run_dir
+vision.gemm_1024x768x768,gemm,3,Nosplit_x8y8g1_t128x96x128,20479,61437,patch_embed,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.gemm_1024x768x768/Nosplit_x8y8g1_t128x96x128
+vision.eltwise_bias_1024x768_pOs,elt,3,default,8759,26277,bias_patch,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.eltwise_bias_1024x768_pOs/default
+vision.eltwise_add_1024x768_pIsOs,elt,3,default,13492,40476,pos_embed_add,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.eltwise_add_1024x768_pIsOs/default
+vision.layernorm_1024x768,lnorm,75,default,11274,845550,"ln1,ln2,ln_post",,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.layernorm_1024x768/default
+vision.gemm_1024x768x768_zto,gemm,36,Nosplit_x8y8g1_t128x64x128,33503,1206108,q_proj,n_tile 96->64; size 1024x768x768->1024x1024x768,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.gemm_1024x768x768_zto/Nosplit_x8y8g1_t128x64x128
+vision.addi_1024x768,acti,36,default,12916,464976,bias_q,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.addi_1024x768/default
+vision.gemm_1024x768x768_zto_pZs,gemm,72,Nosplit_x8y8g1_t128x64x128,31228,2248416,"k_proj,v_proj",n_tile 96->64; size 1024x768x768->1024x1024x768,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.gemm_1024x768x768_zto_pZs/Nosplit_x8y8g1_t128x64x128
+vision.addi_1024x768_pIsOs,acti,72,default,13020,937440,"bias_k,bias_v",,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.addi_1024x768_pIsOs/default
+vision.flatattention_12x1024x1024x64,attn,36,attn_s8x8_b1024x1024,140330,5051880,qk,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.flatattention_12x1024x1024x64/attn_auto
+vision.gemm_1024x768x768_xfrom,gemm,36,Nosplit_x8y8g1_t128x96x64,24983,899388,o_proj,k_tile 128->64,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.gemm_1024x768x768_xfrom/Nosplit_x8y8g1_t128x96x64
+vision.eltwise_bias_1024x768,elt,72,default,9907,713304,"bias_o,bias_down",,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.eltwise_bias_1024x768/default
+vision.addi_1024x768_pBwIsOs,acti,72,default,12304,885888,"residual_attn,residual_mlp",,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.addi_1024x768_pBwIsOs/default
+vision.gemm_1024x3072x768,gemm,36,Nosplit_x8y8g1_t128x96x128,79636,2866896,mlp_up,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.gemm_1024x3072x768/Nosplit_x8y8g1_t128x96x128
+vision.eltwise_bias_1024x3072,elt,36,default,32965,1186740,bias_up,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.eltwise_bias_1024x3072/default
+vision.gelu_1024x3072,acti,36,default,37514,1350504,gelu,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.gelu_1024x3072/default
+vision.gemm_1024x768x3072,gemm,36,Nosplit_x8y8g1_t128x96x128,60903,2192508,mlp_down,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/vision.gemm_1024x768x3072/Nosplit_x8y8g1_t128x96x128
+connector.eltwise_pixel_shuffle_3072x768,elt,1,default,19948,19948,pixel_shuffle,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/connector.eltwise_pixel_shuffle_3072x768/default
+connector.gemm_192x960x12288,gemm,1,splitK_x8y2g4_t128x128x128,73486,73486,connector_proj,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/connector.gemm_192x960x12288/splitK_x8y2g4_t128x128x128
+connector.eltwise_scale_192x960_pOs,elt,1,default,2285,2285,embed_scale,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/connector.eltwise_scale_192x960_pOs/default
+prefix.rmsnorm_241x960,norm,33,default,4638,153054,"rmsnorm_attn,rmsnorm_mlp,rmsnorm_final",,/home/haoze/.cache/softhier-vla/stage1-h1/plan/prefix.rmsnorm_241x960/default
+prefix.gemm_241x960x960_zto,gemm,16,splitK_x8y2g4_t128x64x120,13843,221488,q_proj,n_tile 128->64,/home/haoze/.cache/softhier-vla/stage1-h1/plan/prefix.gemm_241x960x960_zto/splitK_x8y2g4_t128x64x120
+prefix.gemm_241x320x960_zto_pZs,gemm,32,splitK_x4y2g8_t128x64x120,10345,331040,"k_proj,v_proj",n_tile 96->64; size 256x384x960->256x512x960,/home/haoze/.cache/softhier-vla/stage1-h1/plan/prefix.gemm_241x320x960_zto_pZs/splitK_x4y2g8_t128x64x120
+prefix.rope_241x960,rope,16,default,5420,86720,rope_q,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/prefix.rope_241x960/default
+prefix.rope_241x320_pCwIsOsSw,rope,16,default,3385,54160,rope_k,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/prefix.rope_241x320_pCwIsOsSw/default
+prefix.flatattention_15x241x241x64,attn,16,attn_s2x4_b256x256,26003,416048,qk,"padded q 241->256, kv 241->256 so opt() runs as written; scale halved to 2x4 so all 5 KV heads are processed; row tile 96->64 (Br / sy = 96 fails the output check; multiples of 64 pass)",/home/haoze/.cache/softhier-vla/stage1-h1/plan/prefix.flatattention_15x241x241x64/attn_s2x4_b256x256
+prefix.gemm_241x960x960_xfrom,gemm,16,splitK_x8y2g4_t128x128x64,12717,203472,o_proj,k_tile 120->64; size 256x1024x960->256x1024x1024; group gap X = 256x256x2 B (head-major),/home/haoze/.cache/softhier-vla/stage1-h1/plan/prefix.gemm_241x960x960_xfrom/splitK_x8y2g4_t128x128x64
+prefix.addi_241x960_pBwIsOs,acti,32,default,4593,146976,"residual_attn,residual_mlp",,/home/haoze/.cache/softhier-vla/stage1-h1/plan/prefix.addi_241x960_pBwIsOs/default
+prefix.gemm_241x2560x960,gemm,32,splitN_x8y2g4_t128x80x128,25296,809472,"mlp_gate,mlp_up",,/home/haoze/.cache/softhier-vla/stage1-h1/plan/prefix.gemm_241x2560x960/splitN_x8y2g4_t128x80x128
+prefix.silu_gate_241x2560,acti,16,default,10472,167552,silu_mul,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/prefix.silu_gate_241x2560/default
+prefix.gemm_241x960x2560,gemm,16,splitK_x8y2g4_t128x128x128,20728,331648,mlp_down,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/prefix.gemm_241x960x2560/splitK_x8y2g4_t128x128x128
+expert.gemm_241x320x320_xfrom_zto_pXsZs,gemm,16,splitK_x4y2g8_t128x64x32,10526,168416,"cross_k_proj,cross_v_proj",n_tile 96->64; k_tile 40->32; size 256x384x320->256x512x512; group gap X = 64x256x2 B (head-major),/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.gemm_241x320x320_xfrom_zto_pXsZs/splitK_x4y2g8_t128x64x32
+expert.gemm_50x720x32_pXs,gemm,10,splitK_x8y1g8_t50x96x4,3754,37540,action_in_proj,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.gemm_50x720x32_pXs/splitK_x8y1g8_t50x96x4
+expert.eltwise_bias_50x720,elt,20,default,1436,28720,"bias_action_in,bias_time_in",,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.eltwise_bias_50x720/default
+expert.gemm_50x720x1440,gemm,10,splitK_x8y1g8_t50x96x96,8950,89500,time_mlp_in,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.gemm_50x720x1440/splitK_x8y1g8_t50x96x96
+expert.silu_50x720,acti,10,default,1168,11680,time_silu,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.silu_50x720/default
+expert.gemm_50x720x720,gemm,10,splitK_x8y1g8_t50x96x90,6103,61030,time_mlp_out,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.gemm_50x720x720/splitK_x8y1g8_t50x96x90
+expert.eltwise_bias_50x720_pOs,elt,10,default,1366,13660,bias_time_out,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.eltwise_bias_50x720_pOs/default
+expert.rmsnorm_50x720,norm,330,default,1594,526020,"rmsnorm_attn,rmsnorm_mlp,rmsnorm_final",,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.rmsnorm_50x720/default
+expert.gemm_50x960x720_zto,gemm,160,splitK_x8y1g8_t128x64x90,9491,1518560,"self_q_proj,q_proj",n_tile 128->64,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.gemm_50x960x720_zto/splitK_x8y1g8_t128x64x90
+expert.gemm_50x320x720_zto_pZs,gemm,160,splitK_x4y1g16_t50x64x45,6068,970880,"self_k_proj,self_v_proj",n_tile 96->64; size 50x384x720->50x512x720,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.gemm_50x320x720_zto_pZs/splitK_x4y1g16_t50x64x45
+expert.rope_50x960,rope,160,default,3103,496480,rope_q,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.rope_50x960/default
+expert.rope_50x320_pCwIsOsSw,rope,80,default,1183,94640,rope_k,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.rope_50x320_pCwIsOsSw/default
+expert.flatattention_15x50x291x64,attn,80,attn_s4x2_b128x384,24623,1969840,self_qk,"padded q 50->128, kv 291->384 so opt() runs as written; scale halved to 4x2 so all 5 KV heads are processed; row tile 96->64 (Br / sy = 96 fails the output check; multiples of 64 pass)",/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.flatattention_15x50x291x64/attn_s4x2_b128x384
+expert.flatattention_15x50x241x64,attn,80,attn_s2x2_b384x256,16242,1299360,cross_qk,"padded q 50->128, kv 241->256 so opt() runs as written; row tile 96->192, sy 4->2 (Br / sy = 96 fails the output check; multiples of 64 pass)",/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.flatattention_15x50x241x64/attn_s2x2_b384x256
+expert.gemm_50x720x960_xfrom,gemm,160,splitK_x8y1g8_t128x96x64,9188,1470080,o_proj,k_tile 120->64; size 128x768x960->128x768x1024; group gap X = 128x128x2 B (head-major),/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.gemm_50x720x960_xfrom/splitK_x8y1g8_t128x96x64
+expert.addi_50x720_pBwIsOs,acti,320,default,1354,433280,"residual_attn,residual_mlp",,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.addi_50x720_pBwIsOs/default
+expert.gemm_50x2048x720,gemm,320,splitK_x8y1g8_t50x128x90,11937,3819840,"mlp_gate,mlp_up",,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.gemm_50x2048x720/splitK_x8y1g8_t50x128x90
+expert.silu_gate_50x2048,acti,160,default,2396,383360,silu_mul,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.silu_gate_50x2048/default
+expert.gemm_50x720x2048,gemm,160,splitK_x8y1g8_t50x96x128,10712,1713920,mlp_down,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.gemm_50x720x2048/splitK_x8y1g8_t50x96x128
+expert.gemm_50x32x720,gemm,10,splitK_x1y2g32_t32x32x32,3059,30590,action_out_proj,"upstream opt() setting(s) splitK_x1y1g16_t50x32x45 fail the output check (also in gemm_upstream_h1.csv, gemm_smallm_h1.csv); fastest passing earlier setting added",/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.gemm_50x32x720/splitK_x1y2g32_t32x32x32
+expert.eltwise_bias_50x32,elt,10,default,1213,12130,bias_action_out,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.eltwise_bias_50x32/default
+expert.eltwise_axpy_50x32_pIsOsZw,elt,10,default,1109,11090,euler_update,,/home/haoze/.cache/softhier-vla/stage1-h1/plan/expert.eltwise_axpy_50x32_pIsOsZw/default
