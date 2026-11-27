@@ -436,7 +436,7 @@ function planNote(k) {
   const fix = k.selected.fix || k.plan_fix;
   const failed = k.failed || [];
   const cons = k.plan_sel === "constrained";
-  let h = `<div class="note">${cons ? "Plan-constrained sweep: same deployment plan; the fastest run of this key that passed the output check, over upstream's runs and the sweep's candidates (any head padding of the selected combination)" :
+  let h = `<div class="note">${cons ? "Plan-constrained sweep: same deployment plan; the fastest of the sweep's own runs of this key that passed the output check (at the head padding of the selected combination)" :
     `Upstream deployment plan: ${k.kind === "row" ? "kernel at default parameters with the plan's shape and HBM placement" : "upstream's candidates simulated, the fastest that passed the output check kept"}`}.`;
   if (fix && !cons) h += `<br><b>Recorded fix:</b> ${esc(fix)}`;
   if (failed.length) h += `<br><b>Failed the output check:</b> ${failed.map(f => `<code>${esc(f.cand)}</code>${f.bad ? ` (${Number(f.bad).toLocaleString()} bad)` : ` (${esc(f.status)})`}`).join(", ")}`;
@@ -546,7 +546,7 @@ function renderDetail(P, keepScroll) {
         <div class="kv" style="margin-bottom:8px">
           <div>time per call</div><div><b>${us(k.time_ns)} µs</b> <span class="muted">(measured, constants <code>${esc(k.constants_key)}</code>)</span></div>
           ${k.kind === "row" ? (k.pipelined ? `<div>schedule</div><div>pipelined rows (<code>pipeline = 1</code>)</div>` : "") : `<div>selected</div><div class="mono">${esc(k.selected.cand)} <span class="muted">(${esc(k.selected.technique)})</span>${k.selected.transposed ? ` <span class="badge">transposed, runs as ${esc(k.selected.run_shape)}; layout cost of X<sup>T</sup> / Z<sup>T</sup> not counted</span>` : ""}</div>`}
-          ${k.stage1 ? `<div>${esc(k.stage1.label || "stage 1")}</div><div class="mono">${esc(k.stage1.setting || "–")} · ${us(k.stage1.time_ns)} µs <span class="muted">(×${k.stage1.speedup.toFixed(2)} = ${k.plan ? "constrained ÷ upstream rule" : "stage-1 pick ÷ selected"})</span></div>` : (k.plan ? `<div>plan-constrained sweep</div><div class="muted">not composed yet</div>` : "")}
+          ${k.stage1 ? `<div>${esc(k.stage1.label || "stage 1")}</div><div class="mono">${esc(k.stage1.setting || "–")} · ${us(k.stage1.time_ns)} µs <span class="muted">(×${k.stage1.speedup.toFixed(2)} = ${k.plan ? "constrained ÷ upstream rule" : "stage-1 pick ÷ selected"})</span></div>` : ""}
         </div>
         ${factorBars(k)}
         <details style="margin-top:8px"><summary>Provenance (constants.yaml)</summary><p class="sec mono" style="white-space:pre-wrap">${esc(k.constants_source)}\n\n${esc(k.constants_note)}</p></details>
@@ -567,7 +567,7 @@ function renderDetail(P, keepScroll) {
     </div>
     ${k.candidates.length ? `<h3>${k.plan ? "Plan runs" : "Swept candidates"} (${k.candidates.length}), fastest first</h3>
       <div class="legend">${[...new Set(k.candidates.map(c => c.technique))].map(t => `<span><i style="background:var(${TECH_COLOR[t]})"></i>${esc(t)}</span>`).join("")}
-        <span>○ hollow = output check failed</span><span>★ selected in this plan</span>${k.plan_sel === "constrained" ? `<span>hover a row: sweep run or upstream run</span>` : ""}${k.candidates.some(c => c.transposed) ? `<span>T: transposed run (N x M x K)</span>` : ""}${!k.plan && k.candidates.some(c => c.upstream) ? `<span>(upstream opt()): soft_hier_je's own setting for this shape</span>` : ""}${k.plan ? `<span>(fixed): upstream's setting with a recorded fix · (fallback): fastest passing earlier sweep setting</span>` : ""}<span class="muted">click a row to draw its mapping</span></div>
+        <span>○ hollow = output check failed</span><span>★ selected in this plan</span>${k.candidates.some(c => c.transposed) ? `<span>T: transposed run (N x M x K)</span>` : ""}${!k.plan && k.candidates.some(c => c.upstream) ? `<span>(upstream opt()): soft_hier_je's own setting for this shape</span>` : ""}${k.plan ? `<span>(fixed): upstream's setting with a recorded fix · (fallback): fastest passing earlier sweep setting</span>` : ""}<span class="muted">click a row to draw its mapping</span></div>
       <div class="cands"></div>` : ""}
   `;
   if (k.candidates.length) candPlot(P, k, P.q(".cands"));

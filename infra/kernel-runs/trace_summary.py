@@ -51,7 +51,8 @@ def union_ns(iv, lo, hi):
 
 
 def summarize(d: Path):
-    log = (d / "run.log").read_text(errors="replace")
+    # run.log: the measurement run (--trace); runv.log: the traced run, the only one with --trace-only (same binary)
+    log = (d / ("run.log" if (d / "run.log").exists() else "runv.log")).read_text(errors="replace")
     m = re.search(r"Execution period is (\d+) ns", log)
     period = int(m.group(1))
     ev = json.load(open(d / "perfetto.json"))["traceEvents"]

@@ -6,7 +6,7 @@ Companion to [smolvla-op-graph.md](smolvla-op-graph.md) and [smolvla-op-graph-w1
 
 Labels: kernel times, sweep rows and trace events are *measured*; the valid space counts come from the drivers' candidate generators (*inference*); MFU factors, the time budget and busy fractions are *estimate*; composed call and stage times are sums of measured kernel times (*estimate*: no overlap).
 
-**Checks:** 264 of 264 pass (list in [the appendix](#appendix-checks)).
+**Checks:** 330 of 330 pass (list in [the appendix](#appendix-checks)).
 
 ## How each plan maps its kernels (code)
 
@@ -381,39 +381,39 @@ MFU = f_pad x f_occ x f_rest. f_pad = true / padded FLOP = shape padding x RedMu
 
 | kernel | used by | selected setting | technique | active | time | MFU, % | f_pad | f_occ | f_rest | roofline bound | x roofline | runs (ok): upstream + constrained | trace |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | --- |
-| `vision.flatattention_12x1024x1024x64` | vision.qk | `attn_s8x8_b1024x1024` | collective | 64 | 140.33 | 17.9 | 1.00 | 1.00 | 0.18 | compute | 5.6 | 1 (1) | none |
-| `expert.flatattention_15x50x241x64` | expert.cross_qk | `attn_s2x2_b384x256` | collective | 20 | 16.24 | 2.2 | 0.37 | 0.31 | 0.19 | compute | 45.1 | 2 (1) | none |
-| `expert.flatattention_15x50x291x64` | expert.self_qk | `attn_s4x2_b128x384` | collective | 40 | 24.62 | 1.8 | 0.30 | 0.62 | 0.10 | compute | 56.7 | 2 (1) | none |
-| `prefix.flatattention_15x241x241x64` | prefix.qk | `attn_s2x4_b256x256` | collective | 40 | 26.00 | 6.7 | 0.89 | 0.62 | 0.12 | compute | 15.0 | 2 (1) | none |
-| `vision.flatattention_36x1024x1024x64` | vision.qk | `attn_s8x8_b1024x1024` | collective | 64 | 419.70 | 17.9 | 1.00 | 1.00 | 0.18 | compute | 5.6 | 1 (1) | none |
-| `expert.gemm_50x32x720` | expert.action_out_proj | `splitK_x1y2g32_t32x32x32` | splitK, non-square groups | 64 | 3.06 | 0.6 | 0.27 | 1.00 | 0.02 | HBM | 25.8 | 2 (1) | none |
-| `expert.gemm_50x320x720_zto_pZs` | expert.self_k_proj, expert.self_v_proj | `splitK_x4y1g16_t50x64x45` | splitK, non-square groups | 64 | 6.07 | 2.9 | 0.34 | 1.00 | 0.08 | HBM | 11.0 | 2 (1) | none |
-| `expert.gemm_50x720x32_pXs` | expert.action_in_proj | `splitK_x8y1g8_t50x96x4` | splitK, non-square groups | 64 | 3.75 | 0.5 | 0.07 | 1.00 | 0.07 | HBM | 31.7 | 1 (1) | none |
-| `expert.gemm_50x720x720` | expert.time_mlp_out | `splitK_x8y1g8_t50x96x90` | splitK, non-square groups | 64 | 6.10 | 6.5 | 0.51 | 1.00 | 0.13 | HBM | 5.3 | 1 (1) | none |
-| `expert.gemm_50x720x960_xfrom` | expert.o_proj | `splitK_x8y1g8_t128x96x64` | splitK, non-square groups | 64 | 9.19 | 5.7 | 0.26 | 1.00 | 0.22 | HBM | 6.1 | 2 (2) | none |
-| `expert.gemm_50x720x1440` | expert.time_mlp_in | `splitK_x8y1g8_t50x96x96` | splitK, non-square groups | 64 | 8.95 | 8.8 | 0.51 | 1.00 | 0.17 | HBM | 4.0 | 1 (1) | none |
-| `expert.gemm_50x720x2048` | expert.mlp_down | `splitK_x8y1g8_t50x96x128` | splitK, non-square groups | 64 | 10.71 | 10.5 | 0.55 | 1.00 | 0.19 | HBM | 3.4 | 1 (1) | none |
-| `expert.gemm_50x960x720_zto` | expert.q_proj, expert.self_q_proj | `splitK_x8y1g8_t128x64x90` | splitK, non-square groups | 64 | 9.49 | 5.6 | 0.34 | 1.00 | 0.16 | HBM | 6.3 | 2 (1) | none |
-| `expert.gemm_50x2048x720` | expert.mlp_gate, expert.mlp_up | `splitK_x8y1g8_t50x128x90` | splitK, non-square groups | 64 | 11.94 | 9.4 | 0.73 | 1.00 | 0.13 | HBM | 3.8 | 2 (2) | none |
-| `connector.gemm_192x960x12288` | connector.connector_proj | `splitK_x8y2g4_t128x128x128` | splitK, non-square groups | 64 | 73.49 | 47.0 | 0.70 | 1.00 | 0.67 | compute | 2.1 | 1 (1) | none |
-| `expert.gemm_241x320x320_xfrom_zto_pXsZs` | expert.cross_k_proj, expert.cross_v_proj | `splitK_x4y2g8_t128x64x32` | splitK, non-square groups | 64 | 10.53 | 3.6 | 0.37 | 1.00 | 0.10 | HBM | 21.0 | 2 (1) | none |
-| `prefix.gemm_241x320x960_zto_pZs` | prefix.k_proj, prefix.v_proj | `splitK_x4y2g8_t128x64x120` | splitK, non-square groups | 64 | 10.35 | 10.9 | 0.55 | 1.00 | 0.20 | HBM | 8.6 | 2 (1) | none |
-| `prefix.gemm_241x960x960_zto` | prefix.q_proj | `splitK_x8y2g4_t128x64x120` | splitK, non-square groups | 64 | 13.84 | 24.5 | 0.83 | 1.00 | 0.30 | compute | 4.1 | 2 (1) | none |
-| `prefix.gemm_241x960x960_xfrom` | prefix.o_proj | `splitK_x8y2g4_t128x128x64` | splitK, non-square groups | 64 | 12.72 | 26.6 | 0.83 | 1.00 | 0.32 | compute | 3.8 | 2 (2) | none |
-| `prefix.gemm_241x960x2560` | prefix.mlp_down | `splitK_x8y2g4_t128x128x128` | splitK, non-square groups | 64 | 20.73 | 43.6 | 0.88 | 1.00 | 0.49 | compute | 2.3 | 1 (1) | none |
-| `prefix.gemm_241x2560x960` | prefix.mlp_gate, prefix.mlp_up | `splitN_x8y2g4_t128x80x128` | splitN, non-square groups | 64 | 25.30 | 35.7 | 0.55 | 1.00 | 0.65 | compute | 2.8 | 2 (1) | none |
-| `vision.gemm_1024x768x768` | vision.patch_embed | `Nosplit_x8y8g1_t128x96x128` | Nosplit | 64 | 20.48 | 45.0 | 0.75 | 1.00 | 0.60 | compute | 2.2 | 1 (1) | none |
-| `vision.gemm_1024x768x768_zto` | vision.q_proj | `Nosplit_x8y8g1_t128x64x128` | Nosplit | 64 | 33.50 | 27.5 | 0.75 | 1.00 | 0.37 | compute | 3.6 | 2 (2) | none |
-| `vision.gemm_1024x768x768_zto_pZs` | vision.k_proj, vision.v_proj | `Nosplit_x8y8g1_t128x64x128` | Nosplit | 64 | 31.23 | 29.5 | 0.75 | 1.00 | 0.39 | compute | 3.4 | 2 (2) | none |
-| `vision.gemm_1024x768x768_xfrom` | vision.o_proj | `Nosplit_x8y8g1_t128x96x64` | Nosplit | 64 | 24.98 | 36.9 | 0.75 | 1.00 | 0.49 | compute | 2.7 | 2 (2) | none |
-| `vision.gemm_1024x768x3072` | vision.mlp_down | `Nosplit_x8y8g1_t128x96x128` | Nosplit | 64 | 60.90 | 60.5 | 0.75 | 1.00 | 0.81 | compute | 1.7 | 1 (1) | none |
-| `vision.gemm_1024x3072x768` | vision.mlp_up | `Nosplit_x8y8g1_t128x96x128` | Nosplit | 64 | 79.64 | 46.3 | 0.75 | 1.00 | 0.62 | compute | 2.2 | 1 (1) | none |
-| `vision.gemm_3072x768x768` | vision.patch_embed | `Nosplit_x8y8g1_t96x96x128` | Nosplit | 64 | 69.60 | 39.7 | 0.75 | 1.00 | 0.53 | compute | 2.5 | 1 (1) | none |
-| `vision.gemm_3072x768x768_zto` | vision.q_proj | `Nosplit_x8y8g1_t96x64x128` | Nosplit | 64 | 117.73 | 23.5 | 0.75 | 1.00 | 0.31 | compute | 4.3 | 2 (2) | none |
-| `vision.gemm_3072x768x768_zto_pZs` | vision.k_proj, vision.v_proj | `Nosplit_x8y8g1_t96x64x128` | Nosplit | 64 | 104.34 | 26.5 | 0.75 | 1.00 | 0.35 | compute | 3.8 | 2 (2) | none |
-| `vision.gemm_3072x768x768_xfrom` | vision.o_proj | `Nosplit_x8y8g1_t96x96x64` | Nosplit | 64 | 88.51 | 31.2 | 0.75 | 1.00 | 0.42 | compute | 3.2 | 2 (2) | none |
-| `vision.gemm_3072x768x3072` | vision.mlp_down | `Nosplit_x8y8g1_t96x96x128` | Nosplit | 64 | 211.92 | 52.2 | 0.75 | 1.00 | 0.70 | compute | 1.9 | 1 (1) | none |
-| `vision.gemm_3072x3072x768` | vision.mlp_up | `Nosplit_x8y8g1_t96x96x128` | Nosplit | 64 | 280.77 | 39.4 | 0.75 | 1.00 | 0.53 | compute | 2.5 | 1 (1) | none |
+| `vision.flatattention_12x1024x1024x64` | vision.qk | `attn_s8x8_b1024x1024` | collective | 64 | 140.33 | 17.9 | 1.00 | 1.00 | 0.18 | compute | 5.6 | 1 (1) | selected |
+| `expert.flatattention_15x50x241x64` | expert.cross_qk | `attn_s2x2_b384x256` | collective | 20 | 16.24 | 2.2 | 0.37 | 0.31 | 0.19 | compute | 45.1 | 2 (1) | selected |
+| `expert.flatattention_15x50x291x64` | expert.self_qk | `attn_s4x2_b128x384` | collective | 40 | 24.62 | 1.8 | 0.30 | 0.62 | 0.10 | compute | 56.7 | 2 (1) | selected |
+| `prefix.flatattention_15x241x241x64` | prefix.qk | `attn_s2x4_b256x256` | collective | 40 | 26.00 | 6.7 | 0.89 | 0.62 | 0.12 | compute | 15.0 | 2 (1) | selected |
+| `vision.flatattention_36x1024x1024x64` | vision.qk | `attn_s8x8_b1024x1024` | collective | 64 | 419.70 | 17.9 | 1.00 | 1.00 | 0.18 | compute | 5.6 | 1 (1) | selected |
+| `expert.gemm_50x32x720` | expert.action_out_proj | `splitK_x1y2g32_t32x32x32` | splitK, non-square groups | 64 | 3.06 | 0.6 | 0.27 | 1.00 | 0.02 | HBM | 25.8 | 2 (1) | selected |
+| `expert.gemm_50x320x720_zto_pZs` | expert.self_k_proj, expert.self_v_proj | `splitK_x4y1g16_t50x64x45` | splitK, non-square groups | 64 | 6.07 | 2.9 | 0.34 | 1.00 | 0.08 | HBM | 11.0 | 2 (1) | selected |
+| `expert.gemm_50x720x32_pXs` | expert.action_in_proj | `splitK_x8y1g8_t50x96x4` | splitK, non-square groups | 64 | 3.75 | 0.5 | 0.07 | 1.00 | 0.07 | HBM | 31.7 | 1 (1) | selected |
+| `expert.gemm_50x720x720` | expert.time_mlp_out | `splitK_x8y1g8_t50x96x90` | splitK, non-square groups | 64 | 6.10 | 6.5 | 0.51 | 1.00 | 0.13 | HBM | 5.3 | 1 (1) | selected |
+| `expert.gemm_50x720x960_xfrom` | expert.o_proj | `splitK_x8y1g8_t128x96x64` | splitK, non-square groups | 64 | 9.19 | 5.7 | 0.26 | 1.00 | 0.22 | HBM | 6.1 | 2 (2) | selected |
+| `expert.gemm_50x720x1440` | expert.time_mlp_in | `splitK_x8y1g8_t50x96x96` | splitK, non-square groups | 64 | 8.95 | 8.8 | 0.51 | 1.00 | 0.17 | HBM | 4.0 | 1 (1) | selected |
+| `expert.gemm_50x720x2048` | expert.mlp_down | `splitK_x8y1g8_t50x96x128` | splitK, non-square groups | 64 | 10.71 | 10.5 | 0.55 | 1.00 | 0.19 | HBM | 3.4 | 1 (1) | selected |
+| `expert.gemm_50x960x720_zto` | expert.q_proj, expert.self_q_proj | `splitK_x8y1g8_t128x64x90` | splitK, non-square groups | 64 | 9.49 | 5.6 | 0.34 | 1.00 | 0.16 | HBM | 6.3 | 2 (1) | selected |
+| `expert.gemm_50x2048x720` | expert.mlp_gate, expert.mlp_up | `splitK_x8y1g8_t50x128x90` | splitK, non-square groups | 64 | 11.94 | 9.4 | 0.73 | 1.00 | 0.13 | HBM | 3.8 | 2 (2) | selected |
+| `connector.gemm_192x960x12288` | connector.connector_proj | `splitK_x8y2g4_t128x128x128` | splitK, non-square groups | 64 | 73.49 | 47.0 | 0.70 | 1.00 | 0.67 | compute | 2.1 | 1 (1) | selected |
+| `expert.gemm_241x320x320_xfrom_zto_pXsZs` | expert.cross_k_proj, expert.cross_v_proj | `splitK_x4y2g8_t128x64x32` | splitK, non-square groups | 64 | 10.53 | 3.6 | 0.37 | 1.00 | 0.10 | HBM | 21.0 | 2 (1) | selected |
+| `prefix.gemm_241x320x960_zto_pZs` | prefix.k_proj, prefix.v_proj | `splitK_x4y2g8_t128x64x120` | splitK, non-square groups | 64 | 10.35 | 10.9 | 0.55 | 1.00 | 0.20 | HBM | 8.6 | 2 (1) | selected |
+| `prefix.gemm_241x960x960_zto` | prefix.q_proj | `splitK_x8y2g4_t128x64x120` | splitK, non-square groups | 64 | 13.84 | 24.5 | 0.83 | 1.00 | 0.30 | compute | 4.1 | 2 (1) | selected |
+| `prefix.gemm_241x960x960_xfrom` | prefix.o_proj | `splitK_x8y2g4_t128x128x64` | splitK, non-square groups | 64 | 12.72 | 26.6 | 0.83 | 1.00 | 0.32 | compute | 3.8 | 2 (2) | selected |
+| `prefix.gemm_241x960x2560` | prefix.mlp_down | `splitK_x8y2g4_t128x128x128` | splitK, non-square groups | 64 | 20.73 | 43.6 | 0.88 | 1.00 | 0.49 | compute | 2.3 | 1 (1) | selected |
+| `prefix.gemm_241x2560x960` | prefix.mlp_gate, prefix.mlp_up | `splitN_x8y2g4_t128x80x128` | splitN, non-square groups | 64 | 25.30 | 35.7 | 0.55 | 1.00 | 0.65 | compute | 2.8 | 2 (1) | selected |
+| `vision.gemm_1024x768x768` | vision.patch_embed | `Nosplit_x8y8g1_t128x96x128` | Nosplit | 64 | 20.48 | 45.0 | 0.75 | 1.00 | 0.60 | compute | 2.2 | 1 (1) | selected |
+| `vision.gemm_1024x768x768_zto` | vision.q_proj | `Nosplit_x8y8g1_t128x64x128` | Nosplit | 64 | 33.50 | 27.5 | 0.75 | 1.00 | 0.37 | compute | 3.6 | 2 (2) | selected |
+| `vision.gemm_1024x768x768_zto_pZs` | vision.k_proj, vision.v_proj | `Nosplit_x8y8g1_t128x64x128` | Nosplit | 64 | 31.23 | 29.5 | 0.75 | 1.00 | 0.39 | compute | 3.4 | 2 (2) | selected |
+| `vision.gemm_1024x768x768_xfrom` | vision.o_proj | `Nosplit_x8y8g1_t128x96x64` | Nosplit | 64 | 24.98 | 36.9 | 0.75 | 1.00 | 0.49 | compute | 2.7 | 2 (2) | selected |
+| `vision.gemm_1024x768x3072` | vision.mlp_down | `Nosplit_x8y8g1_t128x96x128` | Nosplit | 64 | 60.90 | 60.5 | 0.75 | 1.00 | 0.81 | compute | 1.7 | 1 (1) | selected |
+| `vision.gemm_1024x3072x768` | vision.mlp_up | `Nosplit_x8y8g1_t128x96x128` | Nosplit | 64 | 79.64 | 46.3 | 0.75 | 1.00 | 0.62 | compute | 2.2 | 1 (1) | selected |
+| `vision.gemm_3072x768x768` | vision.patch_embed | `Nosplit_x8y8g1_t96x96x128` | Nosplit | 64 | 69.60 | 39.7 | 0.75 | 1.00 | 0.53 | compute | 2.5 | 1 (1) | selected |
+| `vision.gemm_3072x768x768_zto` | vision.q_proj | `Nosplit_x8y8g1_t96x64x128` | Nosplit | 64 | 117.73 | 23.5 | 0.75 | 1.00 | 0.31 | compute | 4.3 | 2 (2) | selected |
+| `vision.gemm_3072x768x768_zto_pZs` | vision.k_proj, vision.v_proj | `Nosplit_x8y8g1_t96x64x128` | Nosplit | 64 | 104.34 | 26.5 | 0.75 | 1.00 | 0.35 | compute | 3.8 | 2 (2) | selected |
+| `vision.gemm_3072x768x768_xfrom` | vision.o_proj | `Nosplit_x8y8g1_t96x96x64` | Nosplit | 64 | 88.51 | 31.2 | 0.75 | 1.00 | 0.42 | compute | 3.2 | 2 (2) | selected |
+| `vision.gemm_3072x768x3072` | vision.mlp_down | `Nosplit_x8y8g1_t96x96x128` | Nosplit | 64 | 211.92 | 52.2 | 0.75 | 1.00 | 0.70 | compute | 1.9 | 1 (1) | selected |
+| `vision.gemm_3072x3072x768` | vision.mlp_up | `Nosplit_x8y8g1_t96x96x128` | Nosplit | 64 | 280.77 | 39.4 | 0.75 | 1.00 | 0.53 | compute | 2.5 | 1 (1) | selected |
 
 
 ### f_pad in words
@@ -465,41 +465,8 @@ GVSoC's RedMulE model times every call in output blocks of 32 rows x 64 columns 
 The per-call rule ceil(m/32) x ceil(n/64) x k x 2 cycles + about 160 cycles matched the RedMulE busy time per call of the traced GEMM runs (estimate; fit in cost-model-h1.md section 3). Array padding is modelled for GEMM only: FlatAttention's RedMulE call shapes have not been read yet, so attention keeps block fill = 1. The interpretation that each CE interleaves ce_pipe + 1 outputs to hide the FMA latency is an inference; the timing rule itself is the simulator's code.
 
 
-Trace column: *selected* = a trace of the selected setting exists; *other* = only traces of non-selected candidates (the page says which); *none* = no trace. Reasons:
+Trace column: *selected* = a trace of the selected setting exists; *other* = only traces of non-selected candidates (the page says which); *none* = no trace. Every matrix kernel has a trace of its selected setting.
 
-* `vision.flatattention_12x1024x1024x64`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.flatattention_15x50x241x64`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.flatattention_15x50x291x64`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `prefix.flatattention_15x241x241x64`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.flatattention_36x1024x1024x64`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.gemm_50x32x720`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.gemm_50x320x720_zto_pZs`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.gemm_50x720x32_pXs`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.gemm_50x720x720`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.gemm_50x720x960_xfrom`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.gemm_50x720x1440`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.gemm_50x720x2048`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.gemm_50x960x720_zto`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.gemm_50x2048x720`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `connector.gemm_192x960x12288`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `expert.gemm_241x320x320_xfrom_zto_pXsZs`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `prefix.gemm_241x320x960_zto_pZs`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `prefix.gemm_241x960x960_zto`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `prefix.gemm_241x960x960_xfrom`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `prefix.gemm_241x960x2560`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `prefix.gemm_241x2560x960`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_1024x768x768`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_1024x768x768_zto`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_1024x768x768_zto_pZs`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_1024x768x768_xfrom`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_1024x768x3072`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_1024x3072x768`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_3072x768x768`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_3072x768x768_zto`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_3072x768x768_zto_pZs`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_3072x768x768_xfrom`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_3072x768x3072`: this plan's selected run is not traced yet (trace_picks.py --plan).
-* `vision.gemm_3072x3072x768`: this plan's selected run is not traced yet (trace_picks.py --plan).
 
 Runs that failed the output check but were faster than the selected setting (excluded by the pick rule; worth a look before trusting the pick):
 
@@ -523,41 +490,41 @@ No mapping knob: the kernel spreads the rows over the clusters itself. Effective
 
 | kernel | used by | time, µs | effective GB/s | active clusters (trace) | iDMA busy | Spatz busy |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `connector.eltwise_pixel_shuffle_3072x768` | connector.pixel_shuffle | 19.95 | 473 | - | - | - |
-| `connector.eltwise_scale_192x960_pOs` | connector.embed_scale | 2.29 | 323 | - | - | - |
-| `expert.addi_50x720_pBwIsOs` | expert.residual_attn, expert.residual_mlp | 1.35 | 160 | - | - | - |
-| `expert.eltwise_axpy_50x32_pIsOsZw` | expert.euler_update | 1.11 | 9 | - | - | - |
-| `expert.eltwise_bias_50x32` | expert.bias_action_out | 1.21 | 5 | - | - | - |
-| `expert.eltwise_bias_50x720` | expert.bias_action_in, expert.bias_time_in | 1.44 | 101 | - | - | - |
-| `expert.eltwise_bias_50x720_pOs` | expert.bias_time_out | 1.37 | 106 | - | - | - |
-| `expert.rmsnorm_50x720` | expert.rmsnorm_attn, expert.rmsnorm_final, expert.rmsnorm_mlp | 1.59 | 91 | - | - | - |
-| `expert.rope_50x320_pCwIsOsSw` | expert.rope_k | 1.18 | 54 | - | - | - |
-| `expert.rope_50x960` | expert.rope_q | 3.10 | 62 | - | - | - |
-| `expert.silu_50x720` | expert.time_silu | 1.17 | 123 | - | - | - |
-| `expert.silu_gate_50x2048` | expert.silu_mul | 2.40 | 256 | - | - | - |
-| `prefix.addi_241x960_pBwIsOs` | prefix.residual_attn, prefix.residual_mlp | 4.59 | 302 | - | - | - |
-| `prefix.rmsnorm_241x960` | prefix.rmsnorm_attn, prefix.rmsnorm_final, prefix.rmsnorm_mlp | 4.64 | 200 | - | - | - |
-| `prefix.rope_241x320_pCwIsOsSw` | prefix.rope_k | 3.38 | 91 | - | - | - |
-| `prefix.rope_241x960` | prefix.rope_q | 5.42 | 171 | - | - | - |
-| `prefix.silu_gate_241x2560` | prefix.silu_mul | 10.47 | 353 | - | - | - |
-| `vision.addi_1024x768` | vision.bias_q | 12.92 | 244 | - | - | - |
-| `vision.addi_1024x768_pBwIsOs` | vision.residual_attn, vision.residual_mlp | 12.30 | 384 | - | - | - |
-| `vision.addi_1024x768_pIsOs` | vision.bias_k, vision.bias_v | 13.02 | 242 | - | - | - |
-| `vision.addi_3072x768` | vision.bias_q | 41.18 | 229 | - | - | - |
-| `vision.addi_3072x768_pBwIsOs` | vision.residual_attn, vision.residual_mlp | 42.61 | 332 | - | - | - |
-| `vision.addi_3072x768_pIsOs` | vision.bias_k, vision.bias_v | 45.43 | 208 | - | - | - |
-| `vision.eltwise_add_1024x768_pIsOs` | vision.pos_embed_add | 13.49 | 350 | - | - | - |
-| `vision.eltwise_add_3072x768_pIsOs` | vision.pos_embed_add | 44.78 | 246 | - | - | - |
-| `vision.eltwise_bias_1024x3072` | vision.bias_up | 32.97 | 382 | - | - | - |
-| `vision.eltwise_bias_1024x768` | vision.bias_down, vision.bias_o | 9.91 | 318 | - | - | - |
-| `vision.eltwise_bias_1024x768_pOs` | vision.bias_patch | 8.76 | 359 | - | - | - |
-| `vision.eltwise_bias_3072x3072` | vision.bias_up | 96.74 | 390 | - | - | - |
-| `vision.eltwise_bias_3072x768` | vision.bias_down, vision.bias_o | 30.32 | 311 | - | - | - |
-| `vision.eltwise_bias_3072x768_pOs` | vision.bias_patch | 24.92 | 379 | - | - | - |
-| `vision.gelu_1024x3072` | vision.gelu | 37.51 | 335 | - | - | - |
-| `vision.gelu_3072x3072` | vision.gelu | 106.57 | 354 | - | - | - |
-| `vision.layernorm_1024x768` | vision.ln1, vision.ln2, vision.ln_post | 11.27 | 279 | - | - | - |
-| `vision.layernorm_3072x768` | vision.ln1, vision.ln2, vision.ln_post | 27.76 | 340 | - | - | - |
+| `connector.eltwise_pixel_shuffle_3072x768` | connector.pixel_shuffle | 19.95 | 473 | 64 | 0.86 | 0.00 |
+| `connector.eltwise_scale_192x960_pOs` | connector.embed_scale | 2.29 | 323 | 64 | 0.29 | 0.06 |
+| `expert.addi_50x720_pBwIsOs` | expert.residual_attn, expert.residual_mlp | 1.35 | 160 | 50 | 0.32 | 0.04 |
+| `expert.eltwise_axpy_50x32_pIsOsZw` | expert.euler_update | 1.11 | 9 | 50 | 0.17 | 0.00 |
+| `expert.eltwise_bias_50x32` | expert.bias_action_out | 1.21 | 5 | 64 | 0.20 | 0.00 |
+| `expert.eltwise_bias_50x720` | expert.bias_action_in, expert.bias_time_in | 1.44 | 101 | 64 | 0.30 | 0.03 |
+| `expert.eltwise_bias_50x720_pOs` | expert.bias_time_out | 1.37 | 106 | 64 | 0.29 | 0.03 |
+| `expert.rmsnorm_50x720` | expert.rmsnorm_attn, expert.rmsnorm_final, expert.rmsnorm_mlp | 1.59 | 91 | 50 | 0.18 | 0.17 |
+| `expert.rope_50x320_pCwIsOsSw` | expert.rope_k | 1.18 | 54 | 50 | 0.23 | 0.02 |
+| `expert.rope_50x960` | expert.rope_q | 3.10 | 62 | 64 | 0.55 | 0.05 |
+| `expert.silu_50x720` | expert.time_silu | 1.17 | 123 | 50 | 0.26 | 0.06 |
+| `expert.silu_gate_50x2048` | expert.silu_mul | 2.40 | 256 | 50 | 0.50 | 0.15 |
+| `prefix.addi_241x960_pBwIsOs` | prefix.residual_attn, prefix.residual_mlp | 4.59 | 302 | 64 | 0.53 | 0.06 |
+| `prefix.rmsnorm_241x960` | prefix.rmsnorm_attn, prefix.rmsnorm_final, prefix.rmsnorm_mlp | 4.64 | 200 | 64 | 0.14 | 0.30 |
+| `prefix.rope_241x320_pCwIsOsSw` | prefix.rope_k | 3.38 | 91 | 64 | 0.41 | 0.03 |
+| `prefix.rope_241x960` | prefix.rope_q | 5.42 | 171 | 64 | 0.56 | 0.06 |
+| `prefix.silu_gate_241x2560` | prefix.silu_mul | 10.47 | 353 | 64 | 0.60 | 0.16 |
+| `vision.addi_1024x768` | vision.bias_q | 12.92 | 244 | 64 | 0.47 | 0.07 |
+| `vision.addi_1024x768_pBwIsOs` | vision.residual_attn, vision.residual_mlp | 12.30 | 384 | 64 | 0.41 | 0.08 |
+| `vision.addi_1024x768_pIsOs` | vision.bias_k, vision.bias_v | 13.02 | 242 | 64 | 0.44 | 0.07 |
+| `vision.addi_3072x768` | vision.bias_q | 41.18 | 229 | 64 | 0.50 | 0.07 |
+| `vision.addi_3072x768_pBwIsOs` | vision.residual_attn, vision.residual_mlp | 42.61 | 332 | 64 | 0.49 | 0.07 |
+| `vision.addi_3072x768_pIsOs` | vision.bias_k, vision.bias_v | 45.43 | 208 | 64 | 0.58 | 0.06 |
+| `vision.eltwise_add_1024x768_pIsOs` | vision.pos_embed_add | 13.49 | 350 | 64 | 0.49 | 0.07 |
+| `vision.eltwise_add_3072x768_pIsOs` | vision.pos_embed_add | 44.78 | 246 | 64 | 0.60 | 0.06 |
+| `vision.eltwise_bias_1024x3072` | vision.bias_up | 32.97 | 382 | 64 | 0.64 | 0.12 |
+| `vision.eltwise_bias_1024x768` | vision.bias_down, vision.bias_o | 9.91 | 318 | 64 | 0.35 | 0.10 |
+| `vision.eltwise_bias_1024x768_pOs` | vision.bias_patch | 8.76 | 359 | 64 | 0.25 | 0.11 |
+| `vision.eltwise_bias_3072x3072` | vision.bias_up | 96.74 | 390 | 64 | 0.65 | 0.12 |
+| `vision.eltwise_bias_3072x768` | vision.bias_down, vision.bias_o | 30.32 | 311 | 64 | 0.41 | 0.09 |
+| `vision.eltwise_bias_3072x768_pOs` | vision.bias_patch | 24.92 | 379 | 64 | 0.28 | 0.11 |
+| `vision.gelu_1024x3072` | vision.gelu | 37.51 | 335 | 64 | 0.58 | 0.21 |
+| `vision.gelu_3072x3072` | vision.gelu | 106.57 | 354 | 64 | 0.57 | 0.22 |
+| `vision.layernorm_1024x768` | vision.ln1, vision.ln2, vision.ln_post | 11.27 | 279 | 64 | 0.28 | 0.26 |
+| `vision.layernorm_3072x768` | vision.ln1, vision.ln2, vision.ln_post | 27.76 | 340 | 64 | 0.21 | 0.32 |
 
 ## Kernel parameter interfaces
 
@@ -794,73 +761,139 @@ Upstream (soft_hier_je 4610405, frozen in `infra/kernel-runs/results/kernel_inte
 | own runs | `W1-b vision.gemm_3072x768x768_zto_pZs` | pass | pick Nosplit_x8y8g1_t192x64x256 @3072x768x768: passing run of plan_sweep_h1.csv, 66,087 ns |
 | own runs | `W1-b vision.layernorm_3072x768` | pass | pick default @3072x768: passing run of plan_sweep_h1.csv, 27,761 ns |
 | pick | `vision.gemm_1024x768x768` | pass | fastest checked of 1 plan run(s) = Nosplit_x8y8g1_t128x96x128 (20,479 ns); constants h1_plan 20,479 ns |
+| placement | `vision.gemm_1024x768x768 / Nosplit_x8y8g1_t128x96x128 @1024x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_1024x768x768 / Nosplit_x8y8g1_t128x96x128 @1024x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.eltwise_bias_1024x768_pOs` | pass | fastest checked of 1 plan run(s) = default (8,759 ns); constants h1_plan 8,759 ns |
 | pick | `vision.eltwise_add_1024x768_pIsOs` | pass | fastest checked of 1 plan run(s) = default (13,492 ns); constants h1_plan 13,492 ns |
 | pick | `vision.layernorm_1024x768` | pass | fastest checked of 1 plan run(s) = default (11,274 ns); constants h1_plan 11,274 ns |
 | pick | `vision.gemm_1024x768x768_zto` | pass | fastest checked of 2 plan run(s) = Nosplit_x8y8g1_t128x64x128 (33,503 ns); constants h1_plan 33,503 ns |
+| placement | `vision.gemm_1024x768x768_zto / Nosplit_x8y8g1_t128x64x128 @1024x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_1024x768x768_zto / Nosplit_x8y8g1_t128x64x256 @1024x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.addi_1024x768` | pass | fastest checked of 1 plan run(s) = default (12,916 ns); constants h1_plan 12,916 ns |
 | pick | `vision.gemm_1024x768x768_zto_pZs` | pass | fastest checked of 2 plan run(s) = Nosplit_x8y8g1_t128x64x128 (31,228 ns); constants h1_plan 31,228 ns |
+| placement | `vision.gemm_1024x768x768_zto_pZs / Nosplit_x8y8g1_t128x64x128 @1024x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_1024x768x768_zto_pZs / Nosplit_x8y8g1_t128x64x256 @1024x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.addi_1024x768_pIsOs` | pass | fastest checked of 1 plan run(s) = default (13,020 ns); constants h1_plan 13,020 ns |
 | pick | `vision.flatattention_12x1024x1024x64` | pass | fastest checked of 1 plan run(s) = attn_s8x8_b1024x1024 (140,330 ns); constants h1_plan 140,330 ns |
+| placement | `vision.flatattention_12x1024x1024x64 / attn_s8x8_b1024x1024 @1024x1024` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.flatattention_12x1024x1024x64 / attn_s8x4_b1024x1024_async @1024x1024` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.gemm_1024x768x768_xfrom` | pass | fastest checked of 2 plan run(s) = Nosplit_x8y8g1_t128x96x64 (24,983 ns); constants h1_plan 24,983 ns |
+| placement | `vision.gemm_1024x768x768_xfrom / Nosplit_x8y8g1_t128x96x64 @1024x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_1024x768x768_xfrom / Nosplit_x8y8g1_t128x96x64 @1024x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.eltwise_bias_1024x768` | pass | fastest checked of 1 plan run(s) = default (9,907 ns); constants h1_plan 9,907 ns |
 | pick | `vision.addi_1024x768_pBwIsOs` | pass | fastest checked of 1 plan run(s) = default (12,304 ns); constants h1_plan 12,304 ns |
 | pick | `vision.gemm_1024x3072x768` | pass | fastest checked of 1 plan run(s) = Nosplit_x8y8g1_t128x96x128 (79,636 ns); constants h1_plan 79,636 ns |
+| placement | `vision.gemm_1024x3072x768 / Nosplit_x8y8g1_t128x96x128 @1024x3072x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_1024x3072x768 / Nosplit_x8y8g1_t128x192x192 @1024x3072x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.eltwise_bias_1024x3072` | pass | fastest checked of 1 plan run(s) = default (32,965 ns); constants h1_plan 32,965 ns |
 | pick | `vision.gelu_1024x3072` | pass | fastest checked of 1 plan run(s) = default (37,514 ns); constants h1_plan 37,514 ns |
 | pick | `vision.gemm_1024x768x3072` | pass | fastest checked of 1 plan run(s) = Nosplit_x8y8g1_t128x96x128 (60,903 ns); constants h1_plan 60,903 ns |
+| placement | `vision.gemm_1024x768x3072 / Nosplit_x8y8g1_t128x96x128 @1024x768x3072` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_1024x768x3072 / Nosplit_x8y8g1_t128x96x256 @1024x768x3072` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `connector.eltwise_pixel_shuffle_3072x768` | pass | fastest checked of 1 plan run(s) = default (19,948 ns); constants h1_plan 19,948 ns |
 | pick | `connector.gemm_192x960x12288` | pass | fastest checked of 1 plan run(s) = splitK_x8y2g4_t128x128x128 (73,486 ns); constants h1_plan 73,486 ns |
+| placement | `connector.gemm_192x960x12288 / splitK_x8y2g4_t128x128x128 @192x960x12288` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `connector.gemm_192x960x12288 / splitK_x8y2g4_t128x128x128 @192x960x12288` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `connector.eltwise_scale_192x960_pOs` | pass | fastest checked of 1 plan run(s) = default (2,285 ns); constants h1_plan 2,285 ns |
 | pick | `prefix.rmsnorm_241x960` | pass | fastest checked of 1 plan run(s) = default (4,638 ns); constants h1_plan 4,638 ns |
 | pick | `prefix.gemm_241x960x960_zto` | pass | fastest checked of 1 plan run(s) = splitK_x8y2g4_t128x64x120 (13,843 ns); constants h1_plan 13,843 ns |
+| placement | `prefix.gemm_241x960x960_zto / splitK_x8y2g4_t128x64x120 @256x960x960` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `prefix.gemm_241x960x960_zto / splitK_x8y2g4_t128x64x120 @256x960x960` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `prefix.gemm_241x320x960_zto_pZs` | pass | fastest checked of 1 plan run(s) = splitK_x4y2g8_t128x64x120 (10,345 ns); constants h1_plan 10,345 ns |
+| placement | `prefix.gemm_241x320x960_zto_pZs / splitK_x4y2g8_t128x64x120 @256x320x960` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `prefix.gemm_241x320x960_zto_pZs / splitK_x4y2g8_t128x64x120 @256x320x960` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `prefix.rope_241x960` | pass | fastest checked of 1 plan run(s) = default (5,420 ns); constants h1_plan 5,420 ns |
 | pick | `prefix.rope_241x320_pCwIsOsSw` | pass | fastest checked of 1 plan run(s) = default (3,385 ns); constants h1_plan 3,385 ns |
 | pick | `prefix.flatattention_15x241x241x64` | pass | fastest checked of 1 plan run(s) = attn_s2x4_b256x256 (26,003 ns); constants h1_plan 26,003 ns |
+| placement | `prefix.flatattention_15x241x241x64 / attn_s2x4_b256x256 @256x256` | pass | 40 clusters from the kernel's group placement, 40 with redmule activity in the trace |
+| placement | `prefix.flatattention_15x241x241x64 / attn_s2x4_b768x256 @256x256` | pass | 40 clusters from the kernel's group placement, 40 with redmule activity in the trace |
 | pick | `prefix.gemm_241x960x960_xfrom` | pass | fastest checked of 2 plan run(s) = splitK_x8y2g4_t128x128x64 (12,717 ns); constants h1_plan 12,717 ns |
+| placement | `prefix.gemm_241x960x960_xfrom / splitK_x8y2g4_t128x128x64 @256x960x960` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `prefix.gemm_241x960x960_xfrom / splitK_x8y2g4_t128x128x64 @256x960x960` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `prefix.addi_241x960_pBwIsOs` | pass | fastest checked of 1 plan run(s) = default (4,593 ns); constants h1_plan 4,593 ns |
 | pick | `prefix.gemm_241x2560x960` | pass | fastest checked of 1 plan run(s) = splitN_x8y2g4_t128x80x128 (25,296 ns); constants h1_plan 25,296 ns |
+| placement | `prefix.gemm_241x2560x960 / splitN_x8y2g4_t128x80x128 @241x2560x960` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `prefix.gemm_241x2560x960 / splitN_x8y2g4_t128x80x128 @241x2560x960` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `prefix.silu_gate_241x2560` | pass | fastest checked of 1 plan run(s) = default (10,472 ns); constants h1_plan 10,472 ns |
 | pick | `prefix.gemm_241x960x2560` | pass | fastest checked of 1 plan run(s) = splitK_x8y2g4_t128x128x128 (20,728 ns); constants h1_plan 20,728 ns |
+| placement | `prefix.gemm_241x960x2560 / splitK_x8y2g4_t128x128x128 @241x960x2560` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `prefix.gemm_241x960x2560 / splitK_x8y2g4_t128x128x128 @241x960x2560` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `expert.gemm_241x320x320_xfrom_zto_pXsZs` | pass | fastest checked of 1 plan run(s) = splitK_x4y2g8_t128x64x32 (10,526 ns); constants h1_plan 10,526 ns |
+| placement | `expert.gemm_241x320x320_xfrom_zto_pXsZs / splitK_x4y2g8_t128x64x32 @256x320x320` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `expert.gemm_241x320x320_xfrom_zto_pXsZs / Nosplit_x8y8g1_t32x64x64 @256x320x320` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `expert.gemm_50x720x32_pXs` | pass | fastest checked of 1 plan run(s) = splitK_x8y1g8_t50x96x4 (3,754 ns); constants h1_plan 3,754 ns |
+| placement | `expert.gemm_50x720x32_pXs / splitK_x8y1g8_t50x96x4 @50x720x32` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `expert.gemm_50x720x32_pXs / splitN_x4y2g8_t32x32x32 @50x720x32` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `expert.eltwise_bias_50x720` | pass | fastest checked of 1 plan run(s) = default (1,436 ns); constants h1_plan 1,436 ns |
 | pick | `expert.gemm_50x720x1440` | pass | fastest checked of 1 plan run(s) = splitK_x8y1g8_t50x96x96 (8,950 ns); constants h1_plan 8,950 ns |
+| placement | `expert.gemm_50x720x1440 / splitK_x8y1g8_t50x96x96 @50x720x1440` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `expert.gemm_50x720x1440 / splitK_x8y1g8_t50x96x96 @50x720x1440` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `expert.silu_50x720` | pass | fastest checked of 1 plan run(s) = default (1,168 ns); constants h1_plan 1,168 ns |
 | pick | `expert.gemm_50x720x720` | pass | fastest checked of 1 plan run(s) = splitK_x8y1g8_t50x96x90 (6,103 ns); constants h1_plan 6,103 ns |
+| placement | `expert.gemm_50x720x720 / splitK_x8y1g8_t50x96x90 @50x720x720` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `expert.gemm_50x720x720 / splitK_x4y2g8_t32x192x96 @50x720x720` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `expert.eltwise_bias_50x720_pOs` | pass | fastest checked of 1 plan run(s) = default (1,366 ns); constants h1_plan 1,366 ns |
 | pick | `expert.rmsnorm_50x720` | pass | fastest checked of 1 plan run(s) = default (1,594 ns); constants h1_plan 1,594 ns |
 | pick | `expert.gemm_50x960x720_zto` | pass | fastest checked of 1 plan run(s) = splitK_x8y1g8_t128x64x90 (9,491 ns); constants h1_plan 9,491 ns |
+| placement | `expert.gemm_50x960x720_zto / splitK_x8y1g8_t128x64x90 @128x960x720` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `expert.gemm_50x960x720_zto / splitK_x8y1g8_t64x64x90 @64x960x720` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `expert.gemm_50x320x720_zto_pZs` | pass | fastest checked of 1 plan run(s) = splitK_x4y1g16_t50x64x45 (6,068 ns); constants h1_plan 6,068 ns |
+| placement | `expert.gemm_50x320x720_zto_pZs / splitK_x4y1g16_t50x64x45 @50x320x720` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `expert.gemm_50x320x720_zto_pZs / splitK_x8y1g8_t50x64x96 @50x320x720` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `expert.rope_50x960` | pass | fastest checked of 1 plan run(s) = default (3,103 ns); constants h1_plan 3,103 ns |
 | pick | `expert.rope_50x320_pCwIsOsSw` | pass | fastest checked of 1 plan run(s) = default (1,183 ns); constants h1_plan 1,183 ns |
 | pick | `expert.flatattention_15x50x291x64` | pass | fastest checked of 1 plan run(s) = attn_s4x2_b128x384 (24,623 ns); constants h1_plan 24,623 ns |
+| placement | `expert.flatattention_15x50x291x64 / attn_s4x2_b128x384 @128x384` | pass | 40 clusters from the kernel's group placement, 40 with redmule activity in the trace |
+| placement | `expert.flatattention_15x50x291x64 / attn_s4x1_b192x384 @64x384` | pass | 20 clusters from the kernel's group placement, 20 with redmule activity in the trace |
 | pick | `expert.flatattention_15x50x241x64` | pass | fastest checked of 1 plan run(s) = attn_s2x2_b384x256 (16,242 ns); constants h1_plan 16,242 ns |
+| placement | `expert.flatattention_15x50x241x64 / attn_s2x2_b384x256 @128x256` | pass | 20 clusters from the kernel's group placement, 20 with redmule activity in the trace |
+| placement | `expert.flatattention_15x50x241x64 / attn_s8x1_b192x256 @64x256` | pass | 40 clusters from the kernel's group placement, 40 with redmule activity in the trace |
 | pick | `expert.gemm_50x720x960_xfrom` | pass | fastest checked of 2 plan run(s) = splitK_x8y1g8_t128x96x64 (9,188 ns); constants h1_plan 9,188 ns |
+| placement | `expert.gemm_50x720x960_xfrom / splitK_x8y1g8_t128x96x64 @128x720x960` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `expert.gemm_50x720x960_xfrom / splitK_x4y2g8_t32x192x64 @64x720x960` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `expert.addi_50x720_pBwIsOs` | pass | fastest checked of 1 plan run(s) = default (1,354 ns); constants h1_plan 1,354 ns |
 | pick | `expert.gemm_50x2048x720` | pass | fastest checked of 2 plan run(s) = splitK_x8y1g8_t50x128x90 (11,937 ns); constants h1_plan 11,937 ns |
+| placement | `expert.gemm_50x2048x720 / splitK_x8y1g8_t50x128x90 @50x2048x720` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `expert.gemm_50x2048x720 / splitK_x8y2g4_t32x256x96 @50x2048x720` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `expert.silu_gate_50x2048` | pass | fastest checked of 1 plan run(s) = default (2,396 ns); constants h1_plan 2,396 ns |
 | pick | `expert.gemm_50x720x2048` | pass | fastest checked of 1 plan run(s) = splitK_x8y1g8_t50x96x128 (10,712 ns); constants h1_plan 10,712 ns |
+| placement | `expert.gemm_50x720x2048 / splitK_x8y1g8_t50x96x128 @50x720x2048` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `expert.gemm_50x720x2048 / splitK_x8y1g8_t50x96x128 @50x720x2048` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `expert.gemm_50x32x720` | pass | fastest checked of 1 plan run(s) = splitK_x1y2g32_t32x32x32 (3,059 ns); constants h1_plan 3,059 ns |
+| placement | `expert.gemm_50x32x720 / splitK_x1y2g32_t32x32x32 @50x32x720` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `expert.gemm_50x32x720 / splitK_x1y2g32_t32x32x32 @50x32x720` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `expert.eltwise_bias_50x32` | pass | fastest checked of 1 plan run(s) = default (1,213 ns); constants h1_plan 1,213 ns |
 | pick | `expert.eltwise_axpy_50x32_pIsOsZw` | pass | fastest checked of 1 plan run(s) = default (1,109 ns); constants h1_plan 1,109 ns |
 | pick | `vision.gemm_3072x768x768` | pass | fastest checked of 1 plan run(s) = Nosplit_x8y8g1_t96x96x128 (69,599 ns); constants h1_plan 69,599 ns |
+| placement | `vision.gemm_3072x768x768 / Nosplit_x8y8g1_t96x96x128 @3072x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_3072x768x768 / Nosplit_x8y8g1_t192x96x192 @3072x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.eltwise_bias_3072x768_pOs` | pass | fastest checked of 1 plan run(s) = default (24,917 ns); constants h1_plan 24,917 ns |
 | pick | `vision.eltwise_add_3072x768_pIsOs` | pass | fastest checked of 1 plan run(s) = default (44,783 ns); constants h1_plan 44,783 ns |
 | pick | `vision.layernorm_3072x768` | pass | fastest checked of 1 plan run(s) = default (27,761 ns); constants h1_plan 27,761 ns |
 | pick | `vision.gemm_3072x768x768_zto` | pass | fastest checked of 2 plan run(s) = Nosplit_x8y8g1_t96x64x128 (117,730 ns); constants h1_plan 117,730 ns |
+| placement | `vision.gemm_3072x768x768_zto / Nosplit_x8y8g1_t96x64x128 @3072x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_3072x768x768_zto / Nosplit_x8y8g1_t192x64x256 @3072x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.addi_3072x768` | pass | fastest checked of 1 plan run(s) = default (41,178 ns); constants h1_plan 41,178 ns |
 | pick | `vision.gemm_3072x768x768_zto_pZs` | pass | fastest checked of 2 plan run(s) = Nosplit_x8y8g1_t96x64x128 (104,342 ns); constants h1_plan 104,342 ns |
+| placement | `vision.gemm_3072x768x768_zto_pZs / Nosplit_x8y8g1_t96x64x128 @3072x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_3072x768x768_zto_pZs / Nosplit_x8y8g1_t192x64x256 @3072x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.addi_3072x768_pIsOs` | pass | fastest checked of 1 plan run(s) = default (45,428 ns); constants h1_plan 45,428 ns |
 | pick | `vision.flatattention_36x1024x1024x64` | pass | fastest checked of 1 plan run(s) = attn_s8x8_b1024x1024 (419,696 ns); constants h1_plan 419,696 ns |
+| placement | `vision.flatattention_36x1024x1024x64 / attn_s8x8_b1024x1024 @1024x1024` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.flatattention_36x1024x1024x64 / attn_s8x4_b1024x1024_async @1024x1024` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.gemm_3072x768x768_xfrom` | pass | fastest checked of 2 plan run(s) = Nosplit_x8y8g1_t96x96x64 (88,507 ns); constants h1_plan 88,507 ns |
+| placement | `vision.gemm_3072x768x768_xfrom / Nosplit_x8y8g1_t96x96x64 @3072x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_3072x768x768_xfrom / Nosplit_x8y8g1_t192x96x64 @3072x768x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.eltwise_bias_3072x768` | pass | fastest checked of 1 plan run(s) = default (30,315 ns); constants h1_plan 30,315 ns |
 | pick | `vision.addi_3072x768_pBwIsOs` | pass | fastest checked of 1 plan run(s) = default (42,606 ns); constants h1_plan 42,606 ns |
 | pick | `vision.gemm_3072x3072x768` | pass | fastest checked of 1 plan run(s) = Nosplit_x8y8g1_t96x96x128 (280,766 ns); constants h1_plan 280,766 ns |
+| placement | `vision.gemm_3072x3072x768 / Nosplit_x8y8g1_t96x96x128 @3072x3072x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_3072x3072x768 / Nosplit_x8y8g1_t192x192x128 @3072x3072x768` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | pick | `vision.eltwise_bias_3072x3072` | pass | fastest checked of 1 plan run(s) = default (96,742 ns); constants h1_plan 96,742 ns |
 | pick | `vision.gelu_3072x3072` | pass | fastest checked of 1 plan run(s) = default (106,569 ns); constants h1_plan 106,569 ns |
 | pick | `vision.gemm_3072x768x3072` | pass | fastest checked of 1 plan run(s) = Nosplit_x8y8g1_t96x96x128 (211,921 ns); constants h1_plan 211,921 ns |
+| placement | `vision.gemm_3072x768x3072 / Nosplit_x8y8g1_t96x96x128 @3072x768x3072` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
+| placement | `vision.gemm_3072x768x3072 / Nosplit_x8y8g1_t192x96x192 @3072x768x3072` | pass | 64 clusters from the kernel's group placement, 64 with redmule activity in the trace |
 | sum | `W1` | pass | sum over operators of count x kernel time = 39.156 ms; operator-graph page 39.16 ms |
 | sum | `W1-b` | pass | sum over operators of count x kernel time = 40.713 ms; operator-graph page 40.71 ms |
 | sum | `W1 expert per step` | pass | once-per-call operators ['cross_k_proj', 'cross_v_proj']; 10 x per step + once per call = 15.161 ms; expert stage 15.161 ms |
