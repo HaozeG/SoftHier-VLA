@@ -929,6 +929,19 @@ class Explorer:
             context=dict(glossary=glossary(self), dataflow=dataflow(self), limits=LIMITS),
             views=self.views(), plans=self.plan_bundles(kernels))
 
+    def _own_interface(self, k: dict, sel: str, sel_dir: str) -> None:
+        """Kernel parameters of one plan: values over that plan's own runs of the key (upstream rule:
+        plan_runs_h1.csv; plan-constrained sweep: plan_sweep_h1.csv), "selected" = that plan's pick."""
+        if not k.get("interface_kernel"):
+            return
+        if sel == "upstream":
+            dirs = [r["run_dir"] for r in self.pr if r["key"] == k["name"]
+                    and r["status"] not in ("unfit", "skipped_m_iter")]
+        else:
+            dirs = [r["run_dir"] for r in self.ps if r["key"] == k["name"] and r["status"] != "unfit"]
+        k["not_swept"] = []
+        self._interface(k, k["interface_kernel"], dirs, sel_dir)
+
     def _own_candidates(self, k: dict, sel: str) -> None:
         """Keep only the runs this plan's selection looked at: upstream rule = upstream's runs of the key (its
         candidates, recorded fixes, fallbacks); plan-constrained sweep = the sweep's runs plus upstream's runs, which
@@ -1001,9 +1014,10 @@ class Explorer:
                                                time_ns=int(a["time_ns"]), speedup=a["time_ns"] / k["time_ns"])
                         k["plan_sel"] = sel
                         k["stage1"] = None      # no per-key cross-plan field: plans are independent
+                        sel_dir = a["run_dir"] if sel == "constrained" else k["selected"].get("run_dir", "")
                         self._own_candidates(k, sel)
-                        self._plan_traces(k, k.get("candidates", []),
-                                          a["run_dir"] if sel == "constrained" else k["selected"].get("run_dir", ""))
+                        self._own_interface(k, sel, sel_dir)
+                        self._plan_traces(k, k.get("candidates", []), sel_dir)
                         for u in k["uses"]:
                             u["total_ns"] = u["count"] * k["time_ns"]
                         ks[o["kernel"]] = k
