@@ -515,8 +515,8 @@ function niceTicks(max) { const step = Math.pow(10, Math.floor(Math.log10(max / 
   const out = []; for (let t = 0; t <= max; t += m) out.push(t); return out; }
 function candTip(k, c) {
   const s = c.setting; let geo = "";
-  if (k.kind === "gemm") geo = `${s.strategy}, group ${s.sx}x${s.sy} x ${s.groups} groups = ${s.active} clusters<br>tile ${s.mt}x${s.nt}x${s.kt}, padded ${s.Mp}x${s.Np}x${s.Kp} (work ${c.work_ratio}x)<br>RedMulE calls per cluster ${s.redmule_calls} (M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter})`;
-  else geo = `${s.mode}, group ${s.sx}x${s.sy}, ${s.active_groups} of ${s.groups} groups busy = ${s.active} clusters<br>block ${s.Br}x${s.Bc} (per cluster ${s.Br_s}x${s.Bc_s}), Tr ${s.Tr} · Tc ${s.Tc}, work ${c.work_ratio}x`;
+  if (k.kind === "gemm") geo = `${s.strategy}, ${s.groups} group(s) of ${s.sx}x${s.sy} = ${s.active} clusters; padded ${s.Mp}x${s.Np}x${s.Kp} (work ${c.work_ratio}x)<br>per cluster: tile ${s.mt}x${s.nt}x${s.kt} (one RedMulE call) x ${s.redmule_calls} calls (M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter})`;
+  else geo = `${s.mode}, ${s.active_groups} of ${s.groups} groups of ${s.sx}x${s.sy} busy = ${s.active} clusters<br>per group: block ${s.Br}x${s.Bc}, Tr ${s.Tr} · Tc ${s.Tc}; per cluster ${s.Br_s}x${s.Bc_s}; work ${c.work_ratio}x`;
   return `<b class="mono">${esc(c.cand)}</b>${c.cand === k.selected.cand ? " ★ selected" : ""}<br>${geo}<br>time ${c.time_ns ? us(c.time_ns) + " µs" : "–"} · status ${c.status}` +
     (c.transposed ? `<br><b>transposed</b>: Z<sup>T</sup> = W<sup>T</sup> X<sup>T</sup>, run as ${esc(c.run_shape)}; X<sup>T</sup> / Z<sup>T</sup> layout cost in the neighbouring operators not counted` : "") +
     (c.origin ? `<br>${esc(c.origin)}` : "") + (c.fix ? `<br><span class="muted">fix: ${esc(c.fix)}</span>` : "") +
@@ -559,6 +559,25 @@ function gemmCellInfo(k, c, m) {
   const s = c.setting; if (k.kind !== "gemm") return k.kind === "attn" ? `<br>${s.heads_per_group} KV head(s) per group; this cluster: rows ${m.cy * s.Br_s}..+${s.Br_s}, cols ${m.cx * s.Bc_s}..+${s.Bc_s} of each ${s.Br}x${s.Bc} block` : "";
   const own = s.strategy === "splitN" ? `N block ${m.g} of ${s.groups} (${s.Np / s.groups} columns)` : s.strategy === "splitK" ? `K block ${m.g} of ${s.groups} (${s.Kp / s.groups} deep), reduced into group 0` : "the whole problem";
   return `<br>group owns ${own}<br>Z tile per step: rows +${m.cy * s.mt}, cols +${m.cx * s.nt} (${s.mt}x${s.nt}), ${s.redmule_calls} RedMulE calls`;
+}
+
+// mapping text by level: whole operator -> cluster groups -> one group, one step -> one cluster ("tile" and
+// "block" named at the level they belong to: GEMM tile = one RedMulE call on one cluster, SummaGEMM.h:142-144;
+// attention block = one step of one group, split over its clusters)
+const lvl = (name, body) => `<div style="margin-top:4px"><b>${name}</b>: ${body}</div>`;
+function gemmLevels(s, cand) {
+  const N = DATA.arch.mesh[0] * DATA.arch.mesh[1];
+  const per = s.strategy === "splitN" ? [s.Mp, s.Np / s.groups, s.Kp] : s.strategy === "splitK" ? [s.Mp, s.Np, s.Kp / s.groups] : [s.Mp, s.Np, s.Kp];
+  return lvl("Whole operator", `M x N x K padded to ${s.Mp} x ${s.Np} x ${s.Kp} (work ${cand.work_ratio}x).`) +
+    lvl("Cluster groups", `${s.groups} group(s) of ${s.sx} x ${s.sy} clusters = <b>${s.active}</b> of ${N}. ${s.strategy === "splitN" ? "splitN: each group owns N / " + s.groups + " columns" : s.strategy === "splitK" ? "splitK: each group owns K / " + s.groups + "; a FlooNoC reduction adds the partial sums" : "Nosplit: one group does the whole product"}; per group ${per.join(" x ")}.`) +
+    lvl("Per group, one SUMMA step", `output block ${s.sy * s.mt} x ${s.sx * s.nt} (${s.sy} x ${s.mt} rows, ${s.sx} x ${s.nt} columns), K step ${s.kt}; A broadcast along rows, B along columns.`) +
+    lvl("Per cluster", `<b>tile</b> ${s.mt} x ${s.nt} x ${s.kt} = one RedMulE call; M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter} = ${s.redmule_calls} calls. At peak ${us(s.redmule_floor_ns)} µs; as RedMulE times it (tile runs as ${s.tile_blk[0]} x ${s.tile_blk[1]} in ${DATA.arch.rm_blk[0]} x ${DATA.arch.rm_blk[1]} blocks, block fill ${pct(s.f_array)} %) ${us(s.redmule_array_ns)} µs, vs ${cand.time_ns ? us(cand.time_ns) : "–"} µs measured (${cand.time_ns ? pct(s.redmule_floor_ns / cand.time_ns) : "–"} %).`);
+}
+function attnLevels(k, s, cand) {
+  return lvl("Whole operator", `${k.hkv} KV heads (${k.hq} query heads); query rows padded to ${s.q_pad}, kv rows to ${s.kv_pad} (work ${cand.work_ratio}x).`) +
+    lvl("Cluster groups", `${s.groups} groups of ${s.sx} x ${s.sy} clusters, ${s.active_groups} busy = <b>${s.active}</b> clusters; each takes ${s.heads_per_group} KV head(s) in turn. ${s.mode} mode.`) +
+    lvl("Per group, one step", `<b>block</b> ${s.Br} x ${s.Bc} (query rows x kv rows); Tr ${s.Tr} x Tc ${s.Tc} blocks per KV head.`) +
+    lvl("Per cluster", `${s.Br_s} x ${s.Bc_s} of each block (${s.Br} / ${s.sy} rows, ${s.Bc} / ${s.sx} kv rows).`);
 }
 
 function renderDetail(P, keepScroll) {
@@ -620,11 +639,7 @@ function renderDetail(P, keepScroll) {
   if (k.kind === "row") side.innerHTML = `${esc(k.row_note)}.<br><br>${ovTrace ? `${ovTrace.active_clusters.length} clusters active in the trace window; ${k.shape[0]} rows.` : "No trace."}`;
   else { const s = cand.setting;
     side.innerHTML = `<div class="mono" style="margin-bottom:6px">${esc(cand.cand)}${cand.cand === k.selected.cand ? " ★" : ""}</div>` +
-      (k.kind === "gemm" ? `${s.groups} group(s) of ${s.sx} x ${s.sy} = <b>${s.active}</b> of ${DATA.arch.mesh[0] * DATA.arch.mesh[1]} clusters. ${s.strategy === "splitN" ? "Each group owns a block of N." : s.strategy === "splitK" ? "Each group owns a block of K; FlooNoC reduction adds the partial sums." : "One group does the whole product."}
-        <br>Tile ${s.mt} x ${s.nt} x ${s.kt}; padded ${s.Mp} x ${s.Np} x ${s.Kp} (work ${cand.work_ratio}x).
-        <br>Per cluster: M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter} = ${s.redmule_calls} RedMulE calls; at peak ${us(s.redmule_floor_ns)} µs, as RedMulE times it (tile ${s.mt}x${s.nt} runs as ${s.tile_blk[0]}x${s.tile_blk[1]} in ${DATA.arch.rm_blk[0]} x ${DATA.arch.rm_blk[1]} blocks, block fill ${pct(s.f_array)} %) ${us(s.redmule_array_ns)} µs, vs ${cand.time_ns ? us(cand.time_ns) : "–"} µs measured (${cand.time_ns ? pct(s.redmule_floor_ns / cand.time_ns) : "–"} %).`
-      : `${s.groups} groups of ${s.sx} x ${s.sy}; ${s.active_groups} busy (${k.hkv} KV heads, ${s.heads_per_group} per group) = <b>${s.active}</b> clusters. ${s.mode} mode.
-        <br>Block ${s.Br} x ${s.Bc}, per cluster ${s.Br_s} x ${s.Bc_s}; Tr ${s.Tr} x Tc ${s.Tc} blocks (q padded to ${s.q_pad}, kv to ${s.kv_pad}; work ${cand.work_ratio}x).`) +
+      (k.kind === "gemm" ? gemmLevels(s, cand) : attnLevels(k, s, cand)) +
       `<br><br><span class="muted">Placement from <code>flex_group_barrier.h:43</code>: cluster id = x + 8y, groups tile the mesh row-major, group id &lt; groups works. y = 0 drawn at the bottom; HBM channels on the west and south edges (arch_h1.py). ${mode === "map" ? "" : "Numbers: busy % in the kernel window (shade steps of 20 %); outlined cells are the mapping's active clusters."}</span>` +
       (cand.cand !== k.selected.cand ? `<br><br><button class="btn" class="btn backSel">back to selected</button>` : "");
     const bs = P.q(".backSel"); if (bs) bs.onclick = () => { P.st.cand = null; renderDetail(P, true); };
