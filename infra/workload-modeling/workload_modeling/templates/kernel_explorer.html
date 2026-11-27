@@ -274,8 +274,11 @@ function buildPanes() {
       <div class="stageCharts"></div>
       <div class="scroll"><table class="stageTable"></table></div></div>
     <div class="card"><h3 style="margin-top:0">Where the time goes <span class="muted" style="font-weight:400">(estimate)</span></h3>
-      <p class="sec" style="margin-top:0">Matrix kernels split into ideal (true FLOP at peak), padding, idle clusters, HBM floor (unique bytes at ${fmt(DATA.arch.bw / 1e9, 0)} GB/s) and the rest beyond the roofline; row operators whole.</p>
-      <div class="legend budgetLegend"></div><svg class="budget" width="100%" height="190"></svg></div>
+      <p class="sec" style="margin-top:0">Matrix kernels split into ideal (true FLOP at peak), padding, idle clusters, HBM floor (unique bytes at ${fmt(DATA.arch.bw / 1e9, 0)} GB/s) and the rest beyond the roofline; row operators whole. Same scale in both columns.</p>
+      <div class="legend budgetLegend"></div><svg class="budget" width="100%" height="190"></svg>
+      <h4 style="margin:16px 0 4px">By kernel class</h4>
+      <p class="sec" style="margin-top:0">Each stage's time split into GEMM, attention (FlatAttention) and row-operator kernels: count x measured time of this plan's kernels, summed (estimate, no overlap). Same scale in both columns.</p>
+      <div class="legend kindLegend"></div><svg class="kinds" width="100%" height="160"></svg></div>
     <div class="card"><div class="row"><h3 class="grow" style="margin:0">Kernels in this plan</h3><div class="seg kindSeg"></div></div>
       <p class="sec">One row per run key of this plan; click a header to sort, a row for its detail.</p>
       <div class="scroll" style="max-height:560px"><table class="kernelTable"></table></div></div>
@@ -324,12 +327,55 @@ function renderStageCharts(P) {
   });
 }
 
+// ------------------------------------------------------------------ time by kernel class per stage
+const KINDS = [["gemm", "GEMM", "--q4"], ["attn", "attention", "--q2"], ["row", "row operators", "--s5"]];
+function kindRows(plan) {
+  const by = {};
+  for (const o of plan.ops) {
+    if (!o.kernel || o.ns == null) continue;
+    const r = by[o.stage] || (by[o.stage] = { stage: o.stage, gemm: 0, attn: 0, row: 0 });
+    r[plan.kernels[o.kernel].kind] += o.count * o.ns;
+  }
+  return plan.stages.filter(r => r.kind === "stage" && by[r.stage || r.label]).map(r => by[r.stage || r.label]);
+}
+function renderKinds(P) {
+  const svg = P.q(".kinds"); svg.innerHTML = "";
+  P.q(".kindLegend").innerHTML = KINDS.map(([, l, c]) => `<span><i style="background:var(${c})"></i>${l}</span>`).join("");
+  const rows = kindRows(P.plan);
+  const tot = r => r.gemm + r.attn + r.row;
+  const max = Math.max(...panes().filter(x => x.plan).flatMap(x => kindRows(x.plan).map(tot)), 1);
+  const W = svg.clientWidth || 600, L = 80, R = 130, rowH = 34, top = 8;
+  const sx = v => (W - L - R) * v / max;
+  svg.setAttribute("height", top + rows.length * rowH + 26);
+  const step = max / 1e6 > 12 ? 5 : 2;
+  for (let t = 0; t <= max / 1e6; t += step) { const x = L + sx(t * 1e6);
+    svg.append(sv("line", { x1: x, x2: x, y1: top, y2: top + rows.length * rowH, stroke: css("--grid") }));
+    const tx = sv("text", { x, y: top + rows.length * rowH + 16, "text-anchor": "middle" }); tx.textContent = `${t} ms`; svg.append(tx); }
+  rows.forEach((r, i) => {
+    const y = top + i * rowH + 7; let x = L; const T = tot(r);
+    const lab = sv("text", { x: L - 10, y: y + 14, "text-anchor": "end", class: "ink" }); lab.textContent = r.stage; svg.append(lab);
+    const segs = KINDS.filter(([k]) => r[k] > 0);
+    segs.forEach(([k, l, c], j) => { const w = sx(r[k]); if (w < 0.5) return;
+      const last = j === segs.length - 1;
+      const rect = sv("rect", { x, y, width: Math.max(w - (last ? 0 : 2), 0.5), height: 20, fill: css(c), rx: last ? 4 : 0 });
+      hover(rect, `<b>${r.stage}: ${l}</b><br>${fmt(r[k] / 1e6, 3)} ms, ${pct(r[k] / T)} % of the stage`);
+      svg.append(rect);
+      if (w > 46) { const t = sv("text", { x: x + w / 2 - (last ? 0 : 1), y: y + 14, "text-anchor": "middle", "font-size": 11,
+          style: `fill:${k === "attn" ? css("--sel") : "#fff"}` });
+        t.textContent = `${pct(r[k] / T)}%`; svg.append(t); }
+      x += w; });
+    const t = sv("text", { x: x + 8, y: y + 14 }); t.innerHTML = `<tspan class="ink">${fmt(T / 1e6, 2)} ms</tspan>`; svg.append(t);
+  });
+}
+
 // ------------------------------------------------------------------ budget chart (horizontal stacked bars)
 function renderBudget(P) {
   const svg = P.q(".budget"); svg.innerHTML = "";
   P.q(".budgetLegend").innerHTML = BUDGET.map(([, l, c]) => `<span><i style="background:var(${c})"></i>${l}</span>`).join("");
   const b = P.plan.budget; const W = svg.clientWidth || 600, L = 80, R = 130, rowH = 34, top = 8;
-  const totals = b.map(x => BUDGET.reduce((a, [k]) => a + x[k], 0)); const max = Math.max(...totals);
+  const totals = b.map(x => BUDGET.reduce((a, [k]) => a + x[k], 0));
+  // shared scale over the plans on screen, as the other per-stage charts
+  const max = Math.max(...panes().filter(x => x.plan).flatMap(x => x.plan.budget.map(r => BUDGET.reduce((a, [k]) => a + r[k], 0))));
   const sx = v => (W - L - R) * v / max;
   svg.setAttribute("height", top + b.length * rowH + 26);
   const step = max / 1e6 > 12 ? 5 : 2;
@@ -662,7 +708,7 @@ function renderDetail(P, keepScroll) {
   if (!keepScroll) d.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function renderPane(P) { renderPaneHead(P); renderStages(P); renderStageCharts(P); renderBudget(P); renderKernels(P); renderDetail(P, true); }
+function renderPane(P) { renderPaneHead(P); renderStages(P); renderStageCharts(P); renderBudget(P); renderKinds(P); renderKernels(P); renderDetail(P, true); }
 function renderAll() {
   renderSegs(); buildPanes(); renderContext(); renderChecks();
   panes().forEach(renderPane); writeHash();
@@ -701,7 +747,7 @@ function writeHash() {
 }
 readHash();
 detectServer().then(() => { renderAll(); const P = panes().find(P => P.st.kernel); if (P) P.q(".detail").scrollIntoView({ block: "start" }); });
-addEventListener("resize", () => panes().forEach(P => { renderStageCharts(P); renderBudget(P); if (P.st.kernel) renderDetail(P, true); }));
+addEventListener("resize", () => panes().forEach(P => { renderStageCharts(P); renderBudget(P); renderKinds(P); if (P.st.kernel) renderDetail(P, true); }));
 </script>
 </body>
 </html>
