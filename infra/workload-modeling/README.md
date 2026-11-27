@@ -33,6 +33,7 @@ Drift check: `uv run python -m workload_modeling.build && git diff --exit-code` 
 | `workload_modeling/crosscheck.py` | the one-time cross-check against PR1's programs |
 | `workload_modeling/render.py`, `templates/op_graph.md.j2` | the operator-graph page and CSV |
 | `workload_modeling/md_to_html.py` | Markdown to a standalone HTML page (light and dark, pinned mermaid@10.9.1) |
+| `workload_modeling/kernel_explorer.py`, `templates/kernel_explorer.html` | the kernel mapping page: joins operators with the kernel runs (`infra/kernel-runs/results/`), checks picks, constants, placement vs traces and sums; writes `docs/analysis/kernel-mapping-h1.md` and `build/kernel-explorer.html` (serve with `infra/kernel-runs/serve_traces.py`) |
 | `workload_modeling/build.py` | the page generator |
 | `tests/fixtures/` | `config.json` and `header.json` per pinned revision |
 

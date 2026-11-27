@@ -16,6 +16,7 @@ Byte columns and the count rule (docs/analysis/conventions.md):
 
 from __future__ import annotations
 
+import functools
 import math
 from dataclasses import dataclass, field, replace
 
@@ -99,6 +100,11 @@ class Lowering:
     kv_proj_per_step: bool = True    # False: cross-attention K/V projection once per call
     time_in_split: bool = False      # True: time half of time_mlp_in as a one-row product
     batch_cameras: bool = False      # True: all cameras in one vision-encoder call (weights read once)
+    split_fused: bool = False        # True: expert qkv_proj as q, k, v products and mlp_gateup as gate, up
+    #                                  (upstream's deployment plan; stage1-spec §3.3)
+    attn_cameras_as_heads: bool = False  # with batch_cameras: vision attention as one call per layer over
+    #                                  cameras x heads (head-major (heads, cameras x rows, d) read as
+    #                                  (heads x cameras, rows, d) blocks; MHA, so every block is its own head)
 
 
 def pr1_lowering(prefix_rows: int) -> Lowering:
@@ -296,9 +302,15 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
         add(_ew("vision", L, f"bias_{p}", "elementwise", "bias", M, Hv, n, weight_elems=Hv))
     add(_data("vision", L, "transpose_k", M, Hv, n))
     hd_v = Hv // d.v_heads
-    add(_attn("vision", L, "qk", d.v_heads, d.v_heads, N, N, hd_v, d.v_layers * cam, note="per camera"))
-    add(_ew("vision", L, "softmax", "softmax", "softmax", d.v_heads * N, N, d.v_layers * cam))
-    add(_attn("vision", L, "pv", d.v_heads, d.v_heads, N, N, hd_v, d.v_layers * cam, note="per camera"))
+    if lowering.attn_cameras_as_heads:
+        if not lowering.batch_cameras:
+            raise ValueError("attn_cameras_as_heads needs batch_cameras")
+        hv, na, note = d.v_heads * cam, d.v_layers, "cameras x heads in one call"
+    else:
+        hv, na, note = d.v_heads, d.v_layers * cam, "per camera"
+    add(_attn("vision", L, "qk", hv, hv, N, N, hd_v, na, note=note))
+    add(_ew("vision", L, "softmax", "softmax", "softmax", hv * N, N, na))
+    add(_attn("vision", L, "pv", hv, hv, N, N, hd_v, na, note=note))
     add(_gemm("vision", L, "o_proj", M, Hv, Hv, n))
     add(_ew("vision", L, "bias_o", "elementwise", "bias", M, Hv, n, weight_elems=Hv))
     add(_ew("vision", L, "residual_attn", "elementwise", "add", M, Hv, n, n_in=2))
@@ -371,7 +383,12 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
     add(_ew("expert", "embed", "bias_time_out", "elementwise", "bias", Q, He, S, weight_elems=He))
     add(_ew("expert", La, "rmsnorm_attn", "norm", "rmsnorm", Q, He, d.e_layers * S, weight_elems=He))
     qw = d.t_heads * hd
-    add(_gemm("expert", Ls, "qkv_proj", Q, qw + 2 * kv, He, n_self * S))
+    if lowering.split_fused:
+        add(_gemm("expert", Ls, "self_q_proj", Q, qw, He, n_self * S))
+        add(_gemm("expert", Ls, "self_k_proj", Q, kv, He, n_self * S))
+        add(_gemm("expert", Ls, "self_v_proj", Q, kv, He, n_self * S))
+    else:
+        add(_gemm("expert", Ls, "qkv_proj", Q, qw + 2 * kv, He, n_self * S))
     add(_gemm("expert", Lc, "q_proj", Q, qw, He, n_cross * S))
     add(_ew("expert", La, "rope_q", "elementwise", "rope", Q, qw, d.e_layers * S))
     add(_ew("expert", Ls, "rope_k", "elementwise", "rope", Q, kv, n_self * S))
@@ -388,7 +405,11 @@ def build(c: Constants, workload_id: str, lowering: Lowering | None = None) -> l
     add(_gemm("expert", La, "o_proj", Q, He, qw, d.e_layers * S))
     add(_ew("expert", La, "residual_attn", "elementwise", "add", Q, He, d.e_layers * S, n_in=2))
     add(_ew("expert", La, "rmsnorm_mlp", "norm", "rmsnorm", Q, He, d.e_layers * S, weight_elems=He))
-    add(_gemm("expert", La, "mlp_gateup", Q, 2 * d.e_mlp, He, d.e_layers * S))
+    if lowering.split_fused:
+        add(_gemm("expert", La, "mlp_gate", Q, d.e_mlp, He, d.e_layers * S))
+        add(_gemm("expert", La, "mlp_up", Q, d.e_mlp, He, d.e_layers * S))
+    else:
+        add(_gemm("expert", La, "mlp_gateup", Q, 2 * d.e_mlp, He, d.e_layers * S))
     add(_ew("expert", La, "silu_mul", "acti", "silu_mul", Q, d.e_mlp, d.e_layers * S, n_in=2))
     add(_gemm("expert", La, "mlp_down", Q, He, d.e_mlp, d.e_layers * S))
     add(_ew("expert", La, "residual_mlp", "elementwise", "add", Q, He, d.e_layers * S, n_in=2))
@@ -464,22 +485,60 @@ class KernelSet:
 # Stage-1 lowering (docs/designs/stage1-spec.md §3.3): reference computation plus cross K/V once per call.
 STAGE1_LOWERING = Lowering(kv_proj_per_step=False)
 STAGE1_LOWERING_W1B = Lowering(kv_proj_per_step=False, batch_cameras=True)
+# The stage-1 baseline (decision 2026-11-25): upstream's deployment plan, which has separate q / k / v and
+# gate / up products (deploy_plan.Plan); its kernel times are the h1_plan group (plan_runs.py, to_constants.py).
+PLAN_LOWERING = Lowering(kv_proj_per_step=False, split_fused=True)
+# W1-b under the same plan: cameras batched through the vision encoder, attention over cameras x heads
+PLAN_LOWERING_W1B = Lowering(kv_proj_per_step=False, split_fused=True, batch_cameras=True,
+                             attn_cameras_as_heads=True)
 KERNEL_SETS = {
-    "vlabench-3cam": KernelSet("h1_kernels", "h1", STAGE1_LOWERING),  # H1 (stage-1 spec §4)
+    "vlabench-3cam": KernelSet("h1_plan", "h1", PLAN_LOWERING),  # H1, upstream deployment plan (stage-1 spec §4)
 }
+# Every page number comes from runs under the deployment plan: group -> (lowering, selection). "upstream": upstream's
+# kernel-selection rule (plan_runs.py, the baseline); "constrained": the plan-constrained sweep (plan_sweep.py: the
+# plan's placement, reshapes and head padding kept, free knobs searched, attention padding chosen for the graph).
+PLAN_GROUPS = {
+    "h1_plan": (PLAN_LOWERING, "upstream"),
+    "h1_psweep": (PLAN_LOWERING, "constrained"),
+    "h1_plan_w1b": (PLAN_LOWERING_W1B, "upstream"),
+    "h1_psweep_w1b": (PLAN_LOWERING_W1B, "constrained"),
+}
+# The sweep preset (per kernel shape the fastest checked run over the stage-1 sweeps, placement per kernel, inter-
+# kernel layout free): not a deployable plan; kept for the cost-model fit and history, for the unsplit stage-1
+# lowerings only. No page reports it as performance.
+SWEEP_GROUP = "h1_kernels"
 
 
-def kernel_set(workload_id: str) -> KernelSet:
-    """Kernel times of a workload; KeyError for workloads without simulated kernels (pr1-1cam, libero-2cam, ...)."""
+def kernel_set(workload_id: str, lowering: Lowering | None = None, selection: str = "upstream") -> KernelSet:
+    """Kernel times of a workload under a lowering (default: the workload's own) and selection ("upstream" rule or
+    "constrained" sweep); KeyError for workloads without simulated kernels (pr1-1cam, libero-2cam, ...)."""
     if workload_id not in KERNEL_SETS:
         raise KeyError(f"no hand-kernel times for workload {workload_id!r}; kernel sets: {sorted(KERNEL_SETS)}")
-    return KERNEL_SETS[workload_id]
+    ks = KERNEL_SETS[workload_id]
+    low = lowering or ks.lowering
+    for g, (l, sel) in PLAN_GROUPS.items():
+        if l == low and sel == selection:
+            return KernelSet(g, ks.arch, low)
+    if low.split_fused:
+        raise KeyError(f"no plan group for lowering {low} / {selection}")
+    return KernelSet(SWEEP_GROUP, ks.arch, low)        # unsplit stage-1 lowerings: the sweep preset (history)
+
+
+@functools.lru_cache(maxsize=None)
+def plan_keys(workload_id: str = "vlabench-3cam", lowering: Lowering | None = None) -> dict[tuple[str, str], str]:
+    """(stage, op) -> run key of the upstream deployment plan (deploy_plan.Plan), e.g. gemm_1024x768x768_zto_pZs."""
+    from .deploy_plan import Plan          # deploy_plan imports this module
+    return {(d.stage, d.op): d.key for d in Plan(workload_id, lowering=lowering).deploys}
 
 
 def hand_kernel_key(row: OpRow, group: str = "h1_kernels") -> str | None:
-    """constants key of the row's simulated kernel: <group>.<stage>.<kernel>_<row shape>."""
+    """constants key of the row's simulated kernel: <group>.<stage>.<plan run key> for the deployment-plan groups
+    (PLAN_GROUPS), or <group>.<stage>.<kernel>_<row shape> for the sweep preset."""
     if row.op in HOST_OPS or (row.stage, row.op) in INCLUDED_IN:
         return None
+    if group in PLAN_GROUPS:
+        k = plan_keys("vlabench-3cam", PLAN_GROUPS[group][0]).get((row.stage, row.op))
+        return f"{group}.{row.stage}.{k}" if k else None
     shape = "x".join(map(str, row.shape))
     if row.cls == "gemm":
         return f"{group}.{row.stage}.gemm_{shape}"
@@ -491,16 +550,19 @@ def hand_kernel_key(row: OpRow, group: str = "h1_kernels") -> str | None:
     return f"{group}.{row.stage}.eltwise_{kind}_{shape}" if kind else None
 
 
-def hand_kernel_ns(c, workload_id: str, row: OpRow) -> float | None:
-    """Measured ns per call of the row's hand kernel, if one was simulated at this workload and shape."""
+def hand_kernel_ns(c, workload_id: str, row: OpRow, group: str | None = None) -> float | None:
+    """Measured ns per call of the row's hand kernel, if one was simulated at this workload and shape. group: the
+    constants group (kernel_set(workload, lowering).group); default the workload's own."""
     if workload_id not in KERNEL_SETS:
         return None
-    key = hand_kernel_key(row, kernel_set(workload_id).group)
+    group = group or kernel_set(workload_id).group
+    key = hand_kernel_key(row, group)
     if key is None or key not in c.entries:
         return None
     e = c.get(key)
-    shape = key.rsplit("_", 1)[1]
-    if e.workload != workload_id or shape != "x".join(map(str, row.shape)):
+    if e.workload != workload_id:
+        return None
+    if group == SWEEP_GROUP and key.rsplit("_", 1)[1] != "x".join(map(str, row.shape)):
         return None
     return float(e.value)
 

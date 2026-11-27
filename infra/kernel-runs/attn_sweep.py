@@ -35,6 +35,7 @@ WORK_CAP = 2.5
 # name: (query heads, KV heads, q length, kv length, operators). W1 and W1-b share these (attention per camera).
 SHAPES = {
     "12x1024x1024x64": (12, 12, 1024, 1024, "vision qk, softmax, pv (per camera)"),
+    "36x1024x1024x64": (36, 36, 1024, 1024, "vision qk, softmax, pv (W1-b under the plan: cameras x heads, one call)"),
     "15x241x241x64": (15, 5, 241, 241, "prefix qk, softmax, pv"),
     "15x50x291x64": (15, 5, 50, 291, "expert self qk, softmax, pv"),
     "15x50x241x64": (15, 5, 50, 241, "expert cross qk, softmax, pv"),
@@ -78,6 +79,41 @@ def candidates(name):
     for c in out:
         c["cand"] = f"{'async' if c['async_'] else 'coll'}_s{c['sx']}x{c['sy']}_b{c['Br']}x{c['Bc']}"
     return out
+
+
+def upstream_cand(name):
+    """soft_hier_je attn_auto.py opt() (:40-98, gvsoc/gvsoc 4610405) on H1, always run next to the sweep's picks.
+
+    rows Y = q * heads / KV heads, columns X = kv; per-cluster tile 4 * redmule_ce_height = 128, capped at Y and X;
+    scale = Y / tile (X / tile), rounded up to a power of 2 with the tile shrunk to Y / scale, then capped at 8;
+    block Br = scale_y * tile_y, Bc = scale_x * tile_x; async only when batch > free groups (batch 1 here: never).
+    Where opt() asserts divisibility the sequences are padded instead. Upstream does not check head coverage: a
+    setting that drops heads (KV heads > groups, not a multiple) is returned with skip set and not run."""
+    hq, hkv, q, kv, _ = SHAPES[name]
+    r = hq // hkv
+    t = 128
+
+    def axis(n):
+        tile = min(t, n)
+        npad = up(n, tile)
+        s = npad // tile
+        if s & (s - 1):
+            s = 1 << (s - 1).bit_length()
+            tile = -(-npad // s)
+        return min(s, 8), tile
+
+    sy, ty = axis(q * r)
+    sx, tx = axis(kv)
+    Br, Bc = sy * ty, sx * tx
+    qp = q
+    while (qp * r) % Br:
+        qp += 1
+    kvp = up(kv, Bc)
+    G = 64 // (sx * sy)
+    c = dict(q_pad=qp, kv_pad=kvp, sx=sx, sy=sy, Br=Br, Bc=Bc, async_=0, work_ratio=round(qp * kvp / (q * kv), 3),
+             active=min(G, hkv) * sx * sy, upstream=1, skip=hkv > G and hkv % G != 0)
+    c["cand"] = f"coll_s{sx}x{sy}_b{Br}x{Bc}"
+    return c
 
 
 def write_cfg(path, name, c):
@@ -131,7 +167,15 @@ def main():
     done = {(r["shape"], r["cand"]) for r in rows()}
     total = 0
     for n in names:
-        for c in candidates(n)[:a.top]:
+        cs = candidates(n)[:a.top]
+        u = upstream_cand(n)
+        if u["cand"] not in {c["cand"] for c in cs}:
+            cs.append(u)
+        for c in cs:
+            if c.get("skip"):
+                print(f"{n:>16} {c['cand']:<24} upstream opt(): drops heads ({SHAPES[n][1]} KV heads, "
+                      f"{64 // (c['sx'] * c['sy'])} groups), not run")
+                continue
             total += 1
             if a.cmd == "plan":
                 print(f"{n:>16} {c['cand']:<24} pad q {c['q_pad']:<5} kv {c['kv_pad']:<5} work {c['work_ratio']:<6} "

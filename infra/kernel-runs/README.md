@@ -62,14 +62,20 @@ repo.
 | File | What it does |
 | --- | --- |
 | `run_kernel.sh <kernel> <cfg.py> <out> [--trace] [--hbm]` | one build and run; out folder gets the config, arch, `sim_stamp.json`, headers, logs, optional Perfetto trace |
-| `gemm_sweep.py plan\|run\|pick` | SummaGEMM tile, scale and split sweep per W1 / W1-b shape -> `results/gemm_sweep_h1.csv` |
+| `gemm_sweep.py plan\|run\|pick` | SummaGEMM tile, scale and split sweep per W1 / W1-b shape, ranked by the shared model `workload_modeling.kernel_model` (parameters from `constants.yaml` arch.h1) -> `results/gemm_sweep_h1.csv` |
 | `gemm_smallm_sweep.py plan\|run\|pick` | M = 50 expert GEMMs: groups 1 or 2 clusters tall, splitN or splitK (structural 0.02 check) -> `results/gemm_smallm_h1.csv` |
 | `row_kernels.py plan\|run\|summary` | Eltwise, Activation, LayerNorm, RMSNorm: one run per shape -> `results/row_kernels_h1.csv` |
-| `attn_sweep.py plan\|run\|pick` | FlatAttention group, block and mode sweep (padded, unmasked) -> `results/attn_sweep_h1.csv` |
+| `attn_sweep.py plan\|run\|pick` | FlatAttention group, block and mode sweep (padded, unmasked), plus upstream `attn_auto.py` `opt()`'s setting per shape -> `results/attn_sweep_h1.csv` |
 | `attn_debug.py [case ...]` | FlatAttention correctness bisection (one kernel feature per case); debug only |
-| `final_runs.py` | re-runs every picked GEMM setting (fastest over both GEMM sweeps) and row kernel -> `results/final_h1.csv` |
+| `gemm_transpose.py plan\|run\|pick [--shape MxNxK]` | transposed GEMM (Z^T = W^T X^T run as N x M x K) with gemm_sweep's candidates -> `results/gemm_transpose_h1.csv`; run for the shapes whose stage-1 pick loses RedMulE block fill |
+| `gemm_upstream.py plan\|run\|pick [--shape MxNxK]` | upstream's own settings: soft_hier_je `gemm_auto.py` `opt()` ported rule for rule (splitK and splitN, padded where it asserts), on every GEMM shape -> `results/gemm_upstream_h1.csv` |
+| `eltwise_pipeline.py [NAME ...]` | the 17 Eltwise configs with `pipeline = 1` (pipelined row schedule) -> `results/eltwise_pipeline_h1.csv` |
+| `wrong_runs.py` | every run whose output check failed, with the splitK correctness rule tested against all splitK runs -> `docs/analysis/wrong-output-runs-h1.md` |
+| `final_runs.py [--plan]` | the W1 preset: per GEMM shape and row kernel the fastest checked run over every result set (sweeps, upstream settings, transposed GEMM, pipelined Eltwise), re-run once -> `results/final_h1.csv` (stage-1 picks frozen in `results/final_h1_stage1.csv`) |
 | `trace_picks.py` | Perfetto traces of the picked settings -> `results/traces_h1.csv` |
 | `reproduce.py list\|run\|export` | re-runs the 51 recorded settings (`configs/h1/`) and compares with the recorded times; `export` (owner) refreshes `configs/h1/` |
+| `trace_summary.py` | per-cluster RedMulE / iDMA / Spatz busy fractions in the kernel window of each trace -> `results/trace_summary_h1.json` (read by the kernel mapping page) |
+| `serve_traces.py [--port 9001]` | serves `infra/workload-modeling/build/kernel-explorer.html` with the traces and run folders on 127.0.0.1, so the page can open traces in Perfetto |
 | `to_constants.py [--print]` | writes the `h1_kernels` section of `infra/workload-modeling/constants.yaml` |
 | `hbm_channel_count.py` | requests per HBM channel from an `hbm_ctrl` trace |
 

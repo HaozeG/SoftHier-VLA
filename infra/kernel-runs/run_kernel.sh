@@ -1,9 +1,12 @@
 #!/bin/bash
 # Run one hand-written kernel once on the patched GVSoC, with optional traces.
 #
-#   run_kernel.sh <kernel> <kernel_cfg.py> <out_dir> [--trace] [--hbm] [--arch <arch.py>]
+#   run_kernel.sh <kernel> <kernel_cfg.py> <out_dir> [--trace | --trace-only] [--hbm] [--arch <arch.py>]
+#   --trace-only: the traced run alone, no separate measurement run (for a setting already measured); same binary,
+#   so the traced run times the kernel and checks the output exactly as the measurement run did. (Building without
+#   the output check was tried and dropped: it saved no wall time and moved the kernel time by about 1 %.)
 #
-#   kernel: elt | gemm | attn | acti | lnorm | norm
+#   kernel: elt | gemm | attn | acti | lnorm | norm | rope
 #   arch:   default infra/kernel-runs/arch/arch_h1.py (stage-1 H1)
 #   out_dir receives: kernel_cfg.py, arch.py, sim_stamp.json (which simulator build ran), the generated
 #   kernel headers and preload.elf, build.log, run.log (timer line and output check); with --trace
@@ -20,12 +23,14 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 KERNEL=$1; CFG=$(realpath "$2"); OUT=$3; shift 3
 TRACE=0
+TRACE_ONLY=0
 HBM=0
 ARCH=$HERE/arch/arch_h1.py
 KREPO=${KREPO:-$HERE/../../third_party/softhier-kernels}
 while [ $# -gt 0 ]; do
   case $1 in
     --trace) TRACE=1; shift ;;
+    --trace-only) TRACE=1; TRACE_ONLY=1; shift ;;
     --hbm) HBM=1; shift ;;
     --arch) ARCH=$(realpath "$2"); shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
@@ -34,7 +39,7 @@ done
 
 case $KERNEL in
   elt) APP=Eltwise ;; gemm) APP=SummaGEMM ;; attn) APP=FlatAttention ;;
-  acti) APP=Activation ;; lnorm) APP=LayerNorm ;; norm) APP=RMSNorm ;;
+  acti) APP=Activation ;; lnorm) APP=LayerNorm ;; norm) APP=RMSNorm ;; rope) APP=RoPE ;;
   *) echo "unknown kernel $KERNEL" >&2; exit 2 ;;
 esac
 IMPL=$KREPO/implementation
@@ -62,9 +67,12 @@ PLD=$OUT/preload.elf
 cd "$SH"
 # Measurement run: gvsoc directly, no trace flags (`make run` adds --trace=/chip/cluster_0/redmule, and any trace
 # flag switches gapy to the debug build, which is slower); stdin from /dev/null.
+# --trace-only skips it: the traced run reports the same time and check (same binary).
+if [ $TRACE_ONLY = 0 ]; then
 timeout "$SHVLA_SIM_TIMEOUT" ./install/bin/gvsoc --target=pulp.chips.flex_cluster.flex_cluster \
   --binary sw_build/softhier.elf run --preload "$PLD" < /dev/null > "$OUT/run.log" 2>&1 \
   || { echo "run failed or timed out, see $OUT/run.log" >&2; exit 1; }
+fi
 if [ $TRACE = 1 ]; then
   timeout "$SHVLA_SIM_TIMEOUT" make runv pld="$PLD" > "$OUT/runv.log" 2>&1
   make pfto > "$OUT/pfto.log" 2>&1
@@ -76,5 +84,6 @@ if [ $HBM = 1 ]; then
   zcat "$OUT/hbm_ctrl.log.gz" | python3 "$HERE/hbm_channel_count.py" "$ARCH" > "$OUT/hbm_channels.txt"
   tail -1 "$OUT/hbm_channels.txt" | sed 's/^/  /'
 fi
-grep -h "Performance Counter" "$OUT/run.log" | sed 's/^/  /'
-grep -h "\[check\]" "$OUT/run.log" | awk '{bad+=$7; if ($11+0>m) m=$11+0} END {printf "  check: %d clusters, bad %d, max_ulp %d\n", NR, bad, m}'
+LOG=$OUT/run.log; [ $TRACE_ONLY = 1 ] && LOG=$OUT/runv.log
+grep -ah "Performance Counter" "$LOG" | sed 's/^/  /'
+grep -ah "\[check\]" "$LOG" | awk '{bad+=$7; if ($11+0>m) m=$11+0} END {printf "  check: %d clusters, bad %d, max_ulp %d\n", NR, bad, m}'

@@ -1,0 +1,6 @@
+combo,upstream,total_ns,missing,missing_keys
+vision.qk q1024 kv1024; prefix.qk q256 kv256; expert.self_qk q64 kv384; expert.cross_qk q64 kv256,0,31575152,0,
+vision.qk q1024 kv1024; prefix.qk q256 kv288; expert.self_qk q64 kv384; expert.cross_qk q64 kv288,0,33431840,0,
+vision.qk q1024 kv1024; prefix.qk q256 kv256; expert.self_qk q128 kv384; expert.cross_qk q128 kv256,1,33523792,0,
+vision.qk q1024 kv1024; prefix.qk q256 kv256; expert.self_qk q64 kv320; expert.cross_qk q64 kv256,0,33869152,0,
+vision.qk q1024 kv1024; prefix.qk q256 kv288; expert.self_qk q64 kv320; expert.cross_qk q64 kv288,0,35725840,0,

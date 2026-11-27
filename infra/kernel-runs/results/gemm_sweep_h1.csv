@@ -209,3 +209,13 @@ shape,cand,m_size,n_size,k_size,m_tile,n_tile,k_tile,scale,groups,strategy,work_
 3072x3072x768,splitN_s2g8_t256x192x64,3072,3072,768,256,192,64,2,8,splitN,1.0,424673,0,334018,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/3072x3072x768/splitN_s2g8_t256x192x64
 3072x3072x768,splitN_s4g2_t256x192x64,3072,3072,768,256,192,64,4,2,splitN,1.0,259522,0,319998,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/3072x3072x768/splitN_s4g2_t256x192x64
 3072x3072x768,Nosplit_s8g1_t128x128x128,3072,3072,768,128,128,128,8,1,Nosplit,1.0,235929,1,194860,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/3072x3072x768/Nosplit_s8g1_t128x128x128
+50x1600x720,splitN_s2g8_t32x128x256,64,2048,768,32,128,256,2,8,splitN,1.748,4096,0,14488,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/50x1600x720/splitN_s2g8_t32x128x256
+50x1600x720,splitN_s2g8_t32x128x128,64,2048,768,32,128,128,2,8,splitN,1.748,4096,0,15886,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/50x1600x720/splitN_s2g8_t32x128x128
+241x320x960,Nosplit_s8g1_t32x64x256,256,512,1024,32,64,256,8,1,Nosplit,1.813,2688,0,10937,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/241x320x960/Nosplit_s8g1_t32x64x256
+50x4096x720,splitN_s2g8_t32x256x256,64,4096,768,32,256,256,2,8,splitN,1.365,7424,0,23970,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/50x4096x720/splitN_s2g8_t32x256x256
+50x4096x720,splitN_s2g8_t32x128x256,64,4096,768,32,128,256,2,8,splitN,1.365,8192,0,27808,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/50x4096x720/splitN_s2g8_t32x128x256
+50x4096x720,splitN_s2g16_t32x160x32,64,5120,736,32,160,32,2,16,splitN,1.636,9472,0,36435,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/50x4096x720/splitN_s2g16_t32x160x32
+50x4096x720,splitN_s1g32_t64x128x32,64,4096,736,64,128,32,1,32,splitN,1.308,9568,0,28940,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/50x4096x720/splitN_s1g32_t64x128x32
+50x4096x720,splitN_s2g8_t32x256x128,64,4096,768,32,256,128,2,8,splitN,1.365,7424,0,25062,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/50x4096x720/splitN_s2g8_t32x256x128
+50x4096x720,splitN_s2g8_t32x256x64,64,4096,768,32,256,64,2,8,splitN,1.365,8064,0,27717,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/50x4096x720/splitN_s2g8_t32x256x64
+1024x768x768,splitN_s4g4_t256x64x192,1024,1024,768,256,64,192,4,4,splitN,1.333,12928,0,32341,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/1024x768x768/splitN_s4g4_t256x64x192

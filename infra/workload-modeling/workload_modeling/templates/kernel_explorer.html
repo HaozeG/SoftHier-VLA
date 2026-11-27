@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SmolVLA on SoftHier H1: kernel mapping explorer</title>
+<style>
+.viz-root {
+  color-scheme: light;
+  --surface-0: #f4f3f0; --surface-1: #fcfcfb; --surface-2: #efeeea; --border: #dddcd6;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --grid: #e4e3de; --idle: #e9e8e3; --idle-ink: #a3a29c;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300;
+  --q1: #cde2fb; --q2: #9ec5f4; --q3: #5598e7; --q4: #256abf; --q5: #104281;
+  --good: #0ca30c; --critical: #d03b3b; --warning: #b37a00;
+  --g-a: #b7d3f6; --g-b: #86b6ef; --sel: #0b0b0b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --surface-0: #121211; --surface-1: #1a1a19; --surface-2: #242422; --border: #383835;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8e8d86;
+    --grid: #2c2c2a; --idle: #262624; --idle-ink: #5d5c57;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #0ca30c;
+    --q1: #184f95; --q2: #1c5cab; --q3: #2a78d6; --q4: #5598e7; --q5: #9ec5f4;
+    --good: #0ca30c; --critical: #e66767; --warning: #fab219;
+    --g-a: #1c5cab; --g-b: #104281; --sel: #f0efec;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --surface-0: #121211; --surface-1: #1a1a19; --surface-2: #242422; --border: #383835;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8e8d86;
+  --grid: #2c2c2a; --idle: #262624; --idle-ink: #5d5c57;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #0ca30c;
+  --q1: #184f95; --q2: #1c5cab; --q3: #2a78d6; --q4: #5598e7; --q5: #9ec5f4;
+  --good: #0ca30c; --critical: #e66767; --warning: #fab219;
+  --g-a: #1c5cab; --g-b: #104281; --sel: #f0efec;
+}
+* { box-sizing: border-box; }
+/* the panes share the outer grid's rows (subgrid): header, stages, budget, kernels and detail start level */
+.panes { display: grid; grid-template-columns: repeat(var(--ncol, 2), minmax(0, 1fr)); column-gap: 14px; margin-top: 14px; }
+@media (max-width: 900px) { .panes { grid-template-columns: minmax(0, 1fr); } }
+.pane { min-width: 0; display: grid; grid-row: span 5; grid-template-rows: subgrid; row-gap: 14px; margin-bottom: 14px; }
+.pane > .card { margin: 0; min-width: 0; }
+.pane-head { border-top: 4px solid var(--s1); } .pane.c1 .pane-head { border-top-color: var(--s2); }
+.pane-head .big { font-size: 24px; font-weight: 600; }
+.stageCharts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 20px; margin: 2px 0 12px; }
+.stageCharts svg { width: 100%; display: block; overflow: visible; }
+.panes[style*="--ncol: 2"] .split, .panes[style*="--ncol:2"] .split { grid-template-columns: minmax(0, 1fr); }
+.planbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cmp-head { display: grid; grid-template-columns: repeat(var(--ncol, 2), minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+@media (max-width: 720px) { .cmp-head { grid-template-columns: minmax(0, 1fr); } }
+.cmp-col { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface-2); min-width: 0; }
+.cmp-col .big { font-size: 22px; font-weight: 600; }
+.cmp-col.c0 { border-top: 3px solid var(--s1); } .cmp-col.c1 { border-top: 3px solid var(--s2); }
+th.g0, td.g0 { box-shadow: inset 0 -2px 0 0 transparent; } th.gh0 { border-bottom: 3px solid var(--s1); } th.gh1 { border-bottom: 3px solid var(--s2); }
+td.gs, th.gs { border-left: 2px solid var(--border); }
+.seg.chips { flex-wrap: wrap; max-width: 100%; }
+.chips button .k { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+body { margin: 0; }
+.viz-root { background: var(--surface-0); color: var(--text-primary); min-height: 100vh;
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.wrap { max-width: 1320px; margin: 0 auto; padding: 20px 24px 60px; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 0 0 10px; }
+h3 { font-size: 14px; margin: 16px 0 8px; color: var(--text-secondary); font-weight: 600; }
+tr.sub td { color: var(--text-secondary); }
+summary h2 { margin: 0; }
+p { margin: 4px 0 8px; }
+.muted { color: var(--text-muted); }
+.sec { color: var(--text-secondary); }
+code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin: 14px 0; }
+.row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.grow { flex: 1 1 auto; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--surface-1); color: var(--text-secondary); padding: 5px 12px; cursor: pointer; font: inherit; }
+.seg button.on { background: var(--surface-2); color: var(--text-primary); font-weight: 600; }
+button.btn { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); border-radius: 7px;
+  padding: 5px 11px; cursor: pointer; font: inherit; }
+button.btn:hover { background: var(--surface-2); }
+button.btn:disabled { color: var(--text-muted); cursor: not-allowed; }
+.tiles { display: flex; gap: 12px; flex-wrap: wrap; }
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; min-width: 150px; }
+.tile .v { font-size: 22px; font-weight: 650; }
+.tile .l { color: var(--text-secondary); font-size: 12.5px; }
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 1px 8px; border-radius: 99px;
+  border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+.badge.ok::before { content: "✓"; color: var(--good); font-weight: 700; }
+.badge.fail::before { content: "✕"; color: var(--critical); font-weight: 700; }
+.badge.warn::before { content: "!"; color: var(--warning); font-weight: 700; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { color: var(--text-secondary); font-weight: 600; font-size: 12.5px; position: sticky; top: 0; background: var(--surface-1); cursor: default; }
+th.sort { cursor: pointer; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td .mono { white-space: nowrap; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--surface-2); }
+tr.on td { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--s1); }
+.scroll { max-height: 560px; overflow: auto; border: 1px solid var(--grid); border-radius: 8px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); margin: 6px 0; }
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+@media (max-width: 1000px) { .split { grid-template-columns: 1fr; } }
+svg text { fill: var(--text-secondary); font-size: 11.5px; }
+svg .ink { fill: var(--text-primary); }
+#tip { position: fixed; pointer-events: none; z-index: 10; background: var(--surface-1); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  max-width: 420px; display: none; }
+#tip b { font-weight: 650; }
+.note { border-left: 3px solid var(--border); padding: 4px 10px; color: var(--text-secondary); margin: 8px 0; }
+.note.warn { border-left-color: var(--warning); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; font-size: 13px; }
+.kv div:nth-child(odd) { color: var(--text-secondary); }
+.factor { display: grid; grid-template-columns: 110px 1fr 56px; align-items: center; gap: 8px; margin: 3px 0; font-size: 13px; }
+.bar { height: 10px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--s1); border-radius: 0 4px 4px 0; }
+details summary { cursor: pointer; color: var(--text-secondary); }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+<div class="wrap">
+  <div class="row">
+    <div class="grow">
+      <h1>SmolVLA on SoftHier H1: kernel mapping explorer</h1>
+      <div class="sec">Stage-1 baseline, <code>vlabench-3cam</code>, one policy call composed from hand-written kernels simulated one at a time (GVSoC, DRAMSys HBM).
+        W1 and W1-b each run under upstream's whole-graph HBM deployment plan with two independent kernel-mapping strategies: upstream's kernel-selection rule (<code>constants.yaml h1_plan</code>, <code>h1_plan_w1b</code>) and the plan-constrained sweep (<code>h1_psweep</code>, <code>h1_psweep_w1b</code>). Each plan picks from its own runs; plans may be better or worse than one another and are shown side by side, not aligned.
+        Companion to <code>docs/analysis/kernel-mapping-h1.md</code>.</div>
+    </div>
+    <div class="seg" id="themeSeg"><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
+  </div>
+
+  <div class="card" id="serverNote"></div>
+
+  <div class="card">
+    <h2>Plans</h2>
+    <p class="sec" style="margin-top:0">Each plan is one set of run results: its own operator split, run keys, kernel settings and times, loaded as a whole. Pick up to two to see side by side (a third pick replaces the older one); each column has its own tables, sorting, kernel detail and mesh, nothing is aligned between them, so plans that split or map operators differently compare as they are. Every time is a sum of measured kernel times under the plan's deployment (estimate, no overlap).</p>
+    <div class="planbar"><div class="seg chips" id="viewSeg"></div>
+      <label class="btn" style="cursor:pointer">Load plan results… <input type="file" id="loadPlan" accept=".json" multiple hidden></label>
+      <label class="sec" title="selecting a run key in one column selects the same key in the other, when that plan has it"><input type="checkbox" id="linkSel"> link kernel selection by run key</label></div>
+    <div id="loadNote" class="sec" style="margin-top:6px"></div>
+  </div>
+
+  <div class="panes" id="panes"></div>
+
+  <div class="card" id="checkLine"></div>
+
+  <div class="card">
+    <h2>What each stage hands to the next <span class="muted" style="font-weight:400">(inference, from op shapes; the same for every plan of this workload)</span></h2>
+    <div class="scroll"><table id="flowTable"></table></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="gap:24px;align-items:flex-start">
+      <div class="grow" style="min-width:0;flex-basis:320px"><h2>Assumptions behind every number</h2><ul id="assumptions" class="sec"></ul></div>
+      <div class="grow" style="min-width:0;flex-basis:320px"><h2>What this baseline cannot tell you</h2>
+        <p class="sec" style="margin:0">For studies that split or recombine the vision encoder, prefix and action expert:</p><ul id="limits" class="sec"></ul></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <details open><summary><h2 style="display:inline">Glossary</h2> <span class="muted">names, suffixes and columns used on this page</span></summary>
+      <div class="scroll" style="margin-top:8px"><table id="glossary"></table></div></details>
+  </div>
+
+  <div class="card">
+    <h2>Checks on the baseline</h2>
+    <div id="checkSummary"></div>
+    <details style="margin-top:8px"><summary>All checks</summary><div class="scroll" style="margin-top:8px"><table id="checkTable"></table></div></details>
+  </div>
+</div>
+<div id="tip"></div>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const $ = (s, e = document) => e.querySelector(s);
+const el = (tag, attrs = {}, html) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (html !== undefined) e.innerHTML = html; return e; };
+const SVGNS = "http://www.w3.org/2000/svg";
+const sv = (tag, attrs = {}) => { const e = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
+const fmt = (x, d = 1) => x == null || isNaN(x) ? "–" : x.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const us = ns => fmt(ns / 1e3, 2);
+const pct = x => fmt(100 * x, 1);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const css = v => getComputedStyle($(".viz-root")).getPropertyValue(v).trim();
+
+const tip = $("#tip");
+function showTip(ev, html) { tip.innerHTML = html; tip.style.display = "block"; moveTip(ev); }
+function moveTip(ev) { const w = tip.offsetWidth, h = tip.offsetHeight; let x = ev.clientX + 14, y = ev.clientY + 14;
+  if (x + w > innerWidth - 8) x = ev.clientX - w - 14; if (y + h > innerHeight - 8) y = ev.clientY - h - 14; tip.style.left = x + "px"; tip.style.top = y + "px"; }
+function hideTip() { tip.style.display = "none"; }
+function hover(node, html) { node.addEventListener("mouseenter", e => showTip(e, typeof html === "function" ? html() : html));
+  node.addEventListener("mousemove", moveTip); node.addEventListener("mouseleave", hideTip); }
+
+const TECH_COLOR = { "Nosplit": "--s1", "splitN, square groups": "--s2", "splitN, non-square groups": "--s3",
+  "splitK, square groups": "--s4", "splitK, non-square groups": "--s5", "collective": "--s1", "async": "--s2" };
+const BUDGET = [["ideal", "ideal", "--s1"], ["padding", "padding", "--s2"], ["idle", "idle clusters", "--s3"],
+  ["hbm", "HBM floor", "--s6"], ["rest", "rest beyond roofline", "--s4"], ["row", "row operators", "--s5"]];
+
+const PLANS = DATA.plans.slice();
+const newPaneState = () => ({ kind: "all", kernel: null, cand: null, overlay: "redmule", sort: "total", sortRev: false, meshMode: null });
+const state = { views: ["W1:upstream", "W1:constrained"], panes: [newPaneState(), newPaneState()], link: false, server: false };
+const planById = id => PLANS.find(p => p.id === id);
+
+// ------------------------------------------------------------------ server detection (traces need serve_traces.py)
+async function detectServer() {
+  const n = $("#serverNote");
+  if (location.protocol.startsWith("http")) {
+    try { const r = await fetch("/api/ping"); state.server = r.ok; } catch (e) { state.server = false; }
+  }
+  n.innerHTML = state.server
+    ? `<span class="badge ok">trace server running</span> <span class="sec">Perfetto buttons load the trace from this server; run folders open as text.</span>`
+    : `<span class="badge warn">opened without the trace server</span> <span class="sec">Charts and tables work. To open traces in Perfetto and read run logs, run
+       <code>python3 infra/kernel-runs/serve_traces.py</code> and open <code>http://127.0.0.1:9001/</code>.</span>`;
+}
+
+// ------------------------------------------------------------------ header
+function renderSegs() {
+  const vs = $("#viewSeg"); vs.innerHTML = "";
+  PLANS.forEach(v => { const j = state.views.indexOf(v.id);
+    const b = el("button", { title: v.note || "" }, (j >= 0 ? `<span class="k" style="background:var(--s${j + 1})"></span>` : "") + esc(v.label) + (v.loaded ? ` <span class="muted">(loaded)</span>` : ""));
+    if (j >= 0) b.className = "on";
+    b.onclick = () => { const i = state.views.indexOf(v.id);
+      if (i >= 0) { if (state.views.length > 1) { state.views.splice(i, 1); state.panes.splice(i, 1); } }
+      else { state.views.push(v.id); state.panes.push(newPaneState()); if (state.views.length > 2) { state.views.shift(); state.panes.shift(); } }
+      renderAll(); };
+    vs.append(b); });
+  $("#linkSel").checked = state.link; $("#linkSel").onchange = e => { state.link = e.target.checked; };
+  const ts = $("#themeSeg"); const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  ts.querySelectorAll("button").forEach(b => { b.className = b.dataset.t === cur ? "on" : ""; b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; renderAll(); }; });
+}
+
+function renderContext() {
+  const C = DATA.context; const p = DATA.pages.find(x => x.name === (planById(state.views[0]) || {}).page_name) || DATA.pages[0];
+  const nf = DATA.checks.filter(x => !x.ok).length;
+  $("#checkLine").innerHTML = `<span class="badge ${nf ? "fail" : "ok"}">checks: ${DATA.checks.length - nf} of ${DATA.checks.length} pass</span> <span class="sec">pick, constants, placement vs trace and sums; the list is at the bottom of the page.</span>`;
+  const n = (x, d) => `<td class="n">${x == null ? "" : fmt(x, d)}</td>`;
+  $("#flowTable").innerHTML = `<tr><th>from</th><th>to</th><th>what</th><th class="n">MB</th><th>when</th></tr>` +
+    C.dataflow.map(d => `<tr><td>${d.src}</td><td>${d.dst}</td><td class="sec">${esc(d.what)}</td><td class="n">${fmt(d.bytes / 1e6, 3)}</td><td class="sec">${esc(d.when)}</td></tr>`).join("");
+  const md = t => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>");
+  $("#assumptions").innerHTML = p.assumptions.map(a => `<li>${md(a)}</li>`).join("");
+  $("#limits").innerHTML = C.limits.map(a => `<li>${md(a)}</li>`).join("");
+  $("#glossary").innerHTML = `<tr><th>term</th><th>meaning</th></tr>` + C.glossary.map(g => `<tr><td style="white-space:nowrap"><b>${md(g.term)}</b></td><td class="sec">${md(g.meaning)}</td></tr>`).join("");
+}
+
+function renderChecks() {
+  const c = DATA.checks; const bad = c.filter(x => !x.ok);
+  const kinds = {}; c.forEach(x => { kinds[x.kind] = kinds[x.kind] || [0, 0]; kinds[x.kind][x.ok ? 0 : 1]++; });
+  const desc = { pick: "selected = fastest run that passed the output check; among the plan runs of the key (upstream's candidates and recorded fixes), = constants.yaml h1_plan / h1_plan_w1b", "own runs": "every plan-constrained pick is a passing run of its own sweep (plan_sweep_h1.csv), for the key and padded sizes it names; the plans share no runs", "reproducible": "a run both drivers made (same run variant and setting) has the same status and time in plan_runs_h1.csv and plan_sweep_h1.csv", constants: "sweep preset: final re-run time = constants.yaml h1_kernels",
+    placement: "mesh placement computed from the kernel source = clusters with RedMulE activity in the trace. Covers square groups (1x1, 2x2) and attention only: selected non-square / splitK expert mappings and scale-8 picks have no trace, their diagrams rest on the source", sum: "sum of kernel times = operator-graph total" };
+  $("#checkSummary").innerHTML = Object.entries(kinds).map(([k, [ok, f]]) =>
+    `<div style="margin:3px 0"><span class="badge ${f ? "fail" : "ok"}">${k}: ${ok} of ${ok + f}</span> <span class="sec">${desc[k] || ""}</span></div>`).join("")
+    + (bad.length ? `<div class="note warn">${bad.length} check(s) fail: ${bad.map(x => esc(x.what)).join(", ")}</div>` : "");
+  $("#checkTable").innerHTML = `<tr><th>check</th><th>what</th><th>result</th><th>detail</th></tr>` +
+    c.map(x => `<tr><td>${x.kind}</td><td class="mono">${esc(x.what)}</td><td><span class="badge ${x.ok ? "ok" : "fail"}">${x.ok ? "pass" : "fail"}</span></td><td class="sec">${esc(x.detail)}</td></tr>`).join("");
+}
+
+// ------------------------------------------------------------------ plan panes (one per picked plan, nothing shared)
+// P = { j, plan, st, root, q(sel) }: everything a pane draws comes from its own plan bundle and its own state
+function panes() {
+  return state.views.map((id, j) => { const plan = planById(id); const root = document.querySelector(`.pane[data-j="${j}"]`);
+    return { j, plan, st: state.panes[j], root, q: s => root.querySelector(s) }; });
+}
+function buildPanes() {
+  const host = $("#panes"); host.style.setProperty("--ncol", state.views.length); host.innerHTML = "";
+  state.views.forEach((id, j) => host.append(el("div", { class: `pane c${j}`, "data-j": j }, `
+    <div class="card pane-head"></div>
+    <div class="card"><h3 style="margin-top:0">Per stage, per policy call</h3>
+      <p class="sec" style="margin-top:0">Sums of this plan's measured kernel times (estimate). Weight reads and traffic: op model on logical shapes. Bars: one per stage, on the same scale in both columns.</p>
+      <div class="stageCharts"></div>
+      <div class="scroll"><table class="stageTable"></table></div></div>
+    <div class="card"><h3 style="margin-top:0">Where the time goes <span class="muted" style="font-weight:400">(estimate)</span></h3>
+      <p class="sec" style="margin-top:0">Matrix kernels split into ideal (true FLOP at peak), padding, idle clusters, HBM floor (unique bytes at ${fmt(DATA.arch.bw / 1e9, 0)} GB/s) and the rest beyond the roofline; row operators whole. Same scale in both columns.</p>
+      <div class="legend budgetLegend"></div><svg class="budget" width="100%" height="190"></svg>
+      <h4 style="margin:16px 0 4px">By kernel class</h4>
+      <p class="sec" style="margin-top:0">Each stage's time split into GEMM, attention (FlatAttention) and row-operator kernels: count x measured time of this plan's kernels, summed (estimate, no overlap). Same scale in both columns.</p>
+      <div class="legend kindLegend"></div><svg class="kinds" width="100%" height="160"></svg></div>
+    <div class="card"><div class="row"><h3 class="grow" style="margin:0">Kernels in this plan</h3><div class="seg kindSeg"></div></div>
+      <p class="sec">One row per run key of this plan; click a header to sort, a row for its detail.</p>
+      <div class="scroll" style="max-height:560px"><table class="kernelTable"></table></div></div>
+    <div class="card detail"></div>`)));
+}
+function renderPaneHead(P) {
+  const v = P.plan; const other = panes().find(x => x.j !== P.j);
+  const rel = other && other.plan ? ` <span class="sec">x ${(v.total_ms / other.plan.total_ms).toFixed(2)} vs ${P.j ? "left" : "right"}</span>` : "";
+  P.q(".pane-head").innerHTML = `<div><b>${esc(v.label)}</b> <span class="muted">${esc(v.desc)}; <code>${esc(v.group)}</code></span></div>
+    <div style="margin-top:6px"><span class="big">${fmt(v.total_ms, 2)} ms</span>${rel}</div>
+    <div class="sec">MFU ${fmt(v.mfu, 1)} % · ${Object.keys(v.kernels).length} run keys · ${esc(v.note || "")}</div>`;
+}
+function renderStages(P) {
+  const n = (x, d) => `<td class="n">${x == null ? "" : fmt(x, d)}</td>`;
+  P.q(".stageTable").innerHTML = `<tr><th>stage</th><th class="n">ms</th><th class="n">share</th><th class="n">calls</th><th class="n">MFU, %</th><th class="n">weights read, MB</th><th class="n">traffic, MB</th><th class="n">GB/s</th></tr>` +
+    P.plan.stages.map(r => `<tr${r.kind === "stage" ? "" : ' class="sub"'}><td>${r.kind === "stage" ? `<b>${esc(r.label)}</b>` : `<span class="muted">↳</span> ${esc(r.label)}`}</td>${n(r.ms, 3)}<td class="n">${r.share == null ? "" : pct(r.share) + " %"}</td>${n(r.calls, 0)}${n(100 * r.mfu, 1)}${n(r.weights_mb, 1)}${n(r.traffic_mb, 1)}${n(r.gbps, 0)}</tr>`).join("");
+}
+
+// ------------------------------------------------------------------ per-stage bars (one bar per stage and metric)
+const STAGE_METRICS = [["ms", "time per call, ms", 2, 1], ["mfu", "MFU, %", 1, 100],
+                       ["weights_mb", "weights read, MB", 0, 1], ["traffic_mb", "HBM traffic, MB", 0, 1]];
+function renderStageCharts(P) {
+  const host = P.q(".stageCharts"); host.innerHTML = "";
+  const rows = v => v.stages.filter(r => r.kind === "stage");
+  const shown = panes().filter(x => x.plan);
+  const color = css(P.j ? "--s2" : "--s1");
+  // all panels first, so each is measured at its grid width
+  const svgs = STAGE_METRICS.map(() => { const e = sv("svg", { height: 104 }); host.append(e); return e; });
+  STAGE_METRICS.forEach(([key, title, dec, mul], m) => {
+    // shared scale over the plans on screen, so the two columns read against each other
+    const max = Math.max(...shown.flatMap(x => rows(x.plan).map(r => (r[key] || 0) * mul)), 1e-9);
+    const rs = rows(P.plan);
+    const svg = svgs[m];
+    const W = svg.getBoundingClientRect().width || 260, L = 76, R = 58, rowH = 20, top = 20;
+    svg.setAttribute("height", top + rs.length * rowH + 4);
+    const tt = sv("text", { x: 0, y: 12, class: "ink", "font-weight": 600 }); tt.textContent = title; svg.append(tt);
+    svg.append(sv("line", { x1: L, x2: L, y1: top - 2, y2: top + rs.length * rowH - 2, stroke: css("--grid") }));
+    rs.forEach((r, i) => {
+      const v = (r[key] || 0) * mul, y = top + i * rowH, w = Math.max((W - L - R) * v / max, v > 0 ? 1 : 0);
+      const lab = sv("text", { x: L - 8, y: y + 12, "text-anchor": "end" }); lab.textContent = r.label; svg.append(lab);
+      const rect = sv("rect", { x: L, y: y + 2, width: w, height: 13, rx: 3, fill: color });
+      hover(rect, `<b>${esc(r.label)}: ${title}</b><br>${fmt(v, dec + 1)}` + (key === "ms" && r.share != null ? ` (${pct(r.share)} % of the call)` : ""));
+      svg.append(rect);
+      const t = sv("text", { x: L + w + 6, y: y + 12, class: "ink" }); t.textContent = fmt(v, dec); svg.append(t);
+    });
+  });
+}
+
+// ------------------------------------------------------------------ time by kernel class per stage
+const KINDS = [["gemm", "GEMM", "--q4"], ["attn", "attention", "--q2"], ["row", "row operators", "--s5"]];
+function kindRows(plan) {
+  const by = {};
+  for (const o of plan.ops) {
+    if (!o.kernel || o.ns == null) continue;
+    const r = by[o.stage] || (by[o.stage] = { stage: o.stage, gemm: 0, attn: 0, row: 0 });
+    r[plan.kernels[o.kernel].kind] += o.count * o.ns;
+  }
+  return plan.stages.filter(r => r.kind === "stage" && by[r.stage || r.label]).map(r => by[r.stage || r.label]);
+}
+function renderKinds(P) {
+  const svg = P.q(".kinds"); svg.innerHTML = "";
+  P.q(".kindLegend").innerHTML = KINDS.map(([, l, c]) => `<span><i style="background:var(${c})"></i>${l}</span>`).join("");
+  const rows = kindRows(P.plan);
+  const tot = r => r.gemm + r.attn + r.row;
+  const max = Math.max(...panes().filter(x => x.plan).flatMap(x => kindRows(x.plan).map(tot)), 1);
+  const W = svg.clientWidth || 600, L = 80, R = 130, rowH = 34, top = 8;
+  const sx = v => (W - L - R) * v / max;
+  svg.setAttribute("height", top + rows.length * rowH + 26);
+  const step = max / 1e6 > 12 ? 5 : 2;
+  for (let t = 0; t <= max / 1e6; t += step) { const x = L + sx(t * 1e6);
+    svg.append(sv("line", { x1: x, x2: x, y1: top, y2: top + rows.length * rowH, stroke: css("--grid") }));
+    const tx = sv("text", { x, y: top + rows.length * rowH + 16, "text-anchor": "middle" }); tx.textContent = `${t} ms`; svg.append(tx); }
+  rows.forEach((r, i) => {
+    const y = top + i * rowH + 7; let x = L; const T = tot(r);
+    const lab = sv("text", { x: L - 10, y: y + 14, "text-anchor": "end", class: "ink" }); lab.textContent = r.stage; svg.append(lab);
+    const segs = KINDS.filter(([k]) => r[k] > 0);
+    segs.forEach(([k, l, c], j) => { const w = sx(r[k]); if (w < 0.5) return;
+      const last = j === segs.length - 1;
+      const rect = sv("rect", { x, y, width: Math.max(w - (last ? 0 : 2), 0.5), height: 20, fill: css(c), rx: last ? 4 : 0 });
+      hover(rect, `<b>${r.stage}: ${l}</b><br>${fmt(r[k] / 1e6, 3)} ms, ${pct(r[k] / T)} % of the stage`);
+      svg.append(rect);
+      if (w > 46) { const t = sv("text", { x: x + w / 2 - (last ? 0 : 1), y: y + 14, "text-anchor": "middle", "font-size": 11,
+          style: `fill:${k === "attn" ? css("--sel") : "#fff"}` });
+        t.textContent = `${pct(r[k] / T)}%`; svg.append(t); }
+      x += w; });
+    const t = sv("text", { x: x + 8, y: y + 14 }); t.innerHTML = `<tspan class="ink">${fmt(T / 1e6, 2)} ms</tspan>`; svg.append(t);
+  });
+}
+
+// ------------------------------------------------------------------ budget chart (horizontal stacked bars)
+function renderBudget(P) {
+  const svg = P.q(".budget"); svg.innerHTML = "";
+  P.q(".budgetLegend").innerHTML = BUDGET.map(([, l, c]) => `<span><i style="background:var(${c})"></i>${l}</span>`).join("");
+  const b = P.plan.budget; const W = svg.clientWidth || 600, L = 80, R = 130, rowH = 34, top = 8;
+  const totals = b.map(x => BUDGET.reduce((a, [k]) => a + x[k], 0));
+  // shared scale over the plans on screen, as the other per-stage charts
+  const max = Math.max(...panes().filter(x => x.plan).flatMap(x => x.plan.budget.map(r => BUDGET.reduce((a, [k]) => a + r[k], 0))));
+  const sx = v => (W - L - R) * v / max;
+  svg.setAttribute("height", top + b.length * rowH + 26);
+  const step = max / 1e6 > 12 ? 5 : 2;
+  for (let t = 0; t <= max / 1e6; t += step) { const x = L + sx(t * 1e6);
+    svg.append(sv("line", { x1: x, x2: x, y1: top, y2: top + b.length * rowH, stroke: css("--grid") }));
+    const tx = sv("text", { x, y: top + b.length * rowH + 16, "text-anchor": "middle" }); tx.textContent = `${t} ms`; svg.append(tx); }
+  b.forEach((r, i) => {
+    const y = top + i * rowH + 7; let x = L;
+    const lab = sv("text", { x: L - 10, y: y + 14, "text-anchor": "end", class: "ink" }); lab.textContent = r.stage; svg.append(lab);
+    const segs = BUDGET.filter(([k]) => r[k] > 0);
+    segs.forEach(([k, l, c], j) => { const w = sx(r[k]); if (w < 0.5) { return; }
+      const last = j === segs.length - 1;
+      const rect = sv("rect", { x, y, width: Math.max(w - (last ? 0 : 2), 0.5), height: 20, fill: css(c), rx: last ? 4 : 0 });
+      hover(rect, `<b>${r.stage}: ${l}</b><br>${fmt(r[k] / 1e6, 3)} ms (${pct(r[k] / totals[i])} % of the stage)`);
+      svg.append(rect); x += w; });
+    const t = sv("text", { x: x + 8, y: y + 14 }); t.innerHTML = `<tspan class="ink">${fmt(totals[i] / 1e6, 2)} ms</tspan> · MFU ${P.plan.stage_mfu[r.stage]} %`; svg.append(t);
+  });
+}
+
+// ------------------------------------------------------------------ kernel table
+function kernelRows(P) {
+  const st = P.st; const by = {};
+  for (const o of P.plan.ops) { if (!o.kernel) continue; const k = P.plan.kernels[o.kernel];
+    const r = by[o.kernel] = by[o.kernel] || { k, calls: 0, ops: [] }; r.calls += o.count; r.ops.push(`${o.stage}.${o.op}`); }
+  const tot = Object.values(by).reduce((a, r) => a + r.calls * r.k.time_ns, 0);
+  let rows = Object.values(by).map(r => ({ ...r, total: r.calls * r.k.time_ns, share: r.calls * r.k.time_ns / tot }));
+  if (st.kind !== "all") rows = rows.filter(r => r.k.kind === st.kind);
+  // natural direction first (largest first for numbers, a-z for text); a second click on the header reverses it
+  const NA = 1e18, TR = { selected: 0, other: 1, none: 2 };
+  const runs = r => r.k.n_own ?? r.k.candidates.length;
+  const key = { name: r => r.k.name, calls: r => -r.calls, time: r => -r.k.time_ns, total: r => -r.total, share: r => -r.share,
+    mfu: r => r.k.kind === "row" ? NA : -r.k.mfu, fac: r => r.k.kind === "row" ? NA : r.k.f_rest,
+    bound: r => r.k.kind === "row" ? "z" : r.k.bound, roof: r => r.k.kind === "row" ? NA : -r.k.time_ns / r.k.roof_ns, cand: r => r.k.selected.cand || "~",
+    runs: r => -runs(r), trace: r => TR[r.k.trace_status] }[st.sort];
+  const dir = st.sortRev ? -1 : 1;
+  rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * dir || (b.total - a.total); });
+  return rows;
+}
+const TRACE_BADGE = { selected: ["ok", "selected"], other: ["warn", "other setting"], none: ["fail", "none"] };
+function renderKernels(P) {
+  const st = P.st; const ks = P.q(".kindSeg"); ks.innerHTML = "";
+  [["all", "All"], ["gemm", "GEMM"], ["attn", "Attention"], ["row", "Row ops"]].forEach(([k, l]) => {
+    const b = el("button", {}, l); if (k === st.kind) b.className = "on"; b.onclick = () => { st.kind = k; renderKernels(P); }; ks.append(b); });
+  const t = P.q(".kernelTable"); const rows = kernelRows(P);
+  const th = (k, l, n, title) => `<th class="sort ${n ? "n" : ""}" data-s="${k}"${title ? ` title="${title}"` : ""}>${l}${st.sort === k ? (st.sortRev ? " ▴" : " ▾") : ""}</th>`;
+  t.innerHTML = `<tr>${th("name", "run key")}${th("calls", "calls", 1)}${th("time", "µs", 1)}${th("total", "ms", 1)}${th("share", "share", 1)}${th("mfu", "MFU, %", 1)}${th("fac", "f_pad · f_occ · f_rest", 0, "sort by f_rest")}${th("bound", "bound")}${th("roof", "x roofline", 1)}${th("cand", "selected")}${th("runs", "runs", 1, "runs this plan's selection looked at for this key")}${th("trace", "trace")}</tr>`;
+  t.querySelectorAll("th.sort").forEach(h => h.onclick = () => { st.sortRev = st.sort === h.dataset.s ? !st.sortRev : false; st.sort = h.dataset.s; renderKernels(P); });
+  for (const r of rows) {
+    const k = r.k; const tr = el("tr", { class: "click" + (st.kernel === k.name ? " on" : "") });
+    const fac = k.kind === "row" ? `<span class="muted">vector cores</span>` :
+      `<span class="mono">${k.f_pad.toFixed(2)} · ${k.f_occ.toFixed(2)} · ${k.f_rest.toFixed(2)}</span>`;
+    const tb = TRACE_BADGE[k.trace_status]; const n = k.n_runs;
+    tr.innerHTML = `<td class="mono" title="${esc([...new Set(r.ops)].join(", "))}">${esc(k.name)}</td>
+      <td class="n">${r.calls}</td><td class="n">${us(k.time_ns)}</td><td class="n">${fmt(r.total / 1e6, 3)}</td><td class="n">${pct(r.share)} %</td>
+      <td class="n">${k.kind === "row" ? "–" : pct(k.mfu)}</td><td>${fac}</td><td>${k.kind === "row" ? "–" : k.bound}</td><td class="n">${k.kind === "row" ? "–" : fmt(k.time_ns / k.roof_ns, 1)}</td>
+      <td class="mono">${esc(k.selected.cand || "")}</td><td class="n" title="${n ? (k.plan_sel === "constrained" ? `plan-constrained sweep ${n.sweep} (${n.sweep_ok} ok) over ${n.variants} padding(s) + upstream's ${n.upstream} (${n.upstream_ok} ok)` : `upstream rule: ${n.upstream} run(s), ${n.upstream_ok} passed the check`) : ""}">${k.n_own ?? k.candidates.length}</td><td><span class="badge ${tb[0]}">${tb[1]}</span></td>`;
+    tr.onclick = () => selectKernel(P, k.name);
+    t.append(tr);
+  }
+}
+function selectKernel(P, name) {
+  P.st.kernel = name; P.st.cand = null; renderKernels(P); renderDetail(P);
+  if (state.link) panes().forEach(Q => { if (Q.j !== P.j && Q.plan.kernels[name]) { Q.st.kernel = name; Q.st.cand = null; renderKernels(Q); renderDetail(Q, true); } });
+  P.q(".detail").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ------------------------------------------------------------------ detail
+function traceUrl(t) { const i = t.dir.indexOf("/traces/"); return i < 0 ? null : t.dir.slice(i) + "/perfetto.json"; }
+function runUrl(dir) { const i = dir.indexOf("/stage1-h1/"); return i < 0 ? null : "/runs/" + dir.slice(i + 11); }
+
+async function openPerfetto(t, btn) {
+  const url = traceUrl(t); if (!url) return;
+  btn.disabled = true; const old = btn.textContent; btn.textContent = "loading trace…";
+  try {
+    const buf = await (await fetch(url)).arrayBuffer();
+    const ORIGIN = "https://ui.perfetto.dev"; const win = window.open(ORIGIN);
+    if (!win) { alert("Pop-up blocked: allow pop-ups for this page."); return; }
+    const timer = setInterval(() => win.postMessage("PING", ORIGIN), 50);
+    const onMsg = e => { if (e.data !== "PONG") return; clearInterval(timer); window.removeEventListener("message", onMsg);
+      win.postMessage({ perfetto: { buffer: buf, title: t.name, fileName: t.name + ".json", url: location.href } }, ORIGIN); };
+    window.addEventListener("message", onMsg);
+    setTimeout(() => clearInterval(timer), 30000);
+  } finally { btn.disabled = false; btn.textContent = old; }
+}
+
+function factorBars(k) {
+  if (k.kind === "row") return `<div class="kv">
+    <div>effective bandwidth</div><div>${fmt(k.hbm_eff_bw / 1e9, 0)} GB/s of ${fmt(DATA.arch.bw / 1e9, 0)} GB/s HBM (operator's unique bytes / time)</div>
+    <div>HBM lower bound</div><div>${us(k.t_hbm_min_ns)} µs vs ${us(k.time_ns)} µs measured</div>
+    <div>MFU</div><div class="muted">not meaningful: few FLOP on the vector cores, divided by the matrix-unit peak</div></div>`;
+  const f = (l, v, t) => `<div class="factor"><div>${l}</div><div class="bar" title="${esc(t)}"><span style="width:${Math.min(100, 100 * v)}%"></span></div><div class="mono">${v.toFixed(2)}</div></div>`;
+  return f(`f_pad`, k.f_pad, `true / padded FLOP = shape padding x RedMulE block fill`)
+    + `<div class="muted mono" style="font-size:12px;margin:-2px 0 6px">${esc(k.f_pad_text)}</div>`
+    + f("f_occ", k.f_occ, `active clusters / ${DATA.arch.mesh[0] * DATA.arch.mesh[1]}`) + f("f_rest", k.f_rest, "matrix-unit share of time inside the active clusters")
+    + `<div class="factor"><div><b>MFU</b></div><div class="bar"><span style="width:${100 * k.mfu}%;background:var(--s2)"></span></div><div class="mono">${pct(k.mfu)} %</div></div>
+    <div class="kv" style="margin-top:8px">
+      <div>ideal (FLOP at peak)</div><div>${us(k.t_ideal_ns)} µs</div>
+      <div>HBM lower bound</div><div>${us(k.t_hbm_min_ns)} µs (${fmt(k.bytes_call / 1e6, 2)} MB unique bytes at ${fmt(DATA.arch.bw / 1e9, 0)} GB/s)</div>
+      <div>roofline time</div><div>${us(k.roof_ns)} µs, ${k.bound}-bound · measured is ${fmt(k.time_ns / k.roof_ns, 1)}x the roofline</div>
+      <div>effective bandwidth</div><div>${fmt(k.hbm_eff_bw / 1e9, 0)} GB/s (unique bytes / measured time)</div></div>`;
+}
+
+function techTable(k) {
+  if (!k.techniques.length) return `<p class="sec">${esc(k.row_note || "")}</p><p class="sec">Run setting: <code>${esc(k.config)}</code></p>` + notSwept(k);
+  let h = `<table><tr><th>technique</th><th class="n">valid settings</th><th class="n">swept</th><th class="n">passed check</th><th class="n">fastest, µs</th><th></th></tr>`;
+  for (const t of k.techniques) {
+    const sw = `<i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(${TECH_COLOR[t.technique]});margin-right:6px"></i>`;
+    h += `<tr><td>${sw}${esc(t.technique)}<div class="muted" style="font-size:12px">${esc(t.desc)} · ${esc(t.driver)}</div></td>
+      <td class="n">${t.enumerated ? t.valid.toLocaleString() : "<span class='muted'>not enumerated</span>"}</td><td class="n">${t.enumerated ? t.swept : "–"}</td>
+      <td class="n">${t.enumerated ? t.ok + (t.wrong ? ` <span class="muted">(${t.wrong} wrong)</span>` : "") + (t.failed ? ` <span class="muted">(${t.failed} failed)</span>` : "") : "–"}</td>
+      <td class="n">${t.best_ns ? us(t.best_ns) : "–"}</td><td>${t.selected ? `<span class="badge ok">selected</span>` : ""}</td></tr>`;
+  }
+  h += `</table>`;
+  return h + notSwept(k);
+}
+
+function ifaceTable(k) {
+  // parsed from the kernel sources (kernel_interface.py); values from the generated headers in the run folders
+  const order = {mapping: 0, schedule: 1, fusion: 2, layout: 3, operator: 4, shape: 5, precision: 6, check: 7};
+  const rows = [...(k.interface || [])].sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9) || a.param.localeCompare(b.param));
+  const seen = r => { const e = Object.entries(r.seen || {}); if (!e.length) return "<span class='muted'>–</span>";
+    const t = e.sort((a, b) => b[1] - a[1]).slice(0, 6).map(([v, n]) => `${esc(v)}<span class="muted">×${n}</span>`).join(", ");
+    return (e.length > 6 ? `${e.length} values: ` : "") + t; };
+  const tun = r => ["mapping", "schedule", "fusion", "layout"].includes(r.kind);
+  let h = `<details${k.kind === "row" ? " open" : ""}><summary>${rows.length} parameters; ${rows.filter(tun).length} tunable (mapping, schedule, fusion, layout)</summary>
+    <div style="overflow-x:auto"><table><tr><th>parameter</th><th>kind</th><th>use</th><th>default</th><th>selected</th><th>values over ${rows.length ? rows[0].n_runs : 0} runs</th><th>upstream</th><th>where</th></tr>`;
+  for (const r of rows) {
+    const one = tun(r) && Object.keys(r.seen || {}).length === 1;
+    h += `<tr${r.upstream === "upstream only" ? ' class="muted"' : ""}><td class="mono" title="${esc(r.note || "")}">${esc(r.param)}</td><td>${esc(r.kind || "?")}</td><td>${esc(r.use)}</td>
+      <td class="mono">${esc(r.default ?? "–")}</td><td class="mono">${esc(r.selected ?? "–")}</td><td class="mono">${seen(r)}${one ? ' <span class="badge">never swept</span>' : ""}</td>
+      <td>${esc(r.upstream || "–")}</td><td class="mono muted" style="font-size:11px">${esc(r.where)}</td></tr>`;
+  }
+  return h + `</table></div><p class="sec" style="font-size:12px">Parameters parsed from the kernel sources (descriptor fields passed to the entry call, #if switches, other macros); kind and note from kernel_interface.ANNOT; values read from the generated header kept in each run folder. Hover a parameter for its note.</p></details>`;
+}
+
+function planNote(k) {
+  const fix = k.selected.fix || k.plan_fix;
+  const failed = k.failed || [];
+  const cons = k.plan_sel === "constrained";
+  let h = `<div class="note">${cons ? "Plan-constrained sweep: same deployment plan; the fastest of the sweep's own runs of this key that passed the output check (at the head padding of the selected combination)" :
+    `Upstream deployment plan: ${k.kind === "row" ? "kernel at default parameters with the plan's shape and HBM placement" : "upstream's candidates simulated, the fastest that passed the output check kept"}`}.`;
+  if (fix && !cons) h += `<br><b>Recorded fix:</b> ${esc(fix)}`;
+  if (failed.length) h += `<br><b>Failed the output check:</b> ${failed.map(f => `<code>${esc(f.cand)}</code>${f.bad ? ` (${Number(f.bad).toLocaleString()} bad)` : ` (${esc(f.status)})`}`).join(", ")}`;
+  if ((k.skipped || []).length) h += `<br><span class="muted">Not runnable: ${k.skipped.map(x => `${esc(x.cand)} (${esc(x.status)})`).join(", ")}</span>`;
+  return h + `</div>`;
+}
+function notSwept(k) {
+  return k.not_swept.length ? `<details style="margin-top:6px"><summary>In the kernel but never swept</summary><ul>${k.not_swept.map(x => `<li><b>${esc(x.name)}</b>: <span class="sec">${esc(x.why)}</span></li>`).join("")}</ul></details>` : "";
+}
+
+function candPlot(P, k, host) {
+  host.innerHTML = "";
+  if (!k.candidates.length) return;
+  const cs = [...k.candidates].sort((a, b) => (a.time_ns ?? 1e12) - (b.time_ns ?? 1e12));
+  const ok = cs.filter(c => c.time_ns); const max = Math.max(...ok.map(c => c.time_ns)) * 1.05;
+  const W = host.clientWidth || 600, L = 230, R = 70, rh = 19, top = 22;
+  const svg = sv("svg", { width: "100%", height: top + cs.length * rh + 8 }); host.append(svg);
+  const sx = v => L + (W - L - R) * v / max;
+  const ticks = niceTicks(max);
+  ticks.forEach(t => { const x = sx(t); svg.append(sv("line", { x1: x, x2: x, y1: top - 4, y2: top + cs.length * rh, stroke: css("--grid") }));
+    const tx = sv("text", { x, y: top - 8, "text-anchor": "middle" }); tx.textContent = `${fmt(t / 1e3, 0)} µs`; svg.append(tx); });
+  const curCand = P.st.cand || k.selected.cand;
+  cs.forEach((c, i) => {
+    const y = top + i * rh + rh / 2; const sel = c.cand === k.selected.cand; const cur = c.cand === curCand;
+    const g = sv("g", { style: "cursor:pointer" });
+    g.append(sv("rect", { x: 0, y: y - rh / 2, width: W, height: rh, fill: cur ? css("--surface-2") : "transparent" }));
+    const lab = sv("text", { x: L - 10, y: y + 4, "text-anchor": "end", class: sel ? "ink" : "" });
+    lab.textContent = (sel ? "★ " : "") + c.cand + (k.plan ? ((c.origin || "").startsWith("fallback") ? " (fallback)" : (c.origin || "").startsWith("plan-constrained") ? (k.plan_sel === "constrained" ? "" : (c.constrained_pick ? " ◆" : " (c)")) : c.fix ? " (fixed)" : "") : (c.upstream ? " (upstream opt())" : "")); lab.setAttribute("font-family", "ui-monospace, monospace"); lab.setAttribute("font-size", "11");
+    g.append(lab);
+    const col = css(TECH_COLOR[c.technique] || "--s1");
+    if (c.time_ns) {
+      g.append(sv("line", { x1: L, x2: sx(c.time_ns), y1: y, y2: y, stroke: css("--grid"), "stroke-width": 2 }));
+      const filled = c.status === "ok";
+      g.append(sv("circle", { cx: sx(c.time_ns), cy: y, r: sel ? 6 : 4.5, fill: filled ? col : css("--surface-1"), stroke: filled ? css("--surface-1") : col, "stroke-width": 2 }));
+      const v = sv("text", { x: sx(c.time_ns) + 9, y: y + 4 }); v.textContent = filled ? us(c.time_ns) : `${us(c.time_ns)} ${c.status}`; g.append(v);
+    } else { const v = sv("text", { x: L + 4, y: y + 4 }); v.textContent = c.status; g.append(v); }
+    hover(g, () => candTip(k, c));
+    g.addEventListener("click", () => { P.st.cand = c.cand; renderDetail(P, true); });
+    svg.append(g);
+  });
+}
+function niceTicks(max) { const step = Math.pow(10, Math.floor(Math.log10(max / 4))); const m = [1, 2, 5, 10].find(f => max / (f * step) <= 6) * step;
+  const out = []; for (let t = 0; t <= max; t += m) out.push(t); return out; }
+function candTip(k, c) {
+  const s = c.setting; let geo = "";
+  if (k.kind === "gemm") geo = `${s.strategy}, ${s.groups} group(s) of ${s.sx}x${s.sy} = ${s.active} clusters; padded ${s.Mp}x${s.Np}x${s.Kp} (work ${c.work_ratio}x)<br>per cluster: tile ${s.mt}x${s.nt}x${s.kt} (one RedMulE call) x ${s.redmule_calls} calls (M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter}); block fill ${pct(s.f_array)} %`;
+  else geo = `${s.mode}, ${s.active_groups} of ${s.groups} groups of ${s.sx}x${s.sy} busy = ${s.active} clusters<br>per group: block ${s.Br}x${s.Bc}, Tr ${s.Tr} · Tc ${s.Tc}; per cluster ${s.Br_s}x${s.Bc_s}; work ${c.work_ratio}x`;
+  return `<b class="mono">${esc(c.cand)}</b>${c.cand === k.selected.cand ? " ★ selected" : ""}<br>${geo}<br>time ${c.time_ns ? us(c.time_ns) + " µs" : "–"} · status ${c.status}` +
+    (c.transposed ? `<br><b>transposed</b>: Z<sup>T</sup> = W<sup>T</sup> X<sup>T</sup>, run as ${esc(c.run_shape)}; X<sup>T</sup> / Z<sup>T</sup> layout cost in the neighbouring operators not counted` : "") +
+    (c.origin ? `<br>${esc(c.origin)}` : "") + (c.fix ? `<br><span class="muted">fix: ${esc(c.fix)}</span>` : "") +
+    (c.est_ns ? `<br><span class="muted">model (kernel_model, estimate) ${us(c.est_ns)} µs</span>` : "") + (c.trace ? `<br>trace available` : "") + `<br><span class="muted">${esc(c.source)}</span>`;
+}
+
+// ------------------------------------------------------------------ mesh
+function meshSvg(k, c, overlayTrace, overlay) {
+  const N = 8, cell = 40, pad = 30; const W = pad + N * cell + 10, H = N * cell + pad + 24;
+  const svg = sv("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}` });
+  const mesh = c ? c.mesh : null; const busy = overlayTrace ? overlayTrace.busy_frac[overlay] : null;
+  const active = overlayTrace ? new Set(overlayTrace.active_clusters) : null;
+  const qs = ["--q1", "--q2", "--q3", "--q4", "--q5"].map(css);
+  for (let id = 0; id < 64; id++) {
+    const x = id % N, y = Math.floor(id / N); const px = pad + x * cell, py = (N - 1 - y) * cell + 4;
+    let fill = css("--idle"), label = "", ink = css("--idle-ink"), info = `cluster ${id} (x ${x}, y ${y})`;
+    if (busy) {
+      const b = busy[id]; const on = b > 0;
+      fill = on ? qs[Math.min(4, Math.floor(b * 5))] : css("--idle");  // absolute: 0-20-40-60-80-100 %
+      label = on ? Math.round(100 * b) : ""; ink = on ? (qs.indexOf(fill) >= 3 ? "#fff" : css("--text-primary")) : ink;
+      info += `<br>${overlay} busy ${pct(b)} % of the kernel window`;
+    }
+    if (mesh) { const m = mesh[id];
+      if (!busy) { if (m.g >= 0) { fill = css(m.g % 2 ? "--g-b" : "--g-a"); ink = css("--text-primary"); label = "g" + m.g; } }
+      info += m.g >= 0 ? `<br>group ${m.g}, position in group (${m.cx}, ${m.cy})` + gemmCellInfo(k, c, m) : `<br>idle in this mapping`;
+    }
+    const r = sv("rect", { x: px + 1, y: py + 1, width: cell - 2, height: cell - 2, rx: 4, fill });
+    if (mesh && mesh[id].g >= 0 && busy) r.setAttribute("stroke", css("--sel")), r.setAttribute("stroke-width", 1.2);
+    hover(r, info); svg.append(r);
+    if (label !== "") { const t = sv("text", { x: px + cell / 2, y: py + cell / 2 + 4, "text-anchor": "middle", "font-size": 11, style: `fill:${ink};pointer-events:none` }); t.textContent = label; svg.append(t); }
+  }
+  for (let i = 0; i < N; i++) {
+    const tx = sv("text", { x: pad + i * cell + cell / 2, y: N * cell + 18, "text-anchor": "middle" }); tx.textContent = i; svg.append(tx);
+    const ty = sv("text", { x: pad - 8, y: (N - 1 - i) * cell + 4 + cell / 2 + 4, "text-anchor": "end" }); ty.textContent = i; svg.append(ty);
+  }
+  const lx = sv("text", { x: pad + N * cell / 2, y: H - 2, "text-anchor": "middle" }); lx.textContent = "x"; svg.append(lx);
+  return svg;
+}
+function gemmCellInfo(k, c, m) {
+  const s = c.setting; if (k.kind !== "gemm") return k.kind === "attn" ? `<br>${s.heads_per_group} KV head(s) per group; this cluster: rows ${m.cy * s.Br_s}..+${s.Br_s}, cols ${m.cx * s.Bc_s}..+${s.Bc_s} of each ${s.Br}x${s.Bc} block` : "";
+  const own = s.strategy === "splitN" ? `N block ${m.g} of ${s.groups} (${s.Np / s.groups} columns)` : s.strategy === "splitK" ? `K block ${m.g} of ${s.groups} (${s.Kp / s.groups} deep), reduced into group 0` : "the whole problem";
+  return `<br>group owns ${own}<br>Z tile per step: rows +${m.cy * s.mt}, cols +${m.cx * s.nt} (${s.mt}x${s.nt}), ${s.redmule_calls} RedMulE calls`;
+}
+
+// mapping text by level: whole operator -> cluster groups -> one group, one step -> one cluster ("tile" and
+// "block" named at the level they belong to: GEMM tile = one RedMulE call on one cluster, SummaGEMM.h:142-144;
+// attention block = one step of one group, split over its clusters)
+const lvl = (name, body) => `<div style="margin-top:4px"><b>${name}</b>: ${body}</div>`;
+function gemmLevels(s, cand) {
+  const N = DATA.arch.mesh[0] * DATA.arch.mesh[1];
+  const per = s.strategy === "splitN" ? [s.Mp, s.Np / s.groups, s.Kp] : s.strategy === "splitK" ? [s.Mp, s.Np, s.Kp / s.groups] : [s.Mp, s.Np, s.Kp];
+  return lvl("Whole operator", `M x N x K padded to ${s.Mp} x ${s.Np} x ${s.Kp} (work ${cand.work_ratio}x).`) +
+    lvl("Cluster groups", `${s.groups} group(s) of ${s.sx} x ${s.sy} clusters = <b>${s.active}</b> of ${N}. ${s.strategy === "splitN" ? "splitN: each group owns N / " + s.groups + " columns" : s.strategy === "splitK" ? "splitK: each group owns K / " + s.groups + "; a FlooNoC reduction adds the partial sums" : "Nosplit: one group does the whole product"}; per group ${per.join(" x ")}.`) +
+    lvl("Per group, M, N, K iterations", `M ${s.m_iter} x N ${s.n_iter} = <b>${s.m_iter * s.n_iter}</b> output block(s) of ${s.sy * s.mt} x ${s.sx * s.nt} to cover its ${per[0]} x ${per[1]} output, one after another; K ${s.k_iter} step(s) of ${s.kt} each (${per[2]} / ${s.kt}). ${s.m_iter * s.n_iter * s.k_iter} SUMMA steps in all (SummaGEMM m_iter, n_iter, k_iter).`) +
+    lvl("Per group, one SUMMA step", `output block ${s.sy * s.mt} x ${s.sx * s.nt} (${s.sy} x ${s.mt} rows, ${s.sx} x ${s.nt} columns), K step ${s.kt}; A broadcast along rows, B along columns.`) +
+    lvl("Per cluster", `<b>tile</b> ${s.mt} x ${s.nt} x ${s.kt} (M x N x K) = one RedMulE call per SUMMA step, so ${s.redmule_calls} calls (M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter}).`) +
+    lvl("RedMulE fill", rmFill(s)) +
+    lvl("Time per cluster", `${us(s.redmule_floor_ns)} µs if every MAC were useful (${s.redmule_calls} calls at peak); ${us(s.redmule_array_ns)} µs with the block fill above; ${cand.time_ns ? us(cand.time_ns) : "–"} µs measured. Peak-rate MAC time = ${cand.time_ns ? pct(s.redmule_floor_ns / cand.time_ns) : "–"} % of measured.`);
+}
+// RedMulE output blocks (light_redmule.cpp init_redmule_meta_data): ce_h rows x ce_w*(ce_pipe+1) columns per pass,
+// a partly filled block costs a full pass; fill per dimension says which one loses
+function rmFill(s) {
+  const [h, w, pipe] = DATA.arch.ce, [bm, bn] = DATA.arch.rm_blk;
+  const dim = (name, t, b) => { const n = Math.ceil(t / b), f = t / (n * b);
+    return `${name} ${t} = ${n} block${n > 1 ? "s" : ""} of ${b}` + (f < 1 ? ` (last one ${t - (n - 1) * b} / ${b} used, <b>${pct(f)} %</b>)` : " (full)"); };
+  return `${h} x ${w} CE array, ${pipe + 1} outputs per CE, so one pass computes a ${bm} x ${bn} output block (rows x columns) and a partly used block costs a full pass. ` +
+    `${dim("M", s.mt, bm)}; ${dim("N", s.nt, bn)}. Block fill ${pct(s.f_array)} %.`;
+}
+function attnLevels(k, s, cand) {
+  return lvl("Whole operator", `${k.hkv} KV heads (${k.hq} query heads); query rows padded to ${s.q_pad}, kv rows to ${s.kv_pad} (work ${cand.work_ratio}x).`) +
+    lvl("Cluster groups", `${s.groups} groups of ${s.sx} x ${s.sy} clusters, ${s.active_groups} busy = <b>${s.active}</b> clusters; each takes ${s.heads_per_group} KV head(s) in turn. ${s.mode} mode.`) +
+    lvl("Per group, one step", `<b>block</b> ${s.Br} x ${s.Bc} (query rows x kv rows); Tr ${s.Tr} x Tc ${s.Tc} blocks per KV head.`) +
+    lvl("Per cluster", `${s.Br_s} x ${s.Bc_s} of each block (${s.Br} / ${s.sy} rows, ${s.Bc} / ${s.sx} kv rows).`);
+}
+
+function renderDetail(P, keepScroll) {
+  if (DATA.pages) setTimeout(writeHash, 0);
+  const d = P.q(".detail"); const k = P.plan.kernels[P.st.kernel];
+  if (!k) { d.innerHTML = `<h2>Kernel detail</h2><p class="sec">Pick a kernel in the table above.</p>`; return; }
+  const p = { name: P.plan.label }; const uses = k.uses;
+  const calls = uses.reduce((a, u) => a + u.count, 0);
+  const cand = k.kind === "row" ? null : (k.candidates.find(c => c.cand === (P.st.cand || k.selected.cand)) || k.selected);
+  const tr = k.trace;
+  d.innerHTML = `
+    <div class="row"><h2 class="grow mono" style="font-size:17px">${esc(k.name)}</h2>
+      <span class="badge">${esc(k.kernel_label)}</span><span class="badge">${calls} calls in ${p.name}</span></div>
+    <p class="sec">${uses.map(u => `<code>${u.stage}.${u.op}</code> x ${u.count} (layers ${esc(u.layers)})`).join(" · ") || "not used in this page"}</p>
+    <div class="split">
+      <div>
+        <h3>Selected and where MFU is lost</h3>
+        <div class="kv" style="margin-bottom:8px">
+          <div>time per call</div><div><b>${us(k.time_ns)} µs</b> <span class="muted">(measured, constants <code>${esc(k.constants_key)}</code>)</span></div>
+          ${k.kind === "row" ? (k.pipelined ? `<div>schedule</div><div>pipelined rows (<code>pipeline = 1</code>)</div>` : "") : `<div>selected</div><div class="mono">${esc(k.selected.cand)} <span class="muted">(${esc(k.selected.technique)})</span>${k.selected.transposed ? ` <span class="badge">transposed, runs as ${esc(k.selected.run_shape)}; layout cost of X<sup>T</sup> / Z<sup>T</sup> not counted</span>` : ""}</div>`}
+          ${k.stage1 ? `<div>${esc(k.stage1.label || "stage 1")}</div><div class="mono">${esc(k.stage1.setting || "–")} · ${us(k.stage1.time_ns)} µs <span class="muted">(×${k.stage1.speedup.toFixed(2)} = ${k.plan ? "constrained ÷ upstream rule" : "stage-1 pick ÷ selected"})</span></div>` : ""}
+        </div>
+        ${factorBars(k)}
+        <details style="margin-top:8px"><summary>Provenance (constants.yaml)</summary><p class="sec mono" style="white-space:pre-wrap">${esc(k.constants_source)}\n\n${esc(k.constants_note)}</p></details>
+        ${k.plan ? planNote(k) : ""}
+        ${(k.wrong_faster || []).length ? `<div class="note warn">${k.wrong_faster.length} run(s) failed the output check but were faster than the selected setting: ${k.wrong_faster.map(w => `<code>${esc(w.cand)}</code> ${us(w.time_ns)} µs (${w.bad} bad)`).join(", ")}. Excluded by the pick rule.</div>` : ""}
+        <h3>Mapping techniques for this shape</h3>
+        ${techTable(k)}
+        <h3>Kernel parameters (${esc(k.interface_kernel)}: interface + selected)</h3>
+        ${ifaceTable(k)}
+      </div>
+      <div>
+        <h3>Spatial mapping on the ${DATA.arch.mesh[0]} x ${DATA.arch.mesh[1]} mesh</h3>
+        <div class="meshCtl" class="row" style="margin-bottom:6px"></div>
+        <div class="row" style="align-items:flex-start"><div class="mesh"></div><div class="meshSide grow sec" style="min-width:200px;font-size:13px"></div></div>
+        <h3>Trace</h3>
+        <div class="traceBox"></div>
+      </div>
+    </div>
+    ${k.candidates.length ? `<h3>${k.plan ? "Plan runs" : "Swept candidates"} (${k.candidates.length}), fastest first</h3>
+      <div class="legend">${[...new Set(k.candidates.map(c => c.technique))].map(t => `<span><i style="background:var(${TECH_COLOR[t]})"></i>${esc(t)}</span>`).join("")}
+        <span>○ hollow = output check failed</span><span>★ selected in this plan</span>${k.candidates.some(c => c.transposed) ? `<span>T: transposed run (N x M x K)</span>` : ""}${!k.plan && k.candidates.some(c => c.upstream) ? `<span>(upstream opt()): soft_hier_je's own setting for this shape</span>` : ""}${k.plan ? `<span>(fixed): upstream's setting with a recorded fix · (fallback): fastest passing earlier sweep setting</span>` : ""}<span class="muted">click a row to draw its mapping</span></div>
+      <div class="cands"></div>` : ""}
+  `;
+  if (k.candidates.length) candPlot(P, k, P.q(".cands"));
+  // mesh + overlay
+  const candTrace = cand && cand.trace ? (k.traces.find(t => t.name === cand.trace) || null) : null;
+  const rowTrace = k.kind === "row" && tr && tr.busy_frac ? tr : null;
+  const ovTrace = candTrace || rowTrace;
+  const ctl = P.q(".meshCtl");
+  const modes = [["map", "mapping (kernel source)"]].concat(ovTrace ? [["redmule", "RedMulE busy"], ["idma", "iDMA busy"], ["spatz", "Spatz busy"]] : []);
+  let mode = P.st.meshMode && modes.find(m => m[0] === P.st.meshMode) ? P.st.meshMode : (k.kind === "row" ? (ovTrace ? "idma" : "map") : "map");
+  const seg = el("div", { class: "seg" }); modes.forEach(([m, l]) => { const b = el("button", {}, l); if (m === mode) b.className = "on"; b.onclick = () => { P.st.meshMode = m; renderDetail(P, true); }; seg.append(b); });
+  ctl.append(seg);
+  if (mode !== "map") P.st.overlay = mode;
+  const mesh = P.q(".mesh");
+  mesh.append(meshSvg(k, cand, mode === "map" ? null : ovTrace, P.st.overlay));
+  const side = P.q(".meshSide");
+  if (k.kind === "row") side.innerHTML = `${esc(k.row_note)}.<br><br>${ovTrace ? `${ovTrace.active_clusters.length} clusters active in the trace window; ${k.shape[0]} rows.` : "No trace."}`;
+  else { const s = cand.setting;
+    side.innerHTML = `<div class="mono" style="margin-bottom:6px">${esc(cand.cand)}${cand.cand === k.selected.cand ? " ★" : ""}</div>` +
+      (k.kind === "gemm" ? gemmLevels(s, cand) : attnLevels(k, s, cand)) +
+      `<br><br><span class="muted">Placement from <code>flex_group_barrier.h:43</code>: cluster id = x + 8y, groups tile the mesh row-major, group id &lt; groups works. y = 0 drawn at the bottom; HBM channels on the west and south edges (arch_h1.py). ${mode === "map" ? "" : "Numbers: busy % in the kernel window (shade steps of 20 %); outlined cells are the mapping's active clusters."}</span>` +
+      (cand.cand !== k.selected.cand ? `<br><br><button class="btn" class="btn backSel">back to selected</button>` : "");
+    const bs = P.q(".backSel"); if (bs) bs.onclick = () => { P.st.cand = null; renderDetail(P, true); };
+  }
+  // trace box
+  const tb = P.q(".traceBox");
+  const show = candTrace || (k.kind === "row" ? rowTrace : null);
+  const statusLine = k.kind === "row" ? (rowTrace ? `<span class="badge ok">trace of this run</span>` : `<span class="badge fail">no trace</span>`)
+    : `<span class="badge ${TRACE_BADGE[k.trace_status][0]}">selected setting: ${k.trace_status === "selected" ? "traced" : "no trace"}</span> <span class="sec">${esc(k.trace_note)}</span>`;
+  let traceList = "";
+  const all = k.kind === "row" ? (rowTrace ? [rowTrace] : []) : k.traces;
+  if (all.length) traceList = `<table style="margin-top:6px"><tr><th>trace</th><th class="n">µs</th><th>status</th><th></th></tr>` + all.map((t, i) => {
+    const isSel = k.kind === "row" || t.cand === k.selected.cand;
+    return `<tr><td class="mono">${esc(t.cand || t.name)}${isSel ? " ★" : ""}${!isSel ? ` <span class="badge warn">not selected</span>` : ""}</td><td class="n">${us(t.measured_ns)}</td><td>${esc(t.status)}</td>
+      <td>${t.status === "ok" ? `<button class="btn" data-tr="${i}" ${state.server ? "" : "disabled title='run serve_traces.py'"}>Open in Perfetto</button>` : ""}</td></tr>`; }).join("") + `</table>`;
+  tb.innerHTML = statusLine + traceList +
+    `<div class="sec" style="margin-top:8px;font-size:12.5px">Run folder of ${cand ? "this setting" : "this run"}: <code>${esc((cand || k.selected).run_dir)}</code>
+      ${state.server && runUrl((cand || k.selected).run_dir) ? ` · <a href="${runUrl((cand || k.selected).run_dir)}/run.log" target="_blank">run.log</a> · <a href="${runUrl((cand || k.selected).run_dir)}/kernel_cfg.py" target="_blank">kernel_cfg.py</a>` : ""}</div>`;
+  tb.querySelectorAll("button[data-tr]").forEach(b => b.onclick = () => openPerfetto(all[+b.dataset.tr], b));
+  if (!keepScroll) d.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderPane(P) { renderPaneHead(P); renderStages(P); renderStageCharts(P); renderBudget(P); renderKinds(P); renderKernels(P); renderDetail(P, true); }
+function renderAll() {
+  renderSegs(); buildPanes(); renderContext(); renderChecks();
+  panes().forEach(renderPane); writeHash();
+}
+// loading more plans: a bundle (build/plans/<id>.json, kernel_explorer.write) or a file with {plans: [...]}
+$("#loadPlan").onchange = async e => {
+  const msgs = [];
+  for (const f of e.target.files) {
+    try {
+      const j = JSON.parse(await f.text()); const list = Array.isArray(j.plans) ? j.plans : [j];
+      for (const b of list) {
+        if (!b || !b.kernels || !b.ops || !b.label) { msgs.push(`${esc(f.name)}: not a plan bundle`); continue; }
+        let id = b.id || f.name; while (planById(id)) id += "'";
+        PLANS.push({ ...b, id, loaded: true }); msgs.push(`loaded <b>${esc(b.label)}</b> from ${esc(f.name)}`);
+        state.views.push(id); state.panes.push(newPaneState()); if (state.views.length > 2) { state.views.shift(); state.panes.shift(); }
+      }
+    } catch (err) { msgs.push(`${esc(f.name)}: ${esc(err.message)}`); }
+  }
+  $("#loadNote").innerHTML = msgs.join(" · ") + (msgs.length ? `. <span class="muted">Loaded plans live in this tab only; the mesh drawing assumes the ${DATA.arch.mesh[0]} x ${DATA.arch.mesh[1]} arch of this page.</span>` : "");
+  e.target.value = ""; renderAll();
+};
+// deep links: #v=W1:upstream,W1:constrained&k0=<run key>&k1=...&c0=<candidate>
+function readHash() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  const pg = DATA.pages.find(p => p.name === h.get("page")); if (pg) state.views = [`${pg.name}:upstream`, `${pg.name}:constrained`].filter(planById);
+  const vv = (h.get("v") || "").split(",").filter(planById); if (vv.length) state.views = vv.slice(0, 2);
+  state.panes = state.views.map(newPaneState);
+  state.views.forEach((id, j) => { const st = state.panes[j], P = planById(id);
+    const kk = h.get("k" + j) || (j === 0 ? h.get("k") : null); if (kk && P.kernels[kk]) st.kernel = kk;
+    if (h.get("c" + j)) st.cand = h.get("c" + j); if (h.get("m" + j)) st.meshMode = h.get("m" + j); });
+}
+function writeHash() {
+  const h = new URLSearchParams({ v: state.views.filter(id => !planById(id).loaded).join(",") });
+  state.panes.forEach((st, j) => { if (st.kernel) h.set("k" + j, st.kernel); if (st.cand) h.set("c" + j, st.cand); if (st.meshMode) h.set("m" + j, st.meshMode); });
+  history.replaceState(null, "", "#" + h.toString());
+}
+readHash();
+detectServer().then(() => { renderAll(); const P = panes().find(P => P.st.kernel); if (P) P.q(".detail").scrollIntoView({ block: "start" }); });
+addEventListener("resize", () => panes().forEach(P => { renderStageCharts(P); renderBudget(P); renderKinds(P); if (P.st.kernel) renderDetail(P, true); }));
+</script>
+</body>
+</html>

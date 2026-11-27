@@ -72,6 +72,17 @@ FIELDS = ["shape", "cand", "m_size", "n_size", "k_size", "m_tile", "n_tile", "k_
           "strategy", "work_ratio", "est_ns", "upstream_opt", "time_ns", "bad", "max_ulp", "status", "run_dir"]
 
 
+sys.path.insert(0, str(HERE.parents[0] / "workload-modeling"))
+from workload_modeling import kernel_model as KM   # noqa: E402
+
+ARCH = KM.arch()           # constants.yaml arch.h1: RedMulE blocks, call overhead, HBM bandwidth
+
+
+def model_ns(Mp, Np, Kp, mt, nt, kt, sx, sy, g, strategy):
+    """The one GEMM model (estimate): kernel_model.gemm_ns, shared with gemm_smallm_sweep and the kernel explorer."""
+    return KM.gemm_ns(Mp, Np, Kp, mt, nt, kt, sx, sy, g, strategy, ARCH)["est_ns"]
+
+
 def up(x, a):
     return -(-x // a) * a
 
@@ -87,20 +98,17 @@ def make_cand(M, N, K, mt, nt, kt, s, g, strategy):
     work = Mp * Np * Kp / (M * N * K)
     if work > WORK_CAP:
         return None
-    # rough model (estimate, ranking only): RedMulE 1024 MAC/cycle at 1 GHz, per call overhead 150 ns,
-    # HBM 2 edges x 8 channels, taken as 200 B/ns total; SUMMA traffic: per group and (m, n) step, X band + W band
+    # model (estimate, ranking only): workload_modeling.kernel_model, parameters from constants.yaml arch.h1
     active = g * s * s
-    calls = (Mp // (s * mt)) * (Np // (g * s * nt)) * (Kp // kt)
-    t_comp = calls * (mt * nt * kt / 1024.0 + 150.0)
-    hbm = g * (Mp // (s * mt)) * (Np // (g * s * nt)) * 2 * Kp * s * (mt + nt) + 2 * Mp * Np
-    t_hbm = hbm / 200.0
-    est = max(t_comp, t_hbm)
+    est = model_ns(Mp, Np, Kp, mt, nt, kt, s, s, g, strategy)
     return dict(m_size=Mp, n_size=Np, k_size=Kp, m_tile=mt, n_tile=nt, k_tile=kt, scale=s, groups=g,
                 strategy=strategy, work_ratio=round(work, 3), est_ns=int(est), active=active)
 
 
 def upstream_opt(M, N, K):
-    """soft_hier_je opt() Nosplit / splitN choice for the padded shape (it asserts divisibility; we pad)."""
+    """Tile and scale of soft_hier_je opt() for a square group, run here as Nosplit only (opt() itself runs splitK
+    and splitN first: gemm_upstream.py ports it in full). Kept so the earlier runs flagged upstream_opt stay
+    reproducible."""
     t = 4 * CE
     mt, nt = min(t, M), min(t, N)
     sy = min(pow2_up(-(-M // mt)), MESH)
@@ -217,6 +225,7 @@ def main():
     ap.add_argument("cmd", choices=["plan", "run", "pick"])
     ap.add_argument("--shape", action="append")
     ap.add_argument("--top", type=int, default=6)
+    ap.add_argument("--cand", action="append", help="run only these candidate names (of the top list)")
     a = ap.parse_args()
     shapes = sorted(SHAPES, key=lambda s: s[0] * s[1] * s[2])
     if a.shape:
@@ -239,6 +248,8 @@ def main():
     for sh in shapes:
         M, N, K = sh
         cands = candidates(M, N, K, a.top)
+        if a.cand:
+            cands = [c for c in cands if c["cand"] in a.cand]
         for c in cands:
             total += 1
             key = (shape_key(sh), c["cand"])

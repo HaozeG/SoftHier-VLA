@@ -1,0 +1,4 @@
+shape,rows,cand,m_size,n_size,k_size,m_tile,n_tile,k_tile,scale,groups,strategy,active,work_ratio,est_ns,time_ns,bad,max_ulp,status,run_dir
+1024x768x768,4,splitN_s1g26_t256x32x256,1024,832,768,256,32,256,1,26,splitN,26,1.083,238551,109083,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/1024x768x768/splitN_s1g26_t256x32x256
+1024x768x768,4,splitN_s1g29_t256x32x256,1024,928,768,256,32,256,1,29,splitN,29,1.208,266076,112244,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/1024x768x768/splitN_s1g29_t256x32x256
+1024x768x768,6,splitN_s2g12_t256x32x256,1024,768,768,256,32,256,2,12,splitN,48,1.0,114032,64360,0,0,ok,/home/haoze/.cache/softhier-vla/stage1-h1/gemm/1024x768x768/splitN_s2g12_t256x32x256

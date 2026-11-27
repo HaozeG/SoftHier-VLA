@@ -1,9 +1,9 @@
 """Convert a generated Markdown page to a standalone HTML page for meetings (local, not committed).
 
 Python-Markdown with the tables and fenced-code extensions, plus a small preprocessor that turns
-```mermaid fences into <pre class="mermaid"> blocks for mermaid.js. Inline CSS with light and dark themes
-(prefers-color-scheme). The only external URL is the pinned mermaid script: tables read offline, the
-diagram needs the network.
+```mermaid fences into <pre class="mermaid"> blocks for mermaid.js, and ```math fences (GitHub's display-math
+block) into KaTeX blocks. Inline CSS with light and dark themes (prefers-color-scheme). External URLs: the pinned
+mermaid script, and the pinned KaTeX script and stylesheet only on pages with a math block; tables read offline.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ from markdown.preprocessors import Preprocessor
 
 MERMAID_URL = "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"
 _FENCE = re.compile(r"^```mermaid\n(.*?)^```\s*$", re.MULTILINE | re.DOTALL)
+KATEX = "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/"
+_MATH = re.compile(r"^```math\n(.*?)^```\s*$", re.MULTILINE | re.DOTALL)
 
 CSS = """
 :root { --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --border: #d1d9e0; --stripe: #f6f8fa; --code: #eff1f3; }
@@ -32,6 +34,8 @@ th, td { border: 1px solid var(--border); padding: 4px 8px; }
 tr:nth-child(even) td { background: var(--stripe); }
 code { background: var(--code); padding: 1px 4px; border-radius: 4px; font-size: 90%; }
 pre.mermaid { background: transparent; text-align: center; }
+div.math { overflow-x: auto; margin: 12px 0; }
+img { max-width: 100%; }
 a { color: #4493f8; }
 """
 
@@ -44,7 +48,10 @@ class _MermaidPre(Preprocessor):
             block = f'<pre class="mermaid">\n{html.escape(mo.group(1))}</pre>'
             return self.md.htmlStash.store(block)
 
-        return _FENCE.sub(repl, text).split("\n")
+        def math(mo: re.Match) -> str:
+            return self.md.htmlStash.store(f'<div class="math">{html.escape(mo.group(1).strip())}</div>')
+
+        return _MATH.sub(math, _FENCE.sub(repl, text)).split("\n")
 
 
 class MermaidExtension(Extension):
@@ -55,10 +62,14 @@ class MermaidExtension(Extension):
 
 def convert(md_text: str, title: str) -> str:
     body = markdown.markdown(md_text, extensions=["tables", "fenced_code", MermaidExtension()])
+    math = '<div class="math">' in body
+    head = f'<link rel="stylesheet" href="{KATEX}katex.min.css">\n' if math else ""
+    tail = (f'<script src="{KATEX}katex.min.js"></script>\n<script>document.querySelectorAll("div.math").forEach('
+            'e => katex.render(e.textContent, e, {displayMode: true, throwOnError: false}));</script>\n') if math else ""
     return (
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-        f"<title>{html.escape(title)}</title>\n<style>{CSS}</style>\n</head>\n<body>\n{body}\n"
+        f"<title>{html.escape(title)}</title>\n{head}<style>{CSS}</style>\n</head>\n<body>\n{body}\n{tail}"
         f"<script src=\"{MERMAID_URL}\"></script>\n"
         "<script>mermaid.initialize({startOnLoad: true, theme: "
         "matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default'});</script>\n"
