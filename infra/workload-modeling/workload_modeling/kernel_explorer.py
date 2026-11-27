@@ -129,19 +129,21 @@ def gemm_setting(r: dict, blk: tuple[int, int, int], mac_per_ns: float) -> dict:
 
 def f_pad_text(k: dict) -> str:
     """f_pad in words: where each part comes from, e.g.
-    '0.75 = shape 1.00 (no padding) x block fill 0.75 (tile 128x96 runs as 128x128)'."""
+    '0.75 = shape 1.00 (no padding) x block fill 0.75 (tile N 96 uses 96 of 128 block columns)'."""
     s = k["selected"]["setting"]
     if k["kind"] == "gemm":
         nom = "x".join(str(v) for v in k["shape"])
         pad = f"{s['Mp']}x{s['Np']}x{s['Kp']}"
         shape = "no padding" if k["f_pad_shape"] == 1.0 else f"{nom} padded to {pad}"
         t, tb = (s["mt"], s["nt"], s["kt"]), s["tile_blk"]
-        if list(t) == tb:
-            blocks = "tile fills whole blocks"
-        elif t[2] == tb[2]:
-            blocks = f"tile {t[0]}x{t[1]} runs as {tb[0]}x{tb[1]}"
-        else:
-            blocks = f"tile {t[0]}x{t[1]}x{t[2]} runs as {tb[0]}x{tb[1]}x{tb[2]}"
+        # which tile dimension leaves part of a RedMulE output block empty (block = rows x columns per pass)
+        part = []
+        for name, v, up in (("M", t[0], tb[0]), ("N", t[1], tb[1])):
+            if v != up:
+                part.append(f"tile {name} {v} uses {v} of {up} block {('rows' if name == 'M' else 'columns')}")
+        if t[2] != tb[2]:
+            part.append(f"tile K {t[2]} uses {t[2]} of {tb[2]}")
+        blocks = "tile fills whole RedMulE output blocks" if not part else "; ".join(part)
         return (f"{k['f_pad']:.2f} = shape {k['f_pad_shape']:.2f} ({shape}) x block fill "
                 f"{k['f_pad_array']:.2f} ({blocks})")
     shape = "no padding" if k["f_pad_shape"] == 1.0 else f"q padded to {s['q_pad']}, kv to {s['kv_pad']}"
@@ -917,7 +919,9 @@ class Explorer:
                 kk["selected"] = dict(kk["selected"], mesh=mesh(k, kk["selected"]["setting"]))
             kernels[name] = kk
         return dict(
-            arch=dict(peak=self.peak, peak_cluster=self.peak_cl, bw=self.bw, mesh=[MESH_X, MESH_Y], rm_blk=list(self.rm_blk)),
+            arch=dict(peak=self.peak, peak_cluster=self.peak_cl, bw=self.bw, mesh=[MESH_X, MESH_Y], rm_blk=list(self.rm_blk),
+                      # RedMulE CE array (constants.yaml arch.h1): ce_h x ce_w CEs, ce_pipe + 1 outputs per CE
+                      ce=[int(self.c.value(f"arch.h1.redmule_{x}")) for x in ("h", "w", "pipe")]),
             pages=[dict(name=p["name"], desc=p["desc"], ops=p["ops"], budget=self.budget(p),
                         total_ms=p["sums"]["total_ms"], mfu=p["sums"]["total"]["mfu"], group=p["group"],
                         stage_mfu={s["stage"]: s["mfu"] for s in p["sums"]["stages"]},

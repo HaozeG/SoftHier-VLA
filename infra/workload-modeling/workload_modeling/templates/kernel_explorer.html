@@ -561,7 +561,7 @@ function niceTicks(max) { const step = Math.pow(10, Math.floor(Math.log10(max / 
   const out = []; for (let t = 0; t <= max; t += m) out.push(t); return out; }
 function candTip(k, c) {
   const s = c.setting; let geo = "";
-  if (k.kind === "gemm") geo = `${s.strategy}, ${s.groups} group(s) of ${s.sx}x${s.sy} = ${s.active} clusters; padded ${s.Mp}x${s.Np}x${s.Kp} (work ${c.work_ratio}x)<br>per cluster: tile ${s.mt}x${s.nt}x${s.kt} (one RedMulE call) x ${s.redmule_calls} calls (M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter})`;
+  if (k.kind === "gemm") geo = `${s.strategy}, ${s.groups} group(s) of ${s.sx}x${s.sy} = ${s.active} clusters; padded ${s.Mp}x${s.Np}x${s.Kp} (work ${c.work_ratio}x)<br>per cluster: tile ${s.mt}x${s.nt}x${s.kt} (one RedMulE call) x ${s.redmule_calls} calls (M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter}); block fill ${pct(s.f_array)} %`;
   else geo = `${s.mode}, ${s.active_groups} of ${s.groups} groups of ${s.sx}x${s.sy} busy = ${s.active} clusters<br>per group: block ${s.Br}x${s.Bc}, Tr ${s.Tr} · Tc ${s.Tc}; per cluster ${s.Br_s}x${s.Bc_s}; work ${c.work_ratio}x`;
   return `<b class="mono">${esc(c.cand)}</b>${c.cand === k.selected.cand ? " ★ selected" : ""}<br>${geo}<br>time ${c.time_ns ? us(c.time_ns) + " µs" : "–"} · status ${c.status}` +
     (c.transposed ? `<br><b>transposed</b>: Z<sup>T</sup> = W<sup>T</sup> X<sup>T</sup>, run as ${esc(c.run_shape)}; X<sup>T</sup> / Z<sup>T</sup> layout cost in the neighbouring operators not counted` : "") +
@@ -617,7 +617,18 @@ function gemmLevels(s, cand) {
   return lvl("Whole operator", `M x N x K padded to ${s.Mp} x ${s.Np} x ${s.Kp} (work ${cand.work_ratio}x).`) +
     lvl("Cluster groups", `${s.groups} group(s) of ${s.sx} x ${s.sy} clusters = <b>${s.active}</b> of ${N}. ${s.strategy === "splitN" ? "splitN: each group owns N / " + s.groups + " columns" : s.strategy === "splitK" ? "splitK: each group owns K / " + s.groups + "; a FlooNoC reduction adds the partial sums" : "Nosplit: one group does the whole product"}; per group ${per.join(" x ")}.`) +
     lvl("Per group, one SUMMA step", `output block ${s.sy * s.mt} x ${s.sx * s.nt} (${s.sy} x ${s.mt} rows, ${s.sx} x ${s.nt} columns), K step ${s.kt}; A broadcast along rows, B along columns.`) +
-    lvl("Per cluster", `<b>tile</b> ${s.mt} x ${s.nt} x ${s.kt} = one RedMulE call; M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter} = ${s.redmule_calls} calls. At peak ${us(s.redmule_floor_ns)} µs; as RedMulE times it (tile runs as ${s.tile_blk[0]} x ${s.tile_blk[1]} in ${DATA.arch.rm_blk[0]} x ${DATA.arch.rm_blk[1]} blocks, block fill ${pct(s.f_array)} %) ${us(s.redmule_array_ns)} µs, vs ${cand.time_ns ? us(cand.time_ns) : "–"} µs measured (${cand.time_ns ? pct(s.redmule_floor_ns / cand.time_ns) : "–"} %).`);
+    lvl("Per cluster", `<b>tile</b> ${s.mt} x ${s.nt} x ${s.kt} (M x N x K) = one RedMulE call; M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter} = ${s.redmule_calls} calls.`) +
+    lvl("RedMulE fill", rmFill(s)) +
+    lvl("Time per cluster", `${us(s.redmule_floor_ns)} µs if every MAC were useful (${s.redmule_calls} calls at peak); ${us(s.redmule_array_ns)} µs with the block fill above; ${cand.time_ns ? us(cand.time_ns) : "–"} µs measured. Peak-rate MAC time = ${cand.time_ns ? pct(s.redmule_floor_ns / cand.time_ns) : "–"} % of measured.`);
+}
+// RedMulE output blocks (light_redmule.cpp init_redmule_meta_data): ce_h rows x ce_w*(ce_pipe+1) columns per pass,
+// a partly filled block costs a full pass; fill per dimension says which one loses
+function rmFill(s) {
+  const [h, w, pipe] = DATA.arch.ce, [bm, bn] = DATA.arch.rm_blk;
+  const dim = (name, t, b) => { const n = Math.ceil(t / b), f = t / (n * b);
+    return `${name} ${t} = ${n} block${n > 1 ? "s" : ""} of ${b}` + (f < 1 ? ` (last one ${t - (n - 1) * b} / ${b} used, <b>${pct(f)} %</b>)` : " (full)"); };
+  return `${h} x ${w} CE array, ${pipe + 1} outputs per CE, so one pass computes a ${bm} x ${bn} output block (rows x columns) and a partly used block costs a full pass. ` +
+    `${dim("M", s.mt, bm)}; ${dim("N", s.nt, bn)}. Block fill ${pct(s.f_array)} %.`;
 }
 function attnLevels(k, s, cand) {
   return lvl("Whole operator", `${k.hkv} KV heads (${k.hq} query heads); query rows padded to ${s.q_pad}, kv rows to ${s.kv_pad} (work ${cand.work_ratio}x).`) +

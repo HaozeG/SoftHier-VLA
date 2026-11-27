@@ -67,7 +67,7 @@ def test_f_pad_includes_array_padding():
     # 50x32x720 (splitK tile 32x32x32): the 32 output columns fill half of a 64-column block
     k = ex.kernels["expert.gemm_50x32x720"]
     assert k["f_pad_array"] == 0.5
-    assert k["f_pad_text"].endswith("x block fill 0.50 (tile 32x32 runs as 32x64)")
+    assert k["f_pad_text"].endswith("x block fill 0.50 (tile N 32 uses 32 of 64 block columns)")
 
 
 def test_mesh_comes_from_constants():
