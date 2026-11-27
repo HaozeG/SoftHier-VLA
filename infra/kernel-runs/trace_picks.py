@@ -50,7 +50,9 @@ for kern, name, cfg, t_meas in jobs:
         continue
     out = OUT / kern / name.replace("plan:", "plan/", 1)
     print(f"[{name}] ...", flush=True)
-    rc = subprocess.run(["bash", str(HERE / "run_kernel.sh"), kern, str(cfg), str(out), "--trace"],
+    # plan picks were measured by their own runs: the traced run alone (it times and checks the same binary)
+    flag = "--trace-only" if name.startswith("plan:") else "--trace"
+    rc = subprocess.run(["bash", str(HERE / "run_kernel.sh"), kern, str(cfg), str(out), flag],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
     pf = out / "perfetto.json"
     t = G.parse_run(out)[0] if hasattr(G, "parse_run") else None

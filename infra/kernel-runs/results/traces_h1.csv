@@ -69,3 +69,8 @@ plan:plan/vision.gemm_1024x768x768_zto/Nosplit_x8y8g1_t128x64x128,gemm,33503,ok,
 plan:plan/vision.addi_1024x768/default,acti,12916,ok,11.1,/home/haoze/.cache/softhier-vla/stage1-h1/traces/acti/plan/plan/vision.addi_1024x768/default
 plan:plan/vision.gemm_1024x768x768_zto_pZs/Nosplit_x8y8g1_t128x64x128,gemm,31228,ok,3.6,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/plan/plan/vision.gemm_1024x768x768_zto_pZs/Nosplit_x8y8g1_t128x64x128
 plan:plan/vision.addi_1024x768_pIsOs/default,acti,13020,ok,11.1,/home/haoze/.cache/softhier-vla/stage1-h1/traces/acti/plan/plan/vision.addi_1024x768_pIsOs/default
+plan:plan/vision.flatattention_12x1024x1024x64/attn_auto,attn,140330,ok,588.2,/home/haoze/.cache/softhier-vla/stage1-h1/traces/attn/plan/plan/vision.flatattention_12x1024x1024x64/attn_auto
+plan:plan/vision.gemm_1024x768x768_xfrom/Nosplit_x8y8g1_t128x96x64,gemm,24983,ok,3.5,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/plan/plan/vision.gemm_1024x768x768_xfrom/Nosplit_x8y8g1_t128x96x64
+plan:plan/vision.eltwise_bias_1024x768/default,elt,9907,ok,10.6,/home/haoze/.cache/softhier-vla/stage1-h1/traces/elt/plan/plan/vision.eltwise_bias_1024x768/default
+plan:plan/vision.addi_1024x768_pBwIsOs/default,acti,12304,ok,11.1,/home/haoze/.cache/softhier-vla/stage1-h1/traces/acti/plan/plan/vision.addi_1024x768_pBwIsOs/default
+plan:plan/vision.gemm_1024x3072x768/Nosplit_x8y8g1_t128x96x128,gemm,79636,ok,4.7,/home/haoze/.cache/softhier-vla/stage1-h1/traces/gemm/plan/plan/vision.gemm_1024x3072x768/Nosplit_x8y8g1_t128x96x128
