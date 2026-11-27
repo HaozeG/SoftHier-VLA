@@ -45,6 +45,8 @@
 .pane > .card { margin: 0; min-width: 0; }
 .pane-head { border-top: 4px solid var(--s1); } .pane.c1 .pane-head { border-top-color: var(--s2); }
 .pane-head .big { font-size: 24px; font-weight: 600; }
+.stageCharts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 20px; margin: 2px 0 12px; }
+.stageCharts svg { width: 100%; display: block; overflow: visible; }
 .panes[style*="--ncol: 2"] .split, .panes[style*="--ncol:2"] .split { grid-template-columns: minmax(0, 1fr); }
 .planbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .cmp-head { display: grid; grid-template-columns: repeat(var(--ncol, 2), minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
@@ -268,7 +270,8 @@ function buildPanes() {
   state.views.forEach((id, j) => host.append(el("div", { class: `pane c${j}`, "data-j": j }, `
     <div class="card pane-head"></div>
     <div class="card"><h3 style="margin-top:0">Per stage, per policy call</h3>
-      <p class="sec" style="margin-top:0">Sums of this plan's measured kernel times (estimate). Weight reads and traffic: op model on logical shapes.</p>
+      <p class="sec" style="margin-top:0">Sums of this plan's measured kernel times (estimate). Weight reads and traffic: op model on logical shapes. Bars: one per stage, on the same scale in both columns.</p>
+      <div class="stageCharts"></div>
       <div class="scroll"><table class="stageTable"></table></div></div>
     <div class="card"><h3 style="margin-top:0">Where the time goes <span class="muted" style="font-weight:400">(estimate)</span></h3>
       <p class="sec" style="margin-top:0">Matrix kernels split into ideal (true FLOP at peak), padding, idle clusters, HBM floor (unique bytes at ${fmt(DATA.arch.bw / 1e9, 0)} GB/s) and the rest beyond the roofline; row operators whole.</p>
@@ -289,6 +292,36 @@ function renderStages(P) {
   const n = (x, d) => `<td class="n">${x == null ? "" : fmt(x, d)}</td>`;
   P.q(".stageTable").innerHTML = `<tr><th>stage</th><th class="n">ms</th><th class="n">share</th><th class="n">calls</th><th class="n">MFU, %</th><th class="n">weights read, MB</th><th class="n">traffic, MB</th><th class="n">GB/s</th></tr>` +
     P.plan.stages.map(r => `<tr${r.kind === "stage" ? "" : ' class="sub"'}><td>${r.kind === "stage" ? `<b>${esc(r.label)}</b>` : `<span class="muted">↳</span> ${esc(r.label)}`}</td>${n(r.ms, 3)}<td class="n">${r.share == null ? "" : pct(r.share) + " %"}</td>${n(r.calls, 0)}${n(100 * r.mfu, 1)}${n(r.weights_mb, 1)}${n(r.traffic_mb, 1)}${n(r.gbps, 0)}</tr>`).join("");
+}
+
+// ------------------------------------------------------------------ per-stage bars (one bar per stage and metric)
+const STAGE_METRICS = [["ms", "time per call, ms", 2, 1], ["mfu", "MFU, %", 1, 100],
+                       ["weights_mb", "weights read, MB", 0, 1], ["traffic_mb", "HBM traffic, MB", 0, 1]];
+function renderStageCharts(P) {
+  const host = P.q(".stageCharts"); host.innerHTML = "";
+  const rows = v => v.stages.filter(r => r.kind === "stage");
+  const shown = panes().filter(x => x.plan);
+  const color = css(P.j ? "--s2" : "--s1");
+  // all panels first, so each is measured at its grid width
+  const svgs = STAGE_METRICS.map(() => { const e = sv("svg", { height: 104 }); host.append(e); return e; });
+  STAGE_METRICS.forEach(([key, title, dec, mul], m) => {
+    // shared scale over the plans on screen, so the two columns read against each other
+    const max = Math.max(...shown.flatMap(x => rows(x.plan).map(r => (r[key] || 0) * mul)), 1e-9);
+    const rs = rows(P.plan);
+    const svg = svgs[m];
+    const W = svg.getBoundingClientRect().width || 260, L = 76, R = 58, rowH = 20, top = 20;
+    svg.setAttribute("height", top + rs.length * rowH + 4);
+    const tt = sv("text", { x: 0, y: 12, class: "ink", "font-weight": 600 }); tt.textContent = title; svg.append(tt);
+    svg.append(sv("line", { x1: L, x2: L, y1: top - 2, y2: top + rs.length * rowH - 2, stroke: css("--grid") }));
+    rs.forEach((r, i) => {
+      const v = (r[key] || 0) * mul, y = top + i * rowH, w = Math.max((W - L - R) * v / max, v > 0 ? 1 : 0);
+      const lab = sv("text", { x: L - 8, y: y + 12, "text-anchor": "end" }); lab.textContent = r.label; svg.append(lab);
+      const rect = sv("rect", { x: L, y: y + 2, width: w, height: 13, rx: 3, fill: color });
+      hover(rect, `<b>${esc(r.label)}: ${title}</b><br>${fmt(v, dec + 1)}` + (key === "ms" && r.share != null ? ` (${pct(r.share)} % of the call)` : ""));
+      svg.append(rect);
+      const t = sv("text", { x: L + w + 6, y: y + 12, class: "ink" }); t.textContent = fmt(v, dec); svg.append(t);
+    });
+  });
 }
 
 // ------------------------------------------------------------------ budget chart (horizontal stacked bars)
@@ -614,7 +647,7 @@ function renderDetail(P, keepScroll) {
   if (!keepScroll) d.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function renderPane(P) { renderPaneHead(P); renderStages(P); renderBudget(P); renderKernels(P); renderDetail(P, true); }
+function renderPane(P) { renderPaneHead(P); renderStages(P); renderStageCharts(P); renderBudget(P); renderKernels(P); renderDetail(P, true); }
 function renderAll() {
   renderSegs(); buildPanes(); renderContext(); renderChecks();
   panes().forEach(renderPane); writeHash();
@@ -653,7 +686,7 @@ function writeHash() {
 }
 readHash();
 detectServer().then(() => { renderAll(); const P = panes().find(P => P.st.kernel); if (P) P.q(".detail").scrollIntoView({ block: "start" }); });
-addEventListener("resize", () => panes().forEach(P => { renderBudget(P); if (P.st.kernel) renderDetail(P, true); }));
+addEventListener("resize", () => panes().forEach(P => { renderStageCharts(P); renderBudget(P); if (P.st.kernel) renderDetail(P, true); }));
 </script>
 </body>
 </html>
