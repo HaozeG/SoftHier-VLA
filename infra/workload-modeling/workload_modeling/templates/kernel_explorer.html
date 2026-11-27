@@ -616,8 +616,9 @@ function gemmLevels(s, cand) {
   const per = s.strategy === "splitN" ? [s.Mp, s.Np / s.groups, s.Kp] : s.strategy === "splitK" ? [s.Mp, s.Np, s.Kp / s.groups] : [s.Mp, s.Np, s.Kp];
   return lvl("Whole operator", `M x N x K padded to ${s.Mp} x ${s.Np} x ${s.Kp} (work ${cand.work_ratio}x).`) +
     lvl("Cluster groups", `${s.groups} group(s) of ${s.sx} x ${s.sy} clusters = <b>${s.active}</b> of ${N}. ${s.strategy === "splitN" ? "splitN: each group owns N / " + s.groups + " columns" : s.strategy === "splitK" ? "splitK: each group owns K / " + s.groups + "; a FlooNoC reduction adds the partial sums" : "Nosplit: one group does the whole product"}; per group ${per.join(" x ")}.`) +
+    lvl("Per group, repeats", `its ${per[0]} x ${per[1]} output is covered in M ${s.m_iter} x N ${s.n_iter} = <b>${s.m_iter * s.n_iter}</b> output block(s) of ${s.sy * s.mt} x ${s.sx * s.nt}, one after another; each is accumulated over K ${s.k_iter} SUMMA step(s) of ${s.kt} (${per[2]} / ${s.kt}). ${s.m_iter * s.n_iter * s.k_iter} steps in all.`) +
     lvl("Per group, one SUMMA step", `output block ${s.sy * s.mt} x ${s.sx * s.nt} (${s.sy} x ${s.mt} rows, ${s.sx} x ${s.nt} columns), K step ${s.kt}; A broadcast along rows, B along columns.`) +
-    lvl("Per cluster", `<b>tile</b> ${s.mt} x ${s.nt} x ${s.kt} (M x N x K) = one RedMulE call; M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter} = ${s.redmule_calls} calls.`) +
+    lvl("Per cluster", `<b>tile</b> ${s.mt} x ${s.nt} x ${s.kt} (M x N x K) = one RedMulE call per SUMMA step, so ${s.redmule_calls} calls (M ${s.m_iter} · N ${s.n_iter} · K ${s.k_iter}).`) +
     lvl("RedMulE fill", rmFill(s)) +
     lvl("Time per cluster", `${us(s.redmule_floor_ns)} µs if every MAC were useful (${s.redmule_calls} calls at peak); ${us(s.redmule_array_ns)} µs with the block fill above; ${cand.time_ns ? us(cand.time_ns) : "–"} µs measured. Peak-rate MAC time = ${cand.time_ns ? pct(s.redmule_floor_ns / cand.time_ns) : "–"} % of measured.`);
 }
